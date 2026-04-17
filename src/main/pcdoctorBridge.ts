@@ -34,103 +34,170 @@ export async function getStatus(): Promise<SystemStatus> {
   return mapToSystemStatus(parsed);
 }
 
-function sev(v: unknown): Severity {
-  return v === 'crit' || v === 'warn' || v === 'info' ? (v as Severity) : 'good';
-}
-
+/** Map the real latest.json schema into what the UI expects. */
 function mapToSystemStatus(r: any): SystemStatus {
+  const m = r.metrics ?? {};
   const kpis: KpiValue[] = [];
   const gauges: GaugeValue[] = [];
 
-  if (r.cpu) {
+  // --- CPU load ---
+  if (typeof m.cpu_load_pct === 'number') {
+    const cpuSev = classifyLoad(m.cpu_load_pct);
     kpis.push({
-      label: 'CPU Temp',
-      value: r.cpu.temp_avg_c,
-      unit: '°C',
-      severity: sev(r.cpu.severity),
-      sub: `Peak ${r.cpu.temp_peak_c}°C`,
-      delta: r.cpu.delta_week,
-    });
-    gauges.push({
-      label: 'CPU Temperature',
-      value: Math.min(100, r.cpu.temp_avg_c),
-      display: `${r.cpu.temp_avg_c}°C`,
-      subtext: r.cpu.severity === 'warn' || r.cpu.severity === 'crit' ? 'THROTTLING' : 'OK',
-      severity: sev(r.cpu.severity),
-    });
-  }
-
-  if (r.ram) {
-    kpis.push({
-      label: 'RAM Usage',
-      value: r.ram.pct,
+      label: 'CPU Load',
+      value: m.cpu_load_pct,
       unit: '%',
-      severity: sev(r.ram.severity),
-      sub: `${r.ram.used_gb} / ${r.ram.total_gb} GB`,
+      severity: cpuSev,
+      sub: 'Note: temps require HWiNFO import',
+    });
+    gauges.push({
+      label: 'CPU Load',
+      value: m.cpu_load_pct,
+      display: `${m.cpu_load_pct}%`,
+      subtext: cpuSev === 'good' ? 'HEALTHY' : cpuSev === 'warn' ? 'BUSY' : 'OVERLOADED',
+      severity: cpuSev,
+    });
+  }
+
+  // --- RAM usage ---
+  if (typeof m.ram_used_pct === 'number') {
+    const ramSev = classifyRam(m.ram_used_pct);
+    const total = m.ram_total_gb ?? 0;
+    const free = m.ram_free_gb ?? 0;
+    kpis.push({
+      label: 'RAM Usage',
+      value: m.ram_used_pct,
+      unit: '%',
+      severity: ramSev,
+      sub: `${free.toFixed(1)} GB free of ${total.toFixed(1)} GB`,
     });
     gauges.push({
       label: 'RAM Usage',
-      value: r.ram.pct,
-      display: `${r.ram.pct}%`,
-      subtext: `${r.ram.used_gb} / ${r.ram.total_gb} GB`,
-      severity: sev(r.ram.severity),
+      value: m.ram_used_pct,
+      display: `${m.ram_used_pct}%`,
+      subtext: `${free.toFixed(1)} / ${total.toFixed(1)} GB`,
+      severity: ramSev,
     });
   }
 
-  if (r.gpu) {
-    kpis.push({
-      label: 'GPU Temp',
-      value: r.gpu.temp_c,
-      unit: '°C',
-      severity: sev(r.gpu.severity),
-      sub: `Hotspot ${r.gpu.hotspot_c}°C`,
-    });
-  }
-
-  if (Array.isArray(r.disks) && r.disks.length) {
-    const c = r.disks.find((d: any) => d.drive === 'C:') ?? r.disks[0];
+  // --- C: drive free ---
+  const disks = Array.isArray(m.disks) ? m.disks : [];
+  const cDrive = disks.find((d: any) => d?.drive === 'C:');
+  if (cDrive) {
+    const sev = classifyDiskFree(cDrive.free_pct);
     kpis.push({
       label: 'C: Drive Free',
-      value: c.free_pct,
+      value: Math.round(cDrive.free_pct),
       unit: '%',
-      severity: sev(c.severity),
-      sub: `${c.free_gb} of ${c.total_gb} GB`,
+      severity: sev,
+      sub: `${cDrive.free_gb.toFixed(0)} of ${cDrive.size_gb.toFixed(0)} GB`,
     });
     gauges.push({
       label: 'C: Drive Used',
-      value: 100 - c.free_pct,
-      display: `${100 - c.free_pct}%`,
-      subtext: `${(c.total_gb - c.free_gb).toFixed(0)} / ${c.total_gb} GB`,
-      severity: sev(c.severity),
+      value: Math.max(0, Math.min(100, 100 - cDrive.free_pct)),
+      display: `${Math.round(100 - cDrive.free_pct)}%`,
+      subtext: `${(cDrive.size_gb - cDrive.free_gb).toFixed(0)} / ${cDrive.size_gb.toFixed(0)} GB`,
+      severity: sev,
     });
   }
 
-  if (r.nas) {
+  // --- NAS mappings health ---
+  const nas = m.nas ?? {};
+  const nasMappingsOk = Array.isArray(nas.mappings) ? nas.mappings.length : 0;
+  const nasReachable = nas.ping === true && nas.smb_port_open === true;
+  const nasSev: Severity = !nasReachable
+    ? 'crit'
+    : nasMappingsOk === 0
+      ? 'warn'
+      : 'good';
+  kpis.push({
+    label: 'NAS',
+    value: nasMappingsOk,
+    severity: nasSev,
+    sub: nasReachable
+      ? (nasMappingsOk === 0 ? 'No persistent mappings' : `${nasMappingsOk} mappings`)
+      : `Unreachable @ ${nas.ip ?? '—'}`,
+  });
+
+  // --- Services summary ---
+  const services = m.services ?? {};
+  const svcEntries = Object.entries(services) as [string, any][];
+  const svcRunning = svcEntries.filter(([, v]) =>
+    typeof v?.status === 'string' && /run/i.test(v.status)
+  ).length;
+  const svcTotal = svcEntries.length;
+  const degraded = svcEntries
+    .filter(([, v]) => typeof v?.status === 'string' && !/run/i.test(v.status))
+    .map(([k]) => k);
+  const svcSev: Severity = degraded.length === 0 ? 'good' : degraded.length <= 2 ? 'warn' : 'crit';
+  kpis.push({
+    label: 'Services',
+    value: svcRunning,
+    severity: svcSev,
+    sub: svcTotal > 0 ? `${svcRunning}/${svcTotal} running${degraded.length ? ` · ${degraded[0]} down` : ''}` : 'No service data',
+  });
+
+  // --- Uptime ---
+  if (typeof m.uptime_hours === 'number') {
+    const hrs = m.uptime_hours;
+    const uptimeSev: Severity = hrs > 24 * 30 ? 'warn' : 'good';   // flag if up over a month (install updates)
     kpis.push({
-      label: 'NAS Drives',
-      value: r.nas.mapped_ok,
-      unit: '/12',
-      severity: sev(r.nas.severity),
-      sub: `${r.nas.mapped_ok}/${r.nas.mapped_total} mapped`,
+      label: 'Uptime',
+      value: Math.round(hrs * 10) / 10,
+      severity: uptimeSev,
+      sub: hrs < 24 ? `${hrs.toFixed(1)} hours` : `${(hrs / 24).toFixed(1)} days`,
     });
   }
 
-  if (r.services) {
-    kpis.push({
-      label: 'Services',
-      value: r.services.running,
-      unit: '/12',
-      severity: sev(r.services.severity),
-      sub: r.services.degraded?.length ? `${r.services.degraded[0]} degraded` : 'All running',
-    });
-  }
+  // --- Overall severity from summary.overall ---
+  const overallSev = mapOverall(r.summary?.overall);
+  const overallLabel = makeOverallLabel(r.summary);
+
+  // --- generated_at from ISO timestamp ---
+  const generated_at = r.timestamp ? Math.floor(Date.parse(r.timestamp) / 1000) : 0;
 
   return {
-    generated_at: r.generated_at,
-    overall_severity: sev(r.overall?.severity),
-    overall_label: r.overall?.label ?? 'OK',
-    host: r.host ?? 'Unknown host',
+    generated_at: Number.isFinite(generated_at) ? generated_at : 0,
+    overall_severity: overallSev,
+    overall_label: overallLabel,
+    host: r.hostname ?? 'Unknown host',
     kpis,
     gauges,
   };
+}
+
+function mapOverall(v: unknown): Severity {
+  const s = String(v ?? '').toUpperCase();
+  if (s === 'CRITICAL') return 'crit';
+  if (s === 'ATTENTION' || s === 'WARNING') return 'warn';
+  if (s === 'OK' || s === 'HEALTHY') return 'good';
+  return 'good';
+}
+
+function makeOverallLabel(summary: any): string {
+  if (!summary || typeof summary !== 'object') return 'OK';
+  const c = summary.critical ?? 0;
+  const w = summary.warning ?? 0;
+  const parts: string[] = [];
+  if (c > 0) parts.push(`${c} critical`);
+  if (w > 0) parts.push(`${w} warning${w === 1 ? '' : 's'}`);
+  const state = String(summary.overall ?? 'OK').toUpperCase();
+  return parts.length ? `${state} — ${parts.join(', ')}` : state;
+}
+
+// Thresholds used for per-metric severity classification
+function classifyLoad(p: number): Severity {
+  if (p >= 90) return 'crit';
+  if (p >= 70) return 'warn';
+  return 'good';
+}
+function classifyRam(p: number): Severity {
+  if (p >= 95) return 'crit';
+  if (p >= 85) return 'warn';
+  return 'good';
+}
+function classifyDiskFree(p: number): Severity {
+  if (p <= 10) return 'crit';
+  if (p <= 20) return 'warn';
+  return 'good';
 }

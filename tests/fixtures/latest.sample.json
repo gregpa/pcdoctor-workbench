@@ -1,26 +1,44 @@
 {
-  "generated_at": 1776528000,
-  "overall": { "severity": "warn", "label": "ATTENTION — 2 warnings" },
-  "host": "Alienware Aurora R11",
-  "cpu": {
-    "temp_avg_c": 82,
-    "temp_peak_c": 99,
-    "effective_clock_mhz": 1178,
-    "nominal_clock_mhz": 4859,
-    "severity": "warn",
-    "delta_week": { "direction": "up", "text": "+17° vs last week", "severity": "crit" }
-  },
-  "ram": {
-    "used_gb": 19.5,
-    "total_gb": 32,
-    "pct": 61,
-    "peak_pct_overnight": 98,
-    "severity": "good"
-  },
-  "gpu": { "temp_c": 47, "hotspot_c": 60, "severity": "good" },
-  "disks": [
-    { "drive": "C:", "free_pct": 20, "free_gb": 190, "total_gb": 935, "severity": "warn" }
+  "timestamp": "2026-04-17T08:00:03.9377239-05:00",
+  "mode": "Report",
+  "hostname": "ALIENWARE-R11",
+  "findings": [
+    {"severity": "warning", "area": "Memory", "message": "RAM usage 88% at check time", "detail": {"free_gb": 3.82}, "auto_fixed": false},
+    {"severity": "warning", "area": "Stability", "message": "Unexpected shutdowns or BSODs detected in last 7 days", "detail": null, "auto_fixed": false},
+    {"severity": "info", "area": "Reboot", "message": "Pending reboot flags: PendingFileRename", "detail": null, "auto_fixed": false}
   ],
-  "nas": { "mapped_ok": 6, "mapped_total": 6, "severity": "good" },
-  "services": { "running": 11, "total": 12, "degraded": ["WSearch"], "severity": "good" }
+  "metrics": {
+    "cpu_load_pct": 32,
+    "ram_used_pct": 88,
+    "ram_total_gb": 31.8,
+    "ram_free_gb": 3.82,
+    "uptime_hours": 18.7,
+    "startup_count": 40,
+    "shell_overlay_count": 23,
+    "os_build": "26200",
+    "disks": [
+      {"drive": "C:", "label": "OS", "size_gb": 934.6, "free_gb": 181.4, "free_pct": 19.4, "fs": "NTFS", "drive_type": "Fixed"},
+      {"drive": "D:", "label": "", "size_gb": 372.6, "free_gb": 211.2, "free_pct": 56.7, "fs": "NTFS", "drive_type": "Fixed"},
+      {"drive": "J:", "label": "Elements", "size_gb": 16015.9, "free_gb": 5568.7, "free_pct": 34.8, "fs": "NTFS", "drive_type": "Fixed"}
+    ],
+    "services": {
+      "Cloudflared": {"status": "service-running", "display": "Cloudflare Tunnel"},
+      "LanmanServer": {"status": "Running", "display": "SMB Server", "start": "Automatic"},
+      "BITS": {"status": "Stopped", "display": "BITS", "start": "Manual"},
+      "com.docker.service": {"status": "Running", "display": "Docker Desktop Service", "start": "Automatic"},
+      "WSL": {"status": "error", "display": "Windows Subsystem for Linux"},
+      "wuauserv": {"status": "Stopped", "display": "Windows Update", "start": "Manual"}
+    },
+    "nas": {
+      "ip": "192.168.50.226",
+      "ping": true,
+      "smb_port_open": true,
+      "session_timeout": 10,
+      "mappings": [],
+      "persistent_registry_maps": []
+    },
+    "event_errors_7d": {"system_count": 273, "application_count": 500, "suppressed": [], "recurring": []}
+  },
+  "actions": [],
+  "summary": {"overall": "ATTENTION", "critical": 0, "warning": 6, "info": 5}
 }
