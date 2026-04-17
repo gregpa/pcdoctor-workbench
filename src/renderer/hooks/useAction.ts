@@ -11,7 +11,7 @@ export function useAction() {
     setRunning(name);
     setLastError(null);
     try {
-      const r = await api.runAction(name);
+      const r = await api.runAction({ name });
       if (r.ok) {
         setLastResult(r.data);
         if (!r.data.success && r.data.error) {
