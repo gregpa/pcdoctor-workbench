@@ -2,10 +2,11 @@ import { ipcMain } from 'electron';
 import { getStatus, PCDoctorBridgeError } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
-import { listActionLog, markActionReverted, queryMetricTrend } from './dataStore.js';
+import { listActionLog, markActionReverted, queryMetricTrend, loadForecasts } from './dataStore.js';
+import { generateForecasts } from './forecastEngine.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
-  AuditLogEntry, RunActionRequest, RevertResult, Trend,
+  AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData,
 } from '@shared/types.js';
 
 export function registerIpcHandlers() {
@@ -85,6 +86,29 @@ export function registerIpcHandlers() {
       };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to query trend' } };
+    }
+  });
+
+  ipcMain.handle('api:getForecast', async (): Promise<IpcResult<ForecastData>> => {
+    try {
+      // Return cached if recent; otherwise regenerate
+      const cached = loadForecasts();
+      if (cached && (Date.now() / 1000 - cached.generated_at) < 12 * 3600) {
+        return { ok: true, data: cached as ForecastData };
+      }
+      const fresh = generateForecasts();
+      return { ok: true, data: fresh };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Forecast failed' } };
+    }
+  });
+
+  ipcMain.handle('api:regenerateForecast', async (): Promise<IpcResult<ForecastData>> => {
+    try {
+      const fresh = generateForecasts();
+      return { ok: true, data: fresh };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Forecast failed' } };
     }
   });
 }
