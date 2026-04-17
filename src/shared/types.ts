@@ -163,3 +163,31 @@ export interface RevertResult {
   reboot_required: boolean;
   details: string;
 }
+
+export interface ForecastProjection {
+  metric: string;               // 'disk.C.free_pct' etc.
+  metric_label: string;         // 'C: drive free %'
+  algorithm: 'linear_regression' | 'ewma' | 'categorical';
+  current_value: number;
+  slope_per_day: number | null;
+  r_squared: number | null;
+  threshold_warn: number | null;
+  threshold_critical: number | null;
+  projected_warn_date: string | null;     // ISO date
+  projected_critical_date: string | null;
+  days_until_critical: number | null;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT';
+  confidence_score: number;     // 0..1
+  severity: 'critical' | 'important' | 'low' | 'indicator';
+  preventive_action?: {
+    action_name: string;        // matches an ActionName
+    label: string;
+    recommended_before: string | null;
+  };
+}
+
+export interface ForecastData {
+  generated_at: number;         // unix seconds
+  projections: ForecastProjection[];
+  insufficient_data: Array<{ metric: string; points: number; required: number }>;
+}

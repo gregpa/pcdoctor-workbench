@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS rollbacks (
   reverted_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_rollbacks_ts ON rollbacks(ts);
+
+CREATE TABLE IF NOT EXISTS forecasts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  generated_at INTEGER NOT NULL,
+  metric TEXT NOT NULL,
+  projection_json TEXT NOT NULL,
+  preventive_action TEXT,
+  due_date INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_forecasts_ts ON forecasts(generated_at);
 `;
 
 let db: Database.Database | null = null;
@@ -206,6 +216,31 @@ export function recordStatusSnapshot(s: {
   }
   if (typeof s.event_errors_system === 'number') stmt.run(ts, 'events', 'system_count', s.event_errors_system, null);
   if (typeof s.event_errors_application === 'number') stmt.run(ts, 'events', 'application_count', s.event_errors_application, null);
+}
+
+// ============== FORECASTS ==============
+
+export function saveForecasts(data: { generated_at: number; projections: any[] }): void {
+  const db = openDb();
+  // Wipe previous forecasts — we want the latest set only
+  db.prepare(`DELETE FROM forecasts`).run();
+  const stmt = db.prepare(
+    `INSERT INTO forecasts (generated_at, metric, projection_json, preventive_action, due_date) VALUES (?, ?, ?, ?, ?)`
+  );
+  for (const p of data.projections) {
+    const dueMs = p.projected_critical_date ? Date.parse(p.projected_critical_date) : null;
+    stmt.run(data.generated_at * 1000, p.metric, JSON.stringify(p), p.preventive_action?.action_name ?? null, dueMs);
+  }
+}
+
+export function loadForecasts(): { generated_at: number; projections: any[] } | null {
+  const db = openDb();
+  const rows = db.prepare(`SELECT generated_at, projection_json FROM forecasts ORDER BY generated_at DESC`).all() as Array<{ generated_at: number; projection_json: string }>;
+  if (rows.length === 0) return null;
+  return {
+    generated_at: Math.floor(rows[0].generated_at / 1000),
+    projections: rows.map(r => JSON.parse(r.projection_json)),
+  };
 }
 
 export function closeDb() {
