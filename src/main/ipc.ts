@@ -5,12 +5,17 @@ import path from 'node:path';
 import { getStatus, PCDoctorBridgeError } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
-import { listActionLog, markActionReverted, queryMetricTrend, loadForecasts } from './dataStore.js';
+import {
+  listActionLog, markActionReverted, queryMetricTrend, loadForecasts,
+  upsertPersistence, setPersistenceApproval, countNewPersistence,
+} from './dataStore.js';
 import { generateForecasts } from './forecastEngine.js';
+import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
+  SecurityPosture, PersistenceItem, ThreatIndicator,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -141,6 +146,57 @@ export function registerIpcHandlers() {
       return { ok: true, data: undefined };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to dismiss flag' } };
+    }
+  });
+
+  ipcMain.handle('api:getSecurityPosture', async (): Promise<IpcResult<SecurityPosture>> => {
+    try {
+      const posture = await runPowerShellScript<any>('security/Get-SecurityPosture.ps1', ['-JsonOutput'], { timeoutMs: 120_000 });
+      const audit = await runPowerShellScript<any>('security/Audit-Persistence.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ items: [] }));
+      const threats = await runPowerShellScript<any>('security/Get-ThreatIndicators.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ indicators: [] }));
+
+      // Upsert persistence items into baseline and compute is_new flag
+      const persistenceItems: PersistenceItem[] = [];
+      for (const raw of (audit.items ?? [])) {
+        const { is_new, row } = upsertPersistence({
+          kind: raw.kind, identifier: raw.identifier, name: raw.name,
+          path: raw.path, publisher: raw.publisher,
+        });
+        persistenceItems.push({
+          kind: raw.kind as PersistenceItem['kind'], identifier: row.identifier,
+          name: row.name, path: row.path ?? undefined, publisher: row.publisher ?? undefined,
+          signed: row.signed === null ? undefined : !!row.signed,
+          first_seen: row.first_seen, last_seen: row.last_seen,
+          approved: row.approved as -1 | 0 | 1, is_new,
+        });
+      }
+
+      const data: SecurityPosture = {
+        generated_at: posture.generated_at,
+        defender: posture.defender,
+        firewall: posture.firewall,
+        windows_update: posture.windows_update,
+        failed_logins: posture.failed_logins,
+        bitlocker: posture.bitlocker ?? [],
+        uac: posture.uac,
+        gpu_driver: posture.gpu_driver,
+        persistence_new_count: countNewPersistence(24),
+        persistence_items: persistenceItems.filter(i => i.is_new || i.approved !== 1).slice(0, 100),
+        threat_indicators: (threats.indicators ?? []) as ThreatIndicator[],
+        overall_severity: posture.overall_severity ?? 'good',
+      };
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Security scan failed' } };
+    }
+  });
+
+  ipcMain.handle('api:approvePersistence', async (_evt, identifier: string, approve: boolean): Promise<IpcResult<void>> => {
+    try {
+      setPersistenceApproval(identifier, approve ? 1 : -1);
+      return { ok: true, data: undefined };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to update approval' } };
     }
   });
 }
