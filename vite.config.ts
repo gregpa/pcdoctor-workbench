@@ -25,6 +25,11 @@ export default defineConfig({
           },
           build: {
             outDir: 'dist-electron/main',
+            lib: {
+              entry: 'src/main/main.ts',
+              formats: ['cjs'],
+              fileName: () => '[name].js',
+            },
             rollupOptions: {
               external: ['better-sqlite3', 'electron'],
             },
@@ -41,6 +46,11 @@ export default defineConfig({
             outDir: 'dist-electron/preload',
             rollupOptions: {
               external: ['electron'],
+              output: {
+                format: 'cjs',
+                entryFileNames: '[name].js',
+                chunkFileNames: '[name].js',
+              },
             },
           },
         },

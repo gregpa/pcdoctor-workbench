@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && tsc -p tsconfig.main.json",
+    "build": "vite build && node scripts/add-cjs-package-json.mjs",
     "preview": "vite preview",
     "package": "electron-builder",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
