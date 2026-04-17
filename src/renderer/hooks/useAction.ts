@@ -7,16 +7,14 @@ export function useAction() {
   const [lastResult, setLastResult] = useState<ActionResult | null>(null);
   const [lastError, setLastError] = useState<IpcError | null>(null);
 
-  const run = useCallback(async (name: ActionName) => {
-    setRunning(name);
+  const run = useCallback(async (req: { name: ActionName; params?: Record<string, string | number> }) => {
+    setRunning(req.name);
     setLastError(null);
     try {
-      const r = await api.runAction({ name });
+      const r = await api.runAction(req);
       if (r.ok) {
         setLastResult(r.data);
-        if (!r.data.success && r.data.error) {
-          setLastError(r.data.error);
-        }
+        if (!r.data.success && r.data.error) setLastError(r.data.error);
       } else {
         setLastError(r.error);
       }

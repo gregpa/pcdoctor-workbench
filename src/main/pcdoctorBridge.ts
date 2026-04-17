@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { LATEST_JSON_PATH } from './constants.js';
-import type { SystemStatus, KpiValue, GaugeValue, Severity } from '@shared/types.js';
+import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName } from '@shared/types.js';
 
 export class PCDoctorBridgeError extends Error {
   code: string;
@@ -156,6 +156,18 @@ function mapToSystemStatus(r: any): SystemStatus {
   // --- generated_at from ISO timestamp ---
   const generated_at = r.timestamp ? Math.floor(Date.parse(r.timestamp) / 1000) : 0;
 
+  const findings: Finding[] = Array.isArray(r.findings) ? r.findings.map((f: any) => {
+    const sev: Finding['severity'] = f.severity === 'critical' ? 'critical' : f.severity === 'info' ? 'info' : 'warning';
+    return {
+      severity: sev,
+      area: f.area ?? 'Unknown',
+      message: f.message ?? '',
+      detail: f.detail,
+      auto_fixed: !!f.auto_fixed,
+      suggested_action: mapAreaToAction(f.area),
+    };
+  }) : [];
+
   return {
     generated_at: Number.isFinite(generated_at) ? generated_at : 0,
     overall_severity: overallSev,
@@ -163,8 +175,20 @@ function mapToSystemStatus(r: any): SystemStatus {
     host: r.hostname ?? 'Unknown host',
     kpis,
     gauges,
-    findings: [],
+    findings,
   };
+}
+
+function mapAreaToAction(area: string | undefined): ActionName | undefined {
+  if (!area) return undefined;
+  const map: Record<string, ActionName> = {
+    'Memory': 'apply_wsl_cap',
+    'Search': 'rebuild_search_index',
+    'Explorer': 'fix_shell_overlays',
+    'NAS': 'remap_nas',
+    'Startup': 'disable_startup_item',
+  };
+  return map[area];
 }
 
 function mapOverall(v: unknown): Severity {
