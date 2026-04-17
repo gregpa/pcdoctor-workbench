@@ -163,6 +163,7 @@ function mapToSystemStatus(r: any): SystemStatus {
     host: r.hostname ?? 'Unknown host',
     kpis,
     gauges,
+    findings: [],
   };
 }
 

@@ -18,6 +18,15 @@ export interface GaugeValue {
   severity: Severity;
 }
 
+export interface Finding {
+  severity: 'critical' | 'warning' | 'info';
+  area: string;
+  message: string;
+  detail?: unknown;
+  auto_fixed: boolean;
+  suggested_action?: ActionName;
+}
+
 export interface SystemStatus {
   generated_at: number; // unix seconds
   overall_severity: Severity;
@@ -25,6 +34,7 @@ export interface SystemStatus {
   host: string;
   kpis: KpiValue[];
   gauges: GaugeValue[];
+  findings: Finding[];
 }
 
 // --- Actions ---
