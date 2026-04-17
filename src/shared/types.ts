@@ -102,3 +102,29 @@ export interface IpcError {
   message: string;
   details?: unknown;
 }
+
+export interface AuditLogEntry {
+  id: number;
+  ts: number;
+  action_name: string;
+  action_label: string;
+  status: 'running' | 'success' | 'error';
+  duration_ms: number | null;
+  error_message: string | null;
+  rollback_id: number | null;
+  reverted_at: number | null;
+  triggered_by: string;
+  params: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+}
+
+export interface RunActionRequest {
+  name: ActionName;
+  params?: Record<string, string | number>;
+}
+
+export interface RevertResult {
+  method: 'system-restore' | 'file-snapshot' | 'none';
+  reboot_required: boolean;
+  details: string;
+}
