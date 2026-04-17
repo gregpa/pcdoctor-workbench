@@ -56,6 +56,11 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     }
   }
 
+  // Special case: install_security_updates uses same script as install_windows_updates but with -SecurityOnly flag
+  if (input.name === 'install_security_updates') {
+    scriptArgs.push('-SecurityOnly');
+  }
+
   const start = Date.now();
   try {
     const result = await runPowerShellScript<Record<string, unknown>>(def.ps_script, scriptArgs);

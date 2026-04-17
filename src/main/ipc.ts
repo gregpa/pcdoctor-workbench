@@ -13,6 +13,7 @@ import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
+import { launchClaudeInTerminal, resolveClaudePath } from './claudeBridge.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
@@ -216,5 +217,25 @@ export function registerIpcHandlers() {
     const r = await installToolViaWinget(toolId);
     if (r.ok) return { ok: true, data: {} };
     return { ok: false, error: { code: 'E_TOOL_INSTALL', message: r.error ?? 'Install failed' } };
+  });
+
+  ipcMain.handle('api:getWindowsUpdateDetail', async (): Promise<IpcResult<any>> => {
+    try {
+      const data = await runPowerShellScript<any>('security/Get-WindowsUpdateDetail.ps1', ['-JsonOutput'], { timeoutMs: 120_000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to fetch WU detail' } };
+    }
+  });
+
+  ipcMain.handle('api:getClaudeStatus', async (): Promise<IpcResult<{ installed: boolean; path: string | null }>> => {
+    const p = resolveClaudePath();
+    return { ok: true, data: { installed: !!p, path: p } };
+  });
+
+  ipcMain.handle('api:launchClaude', async (): Promise<IpcResult<{ pid?: number }>> => {
+    const r = await launchClaudeInTerminal();
+    if (r.ok) return { ok: true, data: { pid: r.pid } };
+    return { ok: false, error: { code: 'E_CLAUDE_LAUNCH', message: r.error ?? 'Launch failed' } };
   });
 }

@@ -276,6 +276,31 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Downloads the latest Microsoft Defender threat definitions (bypassing the normal schedule).',
   },
 
+  // ============== WINDOWS UPDATE ==============
+  install_windows_updates: {
+    name: 'install_windows_updates', label: 'Install All Updates',
+    ps_script: 'actions/Install-WindowsUpdates.ps1',
+    confirm_level: 'destructive', rollback_tier: 'A',
+    restore_point_description: 'PCDoctor: Install Windows Updates',
+    estimated_duration_s: 1800, category: 'update', icon: '🪟',
+    tooltip: 'Downloads and installs all pending Windows Updates. May take 30+ minutes. Creates a restore point before starting.',
+  },
+  install_security_updates: {
+    name: 'install_security_updates', label: 'Install Security Only',
+    ps_script: 'actions/Install-WindowsUpdates.ps1',
+    confirm_level: 'destructive', rollback_tier: 'A',
+    restore_point_description: 'PCDoctor: Install Security Updates',
+    estimated_duration_s: 900, category: 'update', icon: '🛡',
+    tooltip: 'Installs only updates classified as Security. Creates a restore point before starting.',
+  },
+  repair_windows_update: {
+    name: 'repair_windows_update', label: 'Repair Windows Update',
+    ps_script: 'actions/Repair-WindowsUpdate.ps1',
+    confirm_level: 'destructive', rollback_tier: 'C',
+    estimated_duration_s: 60, category: 'update', icon: '🔧',
+    tooltip: 'Stops WU services, renames SoftwareDistribution + catroot2, resets WinHTTP proxy, restarts services. Fixes stuck update issues.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',
