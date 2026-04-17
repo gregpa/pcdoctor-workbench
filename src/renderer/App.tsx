@@ -6,6 +6,8 @@ import { Forecast } from './pages/Forecast.js';
 import { WeeklyReview } from './pages/WeeklyReview.js';
 import { Security } from './pages/Security.js';
 import { Tools } from './pages/Tools.js';
+import { Updates } from './pages/Updates.js';
+import { Claude } from './pages/Claude.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ConfirmProvider } from './lib/confirmContext.js';
 import './styles/globals.css';
@@ -24,6 +26,8 @@ export function App() {
               <Route path="/weekly-review" element={<WeeklyReview />} />
               <Route path="/security" element={<Security />} />
               <Route path="/tools" element={<Tools />} />
+              <Route path="/updates" element={<Updates />} />
+              <Route path="/claude" element={<Claude />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>
