@@ -191,3 +191,24 @@ export interface ForecastData {
   projections: ForecastProjection[];
   insufficient_data: Array<{ metric: string; points: number; required: number }>;
 }
+
+export interface WeeklyReviewActionItem {
+  id: string;
+  priority: 'critical' | 'important' | 'info';
+  area: string;
+  message: string;
+  detail?: unknown;
+  suggested_action?: { action_name: string; label: string };
+  state?: 'pending' | 'applied' | 'dismissed' | 'snoozed';
+}
+
+export interface WeeklyReview {
+  review_date: string;
+  generated_at: number;
+  hostname: string;
+  summary: { overall: string; critical_count: number; warning_count: number; info_count: number };
+  action_items: WeeklyReviewActionItem[];
+  headroom: Record<string, string>;
+  forecast_digest: unknown[];
+  has_pending_flag: boolean;
+}

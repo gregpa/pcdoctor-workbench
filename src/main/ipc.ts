@@ -1,13 +1,19 @@
 import { ipcMain } from 'electron';
+import { readFile, readdir, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { getStatus, PCDoctorBridgeError } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
 import { listActionLog, markActionReverted, queryMetricTrend, loadForecasts } from './dataStore.js';
 import { generateForecasts } from './forecastEngine.js';
+import { PCDOCTOR_ROOT } from './constants.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
-  AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData,
+  AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
 } from '@shared/types.js';
+
+const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
 
 export function registerIpcHandlers() {
   ipcMain.handle('api:getStatus', async (): Promise<IpcResult<SystemStatus>> => {
@@ -109,6 +115,32 @@ export function registerIpcHandlers() {
       return { ok: true, data: fresh };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Forecast failed' } };
+    }
+  });
+
+  ipcMain.handle('api:getWeeklyReview', async (): Promise<IpcResult<WeeklyReview | null>> => {
+    try {
+      if (!existsSync(weeklyDir)) return { ok: true, data: null };
+      const files = (await readdir(weeklyDir)).filter(f => f.endsWith('.json')).sort().reverse();
+      if (files.length === 0) return { ok: true, data: null };
+      const latestFile = path.join(weeklyDir, files[0]);
+      let raw = await readFile(latestFile, 'utf8');
+      if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+      const data = JSON.parse(raw) as WeeklyReview;
+      data.has_pending_flag = existsSync(path.join(weeklyDir, '.pending-review'));
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to load weekly review' } };
+    }
+  });
+
+  ipcMain.handle('api:dismissWeeklyReviewFlag', async (): Promise<IpcResult<void>> => {
+    try {
+      const flagPath = path.join(weeklyDir, '.pending-review');
+      if (existsSync(flagPath)) await unlink(flagPath);
+      return { ok: true, data: undefined };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to dismiss flag' } };
     }
   });
 }

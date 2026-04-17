@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   IpcResult, SystemStatus, ActionResult,
-  AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData,
+  AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
 } from '@shared/types.js';
 
 const api = {
@@ -13,6 +13,8 @@ const api = {
     ipcRenderer.invoke('api:getTrend', req),
   getForecast: (): Promise<IpcResult<ForecastData>> => ipcRenderer.invoke('api:getForecast'),
   regenerateForecast: (): Promise<IpcResult<ForecastData>> => ipcRenderer.invoke('api:regenerateForecast'),
+  getWeeklyReview: (): Promise<IpcResult<WeeklyReview | null>> => ipcRenderer.invoke('api:getWeeklyReview'),
+  dismissWeeklyReviewFlag: (): Promise<IpcResult<void>> => ipcRenderer.invoke('api:dismissWeeklyReviewFlag'),
 };
 
 contextBridge.exposeInMainWorld('api', api);
