@@ -99,9 +99,10 @@ function updateRollbackSnapshotPath(id: number, snapshotPath: string) {
   // We avoid circular deps by doing this via dataStore in a small patch.
   // For simplicity, use a direct SQL via the shared db connection.
   // This function should be moved to dataStore if used more than here.
-  const Database = require('better-sqlite3') as typeof import('better-sqlite3');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Database: new (p: string) => import('better-sqlite3').Database = require('better-sqlite3');
   const { WORKBENCH_DB_PATH } = require('./constants.js');
-  const conn = new Database.default(WORKBENCH_DB_PATH);
+  const conn = new Database(WORKBENCH_DB_PATH);
   try {
     conn.prepare(`UPDATE rollbacks SET snapshot_path = ? WHERE id = ?`).run(snapshotPath, id);
   } finally {
