@@ -28,7 +28,53 @@ export interface SystemStatus {
 }
 
 // --- Actions ---
-export type ActionName = 'flush_dns';  // Extended in Plan 2
+export type ActionName =
+  // Cleanup
+  | 'flush_dns'
+  | 'clear_temp_files'
+  | 'clean_recycle_bin'
+  | 'clean_browser_cache'
+  | 'cleanup_winsxs'
+  | 'clean_onedrive_cache'
+  | 'clean_teams_cache'
+  | 'clean_discord_cache'
+  | 'clean_spotify_cache'
+  // Repair
+  | 'rebuild_search_index'
+  | 'run_sfc'
+  | 'run_dism'
+  | 'trim_ssd'
+  | 'generate_system_report'
+  // Network
+  | 'release_renew_ip'
+  | 'reset_winsock'
+  | 'reset_firewall'
+  | 'flush_arp_cache'
+  | 'reset_network_adapters'
+  | 'remap_nas'
+  // Service / Process
+  | 'restart_service'
+  | 'restart_explorer'
+  | 'restart_network_stack'
+  | 'kill_process'
+  // Performance
+  | 'compact_docker'
+  | 'apply_wsl_cap'
+  | 'fix_shell_overlays'
+  | 'disable_startup_item'
+  // Security
+  | 'reset_hosts_file'
+  // Internal (not shown in UI)
+  | 'create_restore_point';
+
+export type ActionCategory =
+  | 'cleanup'
+  | 'repair'
+  | 'network'
+  | 'service'
+  | 'perf'
+  | 'security'
+  | 'internal';
 
 export interface ActionResult {
   action: ActionName;
