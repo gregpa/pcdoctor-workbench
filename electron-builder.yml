@@ -1,0 +1,36 @@
+appId: com.gregpajak.pcdoctor-workbench
+productName: PCDoctor Workbench
+artifactName: "${productName}-Setup-${version}.${ext}"
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist-electron/**/*
+  - dist/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+
+extraResources:
+  - from: resources/icons
+    to: icons
+
+asar: true
+
+win:
+  target:
+    - nsis
+  icon: resources/icons/icon.ico
+  publisherName: Greg Pajak
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  installerIcon: resources/icons/icon.ico
+  uninstallerIcon: resources/icons/icon.ico
+  include: scripts/installer.nsh
