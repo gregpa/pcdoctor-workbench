@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { LATEST_JSON_PATH } from './constants.js';
-import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName } from '@shared/types.js';
+import { recordStatusSnapshot } from './dataStore.js';
+import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
 
 export class PCDoctorBridgeError extends Error {
   code: string;
@@ -31,7 +32,19 @@ export async function getStatus(): Promise<SystemStatus> {
     throw new PCDoctorBridgeError('E_BRIDGE_PARSE_FAILED', `Invalid JSON: ${e?.message}`);
   }
 
-  return mapToSystemStatus(parsed);
+  const status = mapToSystemStatus(parsed);
+  // Persist snapshot for trend tracking (best-effort, non-fatal)
+  try {
+    const m = parsed.metrics ?? {};
+    recordStatusSnapshot({
+      cpu_load_pct: typeof m.cpu_load_pct === 'number' ? m.cpu_load_pct : undefined,
+      ram_used_pct: typeof m.ram_used_pct === 'number' ? m.ram_used_pct : undefined,
+      disks: Array.isArray(m.disks) ? m.disks.map((d: any) => ({ drive: d.drive, free_pct: d.free_pct })) : undefined,
+      event_errors_system: m?.event_errors_7d?.system_count,
+      event_errors_application: m?.event_errors_7d?.application_count,
+    });
+  } catch {}
+  return status;
 }
 
 /** Map the real latest.json schema into what the UI expects. */
@@ -168,6 +181,40 @@ function mapToSystemStatus(r: any): SystemStatus {
     };
   }) : [];
 
+  // Services pills
+  const rawServices = r.metrics?.services ?? {};
+  const serviceList: ServiceHealth[] = Object.entries(rawServices).map(([key, val]: [string, any]) => {
+    const statusStr = typeof val?.status === 'string' ? val.status : 'unknown';
+    const start = typeof val?.start === 'string' ? val.start : undefined;
+    // Severity: running = good, Manual-start + Stopped = good (normal), other Stopped = warn, error = crit
+    let sev: 'good' | 'warn' | 'crit';
+    if (/run/i.test(statusStr)) sev = 'good';
+    else if (/error/i.test(statusStr)) sev = 'crit';
+    else if (statusStr === 'Stopped' && start === 'Manual') sev = 'good';
+    else if (statusStr === 'Stopped') sev = 'warn';
+    else sev = 'warn';
+    return {
+      key,
+      display: val?.display ?? key,
+      status: statusStr,
+      status_severity: sev,
+      start,
+      detail: typeof val?.detail === 'string' ? val.detail : undefined,
+    };
+  });
+
+  // SMART placeholder — real data integrated in Plan 3b once smartctl bridge exists
+  const smart: SmartEntry[] = Array.isArray(r.metrics?.smart) ? r.metrics.smart.map((s: any) => ({
+    drive: s.drive ?? 'unknown',
+    model: s.model,
+    health: s.health ?? 'UNKNOWN',
+    wear_pct: s.wear_pct,
+    temp_c: s.temp_c,
+    media_errors: s.media_errors,
+    power_on_hours: s.power_on_hours,
+    status_severity: s.health === 'PASSED' ? 'good' : s.health === 'FAILED' ? 'crit' : 'warn',
+  })) : [];
+
   return {
     generated_at: Number.isFinite(generated_at) ? generated_at : 0,
     overall_severity: overallSev,
@@ -176,6 +223,8 @@ function mapToSystemStatus(r: any): SystemStatus {
     kpis,
     gauges,
     findings,
+    services: serviceList,
+    smart,
   };
 }
 
