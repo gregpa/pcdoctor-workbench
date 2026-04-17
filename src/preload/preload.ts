@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
-  SecurityPosture,
+  SecurityPosture, ToolStatus,
 } from '@shared/types.js';
 
 const api = {
@@ -18,6 +18,9 @@ const api = {
   dismissWeeklyReviewFlag: (): Promise<IpcResult<void>> => ipcRenderer.invoke('api:dismissWeeklyReviewFlag'),
   getSecurityPosture: (): Promise<IpcResult<SecurityPosture>> => ipcRenderer.invoke('api:getSecurityPosture'),
   approvePersistence: (identifier: string, approve: boolean): Promise<IpcResult<void>> => ipcRenderer.invoke('api:approvePersistence', identifier, approve),
+  listTools: (): Promise<IpcResult<ToolStatus[]>> => ipcRenderer.invoke('api:listTools'),
+  launchTool: (toolId: string, modeId: string): Promise<IpcResult<{ pid?: number }>> => ipcRenderer.invoke('api:launchTool', toolId, modeId),
+  installTool: (toolId: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installTool', toolId),
 };
 
 contextBridge.exposeInMainWorld('api', api);

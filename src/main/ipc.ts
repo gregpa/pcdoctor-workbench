@@ -12,10 +12,11 @@ import {
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
+import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
-  SecurityPosture, PersistenceItem, ThreatIndicator,
+  SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -198,5 +199,22 @@ export function registerIpcHandlers() {
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to update approval' } };
     }
+  });
+
+  ipcMain.handle('api:listTools', async (): Promise<IpcResult<ToolStatus[]>> => {
+    try { return { ok: true, data: listAllToolStatuses() }; }
+    catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
+  });
+
+  ipcMain.handle('api:launchTool', async (_evt, toolId: string, modeId: string): Promise<IpcResult<{ pid?: number }>> => {
+    const r = await launchTool(toolId, modeId);
+    if (r.ok) return { ok: true, data: { pid: r.pid } };
+    return { ok: false, error: { code: 'E_TOOL_LAUNCH', message: r.error ?? 'Launch failed' } };
+  });
+
+  ipcMain.handle('api:installTool', async (_evt, toolId: string): Promise<IpcResult<{}>> => {
+    const r = await installToolViaWinget(toolId);
+    if (r.ok) return { ok: true, data: {} };
+    return { ok: false, error: { code: 'E_TOOL_INSTALL', message: r.error ?? 'Install failed' } };
   });
 }
