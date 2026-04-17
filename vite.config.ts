@@ -28,10 +28,14 @@ export default defineConfig({
             lib: {
               entry: 'src/main/main.ts',
               formats: ['cjs'],
-              fileName: () => '[name].js',
+              fileName: () => '[name].cjs',
             },
             rollupOptions: {
               external: ['better-sqlite3', 'electron'],
+              output: {
+                entryFileNames: '[name].cjs',
+                chunkFileNames: '[name].cjs',
+              },
             },
           },
         },
@@ -48,8 +52,8 @@ export default defineConfig({
               external: ['electron'],
               output: {
                 format: 'cjs',
-                entryFileNames: '[name].js',
-                chunkFileNames: '[name].js',
+                entryFileNames: '[name].cjs',
+                chunkFileNames: '[name].cjs',
               },
             },
           },
