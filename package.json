@@ -1,6 +1,6 @@
 {
   "name": "pcdoctor-workbench",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local PC maintenance dashboard + action workbench",
   "author": "Greg Pajak <iseeuseeingme@gmail.com>",
   "main": "dist-electron/main/main.cjs",
