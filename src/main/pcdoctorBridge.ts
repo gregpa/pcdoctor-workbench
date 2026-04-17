@@ -23,7 +23,10 @@ export async function getStatus(): Promise<SystemStatus> {
 
   let parsed: any;
   try {
-    parsed = JSON.parse(raw);
+    // Strip UTF-8 BOM if present. PowerShell's Out-File default encoding writes
+    // one; JSON.parse can't handle it.
+    const trimmed = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+    parsed = JSON.parse(trimmed);
   } catch (e: any) {
     throw new PCDoctorBridgeError('E_BRIDGE_PARSE_FAILED', `Invalid JSON: ${e?.message}`);
   }

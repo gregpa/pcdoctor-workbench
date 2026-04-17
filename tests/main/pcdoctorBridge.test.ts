@@ -40,4 +40,14 @@ describe('pcdoctorBridge.getStatus', () => {
     (readFile as any).mockResolvedValueOnce('not json');
     await expect(getStatus()).rejects.toMatchObject({ code: 'E_BRIDGE_PARSE_FAILED' });
   });
+
+  it('strips UTF-8 BOM from latest.json before parsing', async () => {
+    const fixture = await realReadFile(fixturePath, 'utf8');
+    // Prepend BOM to simulate PowerShell-written file
+    (readFile as any).mockResolvedValueOnce('\uFEFF' + fixture);
+
+    const status = await getStatus();
+    expect(status.overall_severity).toBe('warn');
+    expect(status.host).toBe('Alienware Aurora R11');
+  });
 });
