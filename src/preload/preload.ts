@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   IpcResult, SystemStatus, ActionResult,
-  AuditLogEntry, RunActionRequest, RevertResult,
+  AuditLogEntry, RunActionRequest, RevertResult, Trend,
 } from '@shared/types.js';
 
 const api = {
@@ -9,6 +9,8 @@ const api = {
   runAction: (req: RunActionRequest): Promise<IpcResult<ActionResult>> => ipcRenderer.invoke('api:runAction', req),
   getAuditLog: (limit?: number): Promise<IpcResult<AuditLogEntry[]>> => ipcRenderer.invoke('api:getAuditLog', limit ?? 200),
   revertAction: (auditId: number): Promise<IpcResult<RevertResult>> => ipcRenderer.invoke('api:revertAction', auditId),
+  getTrend: (req: { category: string; metric: string; days: number }): Promise<IpcResult<Trend>> =>
+    ipcRenderer.invoke('api:getTrend', req),
 };
 
 contextBridge.exposeInMainWorld('api', api);

@@ -2,10 +2,10 @@ import { ipcMain } from 'electron';
 import { getStatus, PCDoctorBridgeError } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
-import { listActionLog, markActionReverted } from './dataStore.js';
+import { listActionLog, markActionReverted, queryMetricTrend } from './dataStore.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
-  AuditLogEntry, RunActionRequest, RevertResult,
+  AuditLogEntry, RunActionRequest, RevertResult, Trend,
 } from '@shared/types.js';
 
 export function registerIpcHandlers() {
@@ -69,6 +69,22 @@ export function registerIpcHandlers() {
       };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Revert failed' } };
+    }
+  });
+
+  ipcMain.handle('api:getTrend', async (_evt, req: { category: string; metric: string; days: number }): Promise<IpcResult<Trend>> => {
+    try {
+      const points = queryMetricTrend(req.category, req.metric, req.days ?? 7);
+      return {
+        ok: true,
+        data: {
+          metric: `${req.category}.${req.metric}`,
+          unit: req.metric.includes('pct') ? '%' : '',
+          points: points.map(p => ({ ts: Math.floor(p.ts / 1000), value: p.value })),
+        },
+      };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to query trend' } };
     }
   });
 }
