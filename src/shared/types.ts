@@ -318,3 +318,9 @@ export interface SecurityPosture {
   threat_indicators: ThreatIndicator[];
   overall_severity: 'good' | 'warn' | 'crit';
 }
+
+export interface ToolStatus {
+  id: string;
+  installed: boolean;
+  resolved_path: string | null;
+}
