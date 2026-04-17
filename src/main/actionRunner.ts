@@ -34,9 +34,10 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     try {
       rollbackId = await prepareRollback(def, logId);
       if (rollbackId !== null) {
-        const Database = require('better-sqlite3') as typeof import('better-sqlite3');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const Database: new (p: string) => import('better-sqlite3').Database = require('better-sqlite3');
         const { WORKBENCH_DB_PATH } = require('./constants.js');
-        const conn = new Database.default(WORKBENCH_DB_PATH);
+        const conn = new Database(WORKBENCH_DB_PATH);
         try {
           conn.prepare(`UPDATE actions_log SET rollback_id = ? WHERE id = ?`).run(rollbackId, logId);
         } finally {
