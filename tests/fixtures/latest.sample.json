@@ -1,0 +1,26 @@
+{
+  "generated_at": 1776528000,
+  "overall": { "severity": "warn", "label": "ATTENTION — 2 warnings" },
+  "host": "Alienware Aurora R11",
+  "cpu": {
+    "temp_avg_c": 82,
+    "temp_peak_c": 99,
+    "effective_clock_mhz": 1178,
+    "nominal_clock_mhz": 4859,
+    "severity": "warn",
+    "delta_week": { "direction": "up", "text": "+17° vs last week", "severity": "crit" }
+  },
+  "ram": {
+    "used_gb": 19.5,
+    "total_gb": 32,
+    "pct": 61,
+    "peak_pct_overnight": 98,
+    "severity": "good"
+  },
+  "gpu": { "temp_c": 47, "hotspot_c": 60, "severity": "good" },
+  "disks": [
+    { "drive": "C:", "free_pct": 20, "free_gb": 190, "total_gb": 935, "severity": "warn" }
+  ],
+  "nas": { "mapped_ok": 6, "mapped_total": 6, "severity": "good" },
+  "services": { "running": 11, "total": 12, "degraded": ["WSearch"], "severity": "good" }
+}
