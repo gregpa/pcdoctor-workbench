@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import path from 'node:path';
 import { readFile as realReadFile } from 'node:fs/promises';
