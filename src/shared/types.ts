@@ -27,6 +27,39 @@ export interface Finding {
   suggested_action?: ActionName;
 }
 
+export interface TrendPoint {
+  ts: number;       // unix seconds
+  value: number;
+}
+
+export interface Trend {
+  metric: string;   // e.g., 'cpu.load_pct', 'ram.used_pct', 'disk.C.free_pct', 'events.system_7d'
+  unit: string;
+  points: TrendPoint[];
+  healthy_max?: number;
+  healthy_min?: number;
+}
+
+export interface SmartEntry {
+  drive: string;              // e.g. 'NVMe C: (1 TB)'
+  model?: string;
+  health: 'PASSED' | 'FAILED' | 'UNKNOWN';
+  wear_pct?: number;          // 0..100
+  temp_c?: number;
+  media_errors?: number;
+  power_on_hours?: number;
+  status_severity: 'good' | 'warn' | 'crit';
+}
+
+export interface ServiceHealth {
+  key: string;                // e.g., 'Cloudflared'
+  display: string;            // 'Cloudflare Tunnel'
+  status: string;             // raw status string from PS
+  status_severity: 'good' | 'warn' | 'crit';
+  start?: string;             // 'Automatic' | 'Manual' | 'Disabled'
+  detail?: string;
+}
+
 export interface SystemStatus {
   generated_at: number; // unix seconds
   overall_severity: Severity;
@@ -35,6 +68,8 @@ export interface SystemStatus {
   kpis: KpiValue[];
   gauges: GaugeValue[];
   findings: Finding[];
+  services?: ServiceHealth[];
+  smart?: SmartEntry[];
 }
 
 // --- Actions ---

@@ -167,6 +167,47 @@ export function pruneExpiredRollbacks(): number {
   return Number(info.changes);
 }
 
+// ============== METRICS ==============
+
+export interface MetricPoint { ts: number; value: number; }
+
+export function insertMetric(category: string, metric: string, value: number, label?: string): void {
+  openDb().prepare(
+    `INSERT INTO metrics (ts, category, metric, value, label) VALUES (?, ?, ?, ?, ?)`
+  ).run(Date.now(), category, metric, value, label ?? null);
+}
+
+/** Return points for `category.metric` in last N days (oldest first). */
+export function queryMetricTrend(category: string, metric: string, days: number): MetricPoint[] {
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  return openDb().prepare(
+    `SELECT ts, value FROM metrics WHERE category = ? AND metric = ? AND ts >= ? ORDER BY ts ASC`
+  ).all(category, metric, since) as MetricPoint[];
+}
+
+/** Insert a snapshot of the current system status into metrics table. Idempotent per timestamp. */
+export function recordStatusSnapshot(s: {
+  cpu_load_pct?: number;
+  ram_used_pct?: number;
+  disks?: Array<{ drive: string; free_pct: number }>;
+  event_errors_system?: number;
+  event_errors_application?: number;
+}): void {
+  const ts = Date.now();
+  const stmt = openDb().prepare(
+    `INSERT INTO metrics (ts, category, metric, value, label) VALUES (?, ?, ?, ?, ?)`
+  );
+  if (typeof s.cpu_load_pct === 'number') stmt.run(ts, 'cpu', 'load_pct', s.cpu_load_pct, null);
+  if (typeof s.ram_used_pct === 'number') stmt.run(ts, 'ram', 'used_pct', s.ram_used_pct, null);
+  if (Array.isArray(s.disks)) {
+    for (const d of s.disks) {
+      if (typeof d.free_pct === 'number') stmt.run(ts, 'disk', 'free_pct', d.free_pct, d.drive);
+    }
+  }
+  if (typeof s.event_errors_system === 'number') stmt.run(ts, 'events', 'system_count', s.event_errors_system, null);
+  if (typeof s.event_errors_application === 'number') stmt.run(ts, 'events', 'application_count', s.event_errors_application, null);
+}
+
 export function closeDb() {
   db?.close();
   db = null;
