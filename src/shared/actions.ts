@@ -254,6 +254,28 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Replaces C:\\Windows\\System32\\drivers\\etc\\hosts with the Microsoft default (only 127.0.0.1 / ::1 loopback). Original backed up for revert.',
   },
 
+  defender_quick_scan: {
+    name: 'defender_quick_scan', label: 'Defender Quick Scan',
+    ps_script: 'actions/Run-DefenderQuickScan.ps1',
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 600,
+    category: 'security', icon: '🛡',
+    tooltip: 'Starts a Windows Defender Quick Scan in the background. Takes 5-15 min; does not block the UI.',
+  },
+  defender_full_scan: {
+    name: 'defender_full_scan', label: 'Defender Full Scan',
+    ps_script: 'actions/Run-DefenderFullScan.ps1',
+    confirm_level: 'destructive', rollback_tier: 'C', estimated_duration_s: 7200,
+    category: 'security', icon: '🔍',
+    tooltip: 'Starts a Windows Defender Full Scan. Takes 1-4 hours. Uses significant CPU.',
+  },
+  update_defender_defs: {
+    name: 'update_defender_defs', label: 'Update Defender Definitions',
+    ps_script: 'actions/Update-DefenderDefs.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    category: 'security', icon: '📥',
+    tooltip: 'Downloads the latest Microsoft Defender threat definitions (bypassing the normal schedule).',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

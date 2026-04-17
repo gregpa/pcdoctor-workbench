@@ -109,6 +109,7 @@ export type ActionName =
   | 'disable_startup_item'
   // Security
   | 'reset_hosts_file'
+  | 'defender_quick_scan' | 'defender_full_scan' | 'update_defender_defs'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
@@ -211,4 +212,109 @@ export interface WeeklyReview {
   headroom: Record<string, string>;
   forecast_digest: unknown[];
   has_pending_flag: boolean;
+}
+
+// --- Security posture ---
+export interface DefenderStatus {
+  realtime_protection: boolean;
+  antispyware_enabled: boolean;
+  defs_version: string;
+  defs_age_hours: number;
+  engine_version: string;
+  last_quick_scan_hours: number | null;
+  last_full_scan_days: number | null;
+  threats_quarantined_7d: number;
+  threats_active: number;
+  tamper_protection: boolean;
+  cloud_protection: boolean;
+  puaprotection: string;
+  controlled_folder_access: string;
+  network_protection: string;
+  exclusions_count: number;
+  severity: 'good' | 'warn' | 'crit';
+}
+
+export interface FirewallStatus {
+  domain_enabled: boolean;
+  private_enabled: boolean;
+  public_enabled: boolean;
+  default_inbound_action: string;
+  rules_total: number;
+  rules_added_7d: number;
+  severity: 'good' | 'warn' | 'crit';
+}
+
+export interface WindowsUpdatePosture {
+  pending_count: number;
+  pending_security_count: number;
+  last_success_days: number | null;
+  reboot_pending: boolean;
+  wu_service_status: string;
+  severity: 'good' | 'warn' | 'crit';
+}
+
+export interface FailedLoginSummary {
+  total_7d: number;
+  total_24h: number;
+  lockouts_7d: number;
+  top_sources: Array<{ ip: string; count: number }>;
+  rdp_attempts_7d: number;
+  severity: 'good' | 'warn' | 'crit';
+}
+
+export interface BitLockerVolume {
+  drive: string;
+  status: string;              // 'FullyEncrypted' | 'EncryptionInProgress' | 'FullyDecrypted' | etc.
+  protection_on: boolean;
+  encryption_pct: number;
+}
+
+export interface UacStatus {
+  enabled: boolean;
+  level: 'AlwaysNotify' | 'Default' | 'NotifyChanges' | 'Disabled' | 'Unknown';
+  severity: 'good' | 'warn' | 'crit';
+}
+
+export interface DriverFreshness {
+  gpu_vendor: string;
+  gpu_current_version: string;
+  age_days: number | null;
+  severity: 'good' | 'warn' | 'crit';
+}
+
+export interface PersistenceItem {
+  kind: 'startup' | 'scheduled_task' | 'service' | 'wmi_sub' | 'browser_ext';
+  identifier: string;          // stable id (hash of path+name+kind)
+  name: string;
+  path?: string;
+  publisher?: string;
+  signed?: boolean;
+  first_seen: number;          // unix ms
+  last_seen: number;
+  approved: 0 | 1 | -1;        // 0 = unknown, 1 = approved, -1 = rejected
+  is_new: boolean;             // added in the most recent scan
+}
+
+export interface ThreatIndicator {
+  id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  category: string;            // 'ransomware' | 'cryptominer' | 'suspicious_powershell' | 'lolbas' | 'unusual_parent_child' | 'rdp_bruteforce'
+  detected_at: number;
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface SecurityPosture {
+  generated_at: number;
+  defender: DefenderStatus | null;
+  firewall: FirewallStatus | null;
+  windows_update: WindowsUpdatePosture | null;
+  failed_logins: FailedLoginSummary | null;
+  bitlocker: BitLockerVolume[];
+  uac: UacStatus | null;
+  gpu_driver: DriverFreshness | null;
+  persistence_new_count: number;
+  persistence_items: PersistenceItem[];
+  threat_indicators: ThreatIndicator[];
+  overall_severity: 'good' | 'warn' | 'crit';
 }

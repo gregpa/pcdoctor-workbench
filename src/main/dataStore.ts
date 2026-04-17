@@ -53,6 +53,32 @@ CREATE TABLE IF NOT EXISTS forecasts (
   due_date INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_forecasts_ts ON forecasts(generated_at);
+
+CREATE TABLE IF NOT EXISTS persistence_baseline (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  identifier TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  path TEXT,
+  publisher TEXT,
+  signed INTEGER,
+  details_json TEXT,
+  first_seen INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  approved INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_persistence_identifier ON persistence_baseline(identifier);
+
+CREATE TABLE IF NOT EXISTS security_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  scanner TEXT NOT NULL,
+  duration_ms INTEGER,
+  threats_found INTEGER DEFAULT 0,
+  threats_json TEXT,
+  status TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_security_scans_ts ON security_scans(ts);
 `;
 
 let db: Database.Database | null = null;
@@ -241,6 +267,81 @@ export function loadForecasts(): { generated_at: number; projections: any[] } | 
     generated_at: Math.floor(rows[0].generated_at / 1000),
     projections: rows.map(r => JSON.parse(r.projection_json)),
   };
+}
+
+// ============== PERSISTENCE BASELINE ==============
+
+export interface PersistenceRow {
+  id: number;
+  kind: string;
+  identifier: string;
+  name: string;
+  path: string | null;
+  publisher: string | null;
+  signed: number | null;
+  details_json: string | null;
+  first_seen: number;
+  last_seen: number;
+  approved: number;
+}
+
+export function upsertPersistence(item: {
+  kind: string; identifier: string; name: string;
+  path?: string; publisher?: string; signed?: boolean;
+  details?: unknown;
+}): { is_new: boolean; row: PersistenceRow } {
+  const db = openDb();
+  const now = Date.now();
+  const existing = db.prepare(`SELECT * FROM persistence_baseline WHERE identifier = ?`).get(item.identifier) as PersistenceRow | undefined;
+  if (existing) {
+    db.prepare(`UPDATE persistence_baseline SET last_seen = ? WHERE identifier = ?`).run(now, item.identifier);
+    return { is_new: false, row: { ...existing, last_seen: now } };
+  }
+  const info = db.prepare(
+    `INSERT INTO persistence_baseline (kind, identifier, name, path, publisher, signed, details_json, first_seen, last_seen, approved)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+  ).run(
+    item.kind, item.identifier, item.name,
+    item.path ?? null, item.publisher ?? null, item.signed === undefined ? null : (item.signed ? 1 : 0),
+    item.details ? JSON.stringify(item.details) : null,
+    now, now
+  );
+  return { is_new: true, row: {
+    id: Number(info.lastInsertRowid), kind: item.kind, identifier: item.identifier, name: item.name,
+    path: item.path ?? null, publisher: item.publisher ?? null, signed: item.signed === undefined ? null : (item.signed ? 1 : 0),
+    details_json: item.details ? JSON.stringify(item.details) : null, first_seen: now, last_seen: now, approved: 0,
+  }};
+}
+
+export function listPersistenceItems(days = 30): PersistenceRow[] {
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  return openDb().prepare(
+    `SELECT * FROM persistence_baseline WHERE last_seen >= ? ORDER BY first_seen DESC`
+  ).all(since) as PersistenceRow[];
+}
+
+export function setPersistenceApproval(identifier: string, approved: -1 | 0 | 1): void {
+  openDb().prepare(`UPDATE persistence_baseline SET approved = ? WHERE identifier = ?`).run(approved, identifier);
+}
+
+export function countNewPersistence(hours = 24): number {
+  const since = Date.now() - hours * 60 * 60 * 1000;
+  const row = openDb().prepare(
+    `SELECT COUNT(*) as c FROM persistence_baseline WHERE first_seen >= ? AND approved = 0`
+  ).get(since) as { c: number };
+  return row?.c ?? 0;
+}
+
+export function recordSecurityScan(r: {
+  scanner: string; duration_ms: number; threats_found?: number; threats?: unknown; status: string;
+}): number {
+  const info = openDb().prepare(
+    `INSERT INTO security_scans (ts, scanner, duration_ms, threats_found, threats_json, status) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    Date.now(), r.scanner, r.duration_ms,
+    r.threats_found ?? 0, r.threats ? JSON.stringify(r.threats) : null, r.status
+  );
+  return Number(info.lastInsertRowid);
 }
 
 export function closeDb() {
