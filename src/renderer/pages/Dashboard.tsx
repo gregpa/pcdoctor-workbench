@@ -14,6 +14,7 @@ import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
 import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
 import { AuthEventsWidget } from '@renderer/components/dashboard/AuthEventsWidget.js';
+import { BsodPanel } from '@renderer/components/dashboard/BsodPanel.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
 import { CleanMyPC } from '@renderer/components/dashboard/CleanMyPC.js';
 import { ACTIONS } from '@shared/actions.js';
@@ -192,8 +193,9 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="mt-3">
+      <div className="mt-3 grid grid-cols-2 gap-2.5">
         <AuthEventsWidget />
+        <BsodPanel />
       </div>
 
       {selectedService && (
