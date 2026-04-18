@@ -265,7 +265,14 @@ export interface FailedLoginSummary {
   total_7d: number;
   total_24h: number;
   lockouts_7d: number;
-  top_sources: Array<{ ip: string; count: number }>;
+  top_sources: Array<{
+    ip: string;
+    count: number;
+    country?: string | null;
+    city?: string | null;
+    isp?: string | null;
+    org?: string | null;
+  }>;
   rdp_attempts_7d: number;
   severity: 'good' | 'warn' | 'crit';
 }

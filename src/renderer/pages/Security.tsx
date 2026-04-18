@@ -284,13 +284,23 @@ export function Security() {
               <div className="mt-2">
                 <div className="text-text-secondary mb-1">Top source IPs:</div>
                 {data.failed_logins.top_sources.map(s => (
-                  <div key={s.ip} className="flex justify-between items-center text-xs gap-2">
-                    <code>{s.ip}</code>
-                    <span className="text-status-warn flex-1 text-right">{s.count} attempts</span>
+                  <div key={s.ip} className="flex justify-between items-center text-xs gap-2 py-1.5 border-b border-surface-700 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <code className="font-mono">{s.ip}</code>
+                        {s.country && <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface-700 text-text-secondary">{s.country}</span>}
+                      </div>
+                      {(s.city || s.isp) && (
+                        <div className="text-[10px] text-text-secondary/80 mt-0.5 truncate">
+                          {[s.city, s.isp].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-status-warn font-semibold">{s.count}</span>
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
-                        const ok = confirm(`Block ${s.ip} (inbound + outbound firewall rule)?`);
+                        const ok = confirm(`Block ${s.ip}${s.country ? ` (${s.country})` : ''} (inbound + outbound firewall rule)?`);
                         if (!ok) return;
                         setDetail(null);
                         await run({ name: 'block_ip', params: { ip: s.ip } });
