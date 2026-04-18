@@ -7,6 +7,7 @@ import { WeeklyReview } from './pages/WeeklyReview.js';
 import { Security } from './pages/Security.js';
 import { Tools } from './pages/Tools.js';
 import { Updates } from './pages/Updates.js';
+import { MemTest86 } from './pages/MemTest86.js';
 import { Claude } from './pages/Claude.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ConfirmProvider } from './lib/confirmContext.js';
@@ -27,6 +28,7 @@ export function App() {
               <Route path="/security" element={<Security />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/updates" element={<Updates />} />
+              <Route path="/memtest86" element={<MemTest86 />} />
               <Route path="/claude" element={<Claude />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
