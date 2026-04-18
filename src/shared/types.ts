@@ -164,6 +164,7 @@ export interface AuditLogEntry {
 export interface RunActionRequest {
   name: ActionName;
   params?: Record<string, string | number>;
+  dry_run?: boolean;
 }
 
 export interface RevertResult {
@@ -354,3 +355,12 @@ export const DEFAULT_NOTIFICATION_EVENTS = [
 ] as const;
 
 export type NotificationEvent = typeof DEFAULT_NOTIFICATION_EVENTS[number];
+
+// --- Scheduled tasks ---
+export interface ScheduledTaskInfo {
+  name: string;
+  status: string;        // Ready | Disabled | Running | etc.
+  next_run: string | null;
+  last_run: string | null;
+  last_result: string | null;
+}

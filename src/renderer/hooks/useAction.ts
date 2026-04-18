@@ -7,7 +7,7 @@ export function useAction() {
   const [lastResult, setLastResult] = useState<ActionResult | null>(null);
   const [lastError, setLastError] = useState<IpcError | null>(null);
 
-  const run = useCallback(async (req: { name: ActionName; params?: Record<string, string | number> }) => {
+  const run = useCallback(async (req: { name: ActionName; params?: Record<string, string | number>; dry_run?: boolean }) => {
     setRunning(req.name);
     setLastError(null);
     try {

@@ -9,6 +9,7 @@ export interface RunActionInput {
   name: ActionName;
   params?: Record<string, string | number>;
   triggered_by?: 'user' | 'scheduled' | 'telegram' | 'alert';
+  dry_run?: boolean;
 }
 
 export async function runAction(input: RunActionInput): Promise<ActionResult> {
@@ -51,6 +52,9 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
   }
 
   const scriptArgs = ['-JsonOutput'];
+  if (input.dry_run) {
+    scriptArgs.push('-DryRun');
+  }
   if (input.params) {
     for (const [k, v] of Object.entries(input.params)) {
       scriptArgs.push(`-${k.charAt(0).toUpperCase() + k.slice(1)}`, String(v));

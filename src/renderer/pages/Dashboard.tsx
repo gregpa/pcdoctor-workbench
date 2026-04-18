@@ -69,9 +69,9 @@ export function Dashboard() {
     );
   }
 
-  async function handleAction(name: ActionName) {
-    await run({ name });
-    setToast(`${ACTIONS[name].label} completed`);
+  async function handleAction(name: ActionName, params?: Record<string, string>, dryRun?: boolean) {
+    await run({ name, params, dry_run: dryRun });
+    setToast(`${ACTIONS[name].label}${dryRun ? ' (dry run)' : ''} completed`);
     setTimeout(() => setToast(null), 4000);
   }
 
@@ -144,7 +144,7 @@ export function Dashboard() {
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
             {QUICK_ACTIONS.map((name) => (
-              <ActionButton key={name} action={ACTIONS[name]} onRun={() => handleAction(name)} disabled={running !== null} />
+              <ActionButton key={name} action={ACTIONS[name]} onRun={(params, dryRun) => handleAction(name, params, dryRun)} disabled={running !== null} />
             ))}
           </div>
         </div>
