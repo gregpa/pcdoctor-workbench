@@ -327,6 +327,42 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     params_schema: { kb_id: { type: 'string', required: true, description: 'Update KB identifier' } },
   },
 
+  create_shadow_copy: {
+    name: 'create_shadow_copy', label: 'Create Shadow Copy',
+    ps_script: 'actions/Create-ShadowCopy.ps1',
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 30,
+    category: 'security', icon: '📸',
+    tooltip: 'Creates a Volume Shadow Copy on the specified drive — recovery snapshot Windows can restore files from.',
+    params_schema: { drive: { type: 'string', required: false, description: 'Drive letter (default C:)' } },
+  },
+  enable_bitlocker: {
+    name: 'enable_bitlocker', label: 'Enable BitLocker',
+    ps_script: 'actions/Enable-BitLocker.ps1',
+    confirm_level: 'destructive', rollback_tier: 'A',
+    restore_point_description: 'PCDoctor: Enable BitLocker',
+    estimated_duration_s: 300,
+    category: 'security', icon: '🔐',
+    tooltip: 'Starts BitLocker encryption on the specified drive with TPM + Recovery Password. Save the recovery key immediately after.',
+    params_schema: { drive: { type: 'string', required: false, description: 'Drive letter (default C:)' } },
+  },
+  block_ip: {
+    name: 'block_ip', label: 'Block IP Address',
+    ps_script: 'actions/Block-IP.ps1',
+    confirm_level: 'risky', rollback_tier: 'B',
+    snapshot_paths: [],
+    estimated_duration_s: 5,
+    category: 'network', icon: '🚫',
+    tooltip: 'Creates inbound+outbound firewall rules blocking all traffic to/from the specified IP.',
+    params_schema: { ip: { type: 'string', required: true, description: 'IPv4 address to block' } },
+  },
+  run_mbam_scan: {
+    name: 'run_mbam_scan', label: 'Run Malwarebytes Scan',
+    ps_script: 'actions/Run-MalwarebytesScan.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 1800,
+    category: 'security', icon: '🧪',
+    tooltip: 'Launches a Malwarebytes Threat Scan in the background. Requires Malwarebytes installed.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

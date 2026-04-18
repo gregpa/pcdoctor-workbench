@@ -114,6 +114,7 @@ export type ActionName =
   // Windows Update
   | 'install_windows_updates' | 'install_security_updates' | 'repair_windows_update'
   | 'hide_kb' | 'install_kb'
+  | 'create_shadow_copy' | 'enable_bitlocker' | 'block_ip' | 'run_mbam_scan'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
