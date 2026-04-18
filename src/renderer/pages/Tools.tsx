@@ -1,7 +1,8 @@
 import { useTools } from '@renderer/hooks/useTools.js';
 import { TOOLS, TOOL_CATEGORIES, ToolDefinition } from '@shared/tools.js';
 import type { ToolStatus } from '@shared/types.js';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '@renderer/lib/ipc.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 function ToolTile({ def, status, installing, onLaunch, onInstall, working }: {
@@ -111,6 +112,14 @@ export function Tools() {
   const { statuses, loading, installing, refresh, launch, install, installAll } = useTools();
   const [toast, setToast] = useState<string | null>(null);
   const [bulkInstalling, setBulkInstalling] = useState(false);
+  const [recentResults, setRecentResults] = useState<any[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const r = await (api as any).listToolResults?.();
+      if (r?.ok) setRecentResults(r.data);
+    })();
+  }, [statuses]);
 
   if (loading) return (
     <div className="p-6 flex items-center gap-3 text-text-secondary">
@@ -200,6 +209,30 @@ export function Tools() {
           </button>
         </div>
       </div>
+
+      {recentResults.length > 0 && (
+        <div className="mb-4 bg-surface-800 border border-surface-600 rounded-lg p-3">
+          <div className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Recent Tool Results ({recentResults.length})</div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {recentResults.map((r) => (
+              <div key={r.id} className="flex items-start gap-3 p-2 rounded-md bg-surface-900 border border-surface-700 text-[11px]">
+                <span className="text-[9px] px-2 py-0.5 rounded bg-surface-700 text-text-secondary font-semibold">{r.tool_id.toUpperCase()}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-text-secondary">{new Date(r.ts).toLocaleString()}</div>
+                  <div className="text-text-primary truncate">{r.summary ?? `${r.samples ?? '?'} samples`}</div>
+                  {r.findings && (
+                    <div className="text-[10px] text-text-secondary mt-1">
+                      {Object.entries(r.findings).slice(0, 3).map(([k, v]: any) => (
+                        <span key={k} className="mr-3">{k}: avg {v.avg} / max {v.max}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {TOOL_CATEGORIES.map(cat => {
         const toolsInCat = Object.values(TOOLS).filter(t => t.category === cat.id);

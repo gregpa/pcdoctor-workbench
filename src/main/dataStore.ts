@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS weekly_review_states (
   notes TEXT,
   PRIMARY KEY (review_date, item_id)
 );
+
+CREATE TABLE IF NOT EXISTS tool_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  tool_id TEXT NOT NULL,
+  csv_path TEXT,
+  samples INTEGER,
+  findings_json TEXT,
+  summary TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tool_results_ts ON tool_results(ts);
 `;
 
 let db: Database.Database | null = null;
@@ -466,4 +477,36 @@ export function getReviewItemStates(reviewDate: string): Record<string, { state:
 export function closeDb() {
   db?.close();
   db = null;
+}
+
+// ============== TOOL RESULTS ==============
+
+export interface ToolResultRow {
+  id: number;
+  ts: number;
+  tool_id: string;
+  csv_path: string | null;
+  samples: number | null;
+  findings_json: string | null;
+  summary: string | null;
+}
+
+export function insertToolResult(row: {
+  tool_id: string; csv_path?: string; samples?: number; findings?: unknown; summary?: string;
+}): number {
+  const info = openDb().prepare(
+    `INSERT INTO tool_results (ts, tool_id, csv_path, samples, findings_json, summary) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    Date.now(), row.tool_id, row.csv_path ?? null, row.samples ?? null,
+    row.findings ? JSON.stringify(row.findings) : null, row.summary ?? null
+  );
+  return Number(info.lastInsertRowid);
+}
+
+export function listToolResults(toolId?: string, limit = 20): ToolResultRow[] {
+  const sql = toolId
+    ? `SELECT * FROM tool_results WHERE tool_id = ? ORDER BY ts DESC LIMIT ?`
+    : `SELECT * FROM tool_results ORDER BY ts DESC LIMIT ?`;
+  const params = toolId ? [toolId, limit] : [limit];
+  return openDb().prepare(sql).all(...params) as ToolResultRow[];
 }

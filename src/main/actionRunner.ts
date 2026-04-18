@@ -1,7 +1,7 @@
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, ActionResult } from '@shared/types.js';
 import { runPowerShellScript, PCDoctorScriptError } from './scriptRunner.js';
-import { startActionLog, finishActionLog } from './dataStore.js';
+import { startActionLog, finishActionLog, insertToolResult } from './dataStore.js';
 import { prepareRollback } from './rollbackManager.js';
 import { notify } from './notifier.js';
 
@@ -71,6 +71,19 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     const result = await runPowerShellScript<Record<string, unknown>>(def.ps_script, scriptArgs);
     const duration = Date.now() - start;
     finishActionLog(logId, { status: 'success', duration_ms: duration, result });
+    // Capture tool-import results into tool_results history
+    if (input.name === 'import_hwinfo_csv' || input.name === 'import_occt_csv') {
+      try {
+        const r = result as any;
+        insertToolResult({
+          tool_id: input.name.replace('import_', '').replace('_csv', ''),
+          csv_path: r?.csv_path,
+          samples: r?.samples,
+          findings: r?.findings,
+          summary: r?.message,
+        });
+      } catch {}
+    }
     // Fire success notification (user-triggered only; telegram/scheduled get silent logs)
     if ((input.triggered_by ?? 'user') === 'user') {
       notify({
