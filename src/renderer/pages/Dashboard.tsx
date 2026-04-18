@@ -3,6 +3,8 @@ import { useStatus } from '@renderer/hooks/useStatus.js';
 import { useAction } from '@renderer/hooks/useAction.js';
 import { useTrend } from '@renderer/hooks/useTrends.js';
 import { useSecurityPosture } from '@renderer/hooks/useSecurityPosture.js';
+import { useWeeklyReview } from '@renderer/hooks/useWeeklyReview.js';
+import { useNavigate } from 'react-router-dom';
 import { HeaderBar } from '@renderer/components/layout/HeaderBar.js';
 import { KpiCard } from '@renderer/components/dashboard/KpiCard.js';
 import { Gauge } from '@renderer/components/dashboard/Gauge.js';
@@ -46,6 +48,8 @@ export function Dashboard() {
   const { trend: cpuTrend } = useTrend('cpu', 'load_pct', 7);
   const { trend: eventsTrend } = useTrend('events', 'system_count', 7);
   const { data: security } = useSecurityPosture();
+  const { review: weeklyReview } = useWeeklyReview();
+  const navigate = useNavigate();
   const [toast, setToast] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
 
@@ -83,6 +87,22 @@ export function Dashboard() {
         onScan={() => {}}
         scanning={false}
       />
+
+      {weeklyReview?.has_pending_flag && (
+        <div
+          onClick={() => navigate('/weekly-review')}
+          className="mb-3 p-3 bg-status-info/10 border border-status-info/40 rounded-lg cursor-pointer hover:border-status-info/60 flex items-center justify-between gap-3 transition"
+        >
+          <div className="flex items-center gap-2">
+            <span>📋</span>
+            <div>
+              <div className="text-sm font-semibold text-status-info">Weekly review ready</div>
+              <div className="text-[11px] text-text-secondary">{weeklyReview.review_date} · {weeklyReview.action_items.length} action items</div>
+            </div>
+          </div>
+          <span className="text-xs text-status-info">Open →</span>
+        </div>
+      )}
 
       {/* KPI row */}
       <div className="grid grid-cols-6 gap-2.5 mb-3">
