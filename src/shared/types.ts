@@ -327,3 +327,25 @@ export interface ToolStatus {
   installed: boolean;
   resolved_path: string | null;
 }
+
+// --- Notification settings ---
+export interface NotificationSettings {
+  telegram_enabled: boolean;
+  telegram_bot_token: string;      // Stored unencrypted in SQLite for this release; DPAPI encryption is a hardening follow-up.
+  telegram_chat_id: string;
+  quiet_hours_start: number;       // Hour 0-23
+  quiet_hours_end: number;
+  events: Record<string, { toast: boolean; telegram: boolean }>;
+}
+
+export const DEFAULT_NOTIFICATION_EVENTS = [
+  'critical_finding',
+  'warning_finding',
+  'weekly_review_ready',
+  'action_failed',
+  'action_succeeded',
+  'pending_updates_security',
+  'forecast_critical',
+] as const;
+
+export type NotificationEvent = typeof DEFAULT_NOTIFICATION_EVENTS[number];

@@ -79,6 +79,30 @@ CREATE TABLE IF NOT EXISTS security_scans (
   status TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_security_scans_ts ON security_scans(ts);
+
+CREATE TABLE IF NOT EXISTS workbench_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  channel TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  sent_ok INTEGER DEFAULT 0,
+  error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS seen_findings (
+  hash TEXT PRIMARY KEY,
+  first_seen INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  notified INTEGER DEFAULT 0
+);
 `;
 
 let db: Database.Database | null = null;
@@ -342,6 +366,48 @@ export function recordSecurityScan(r: {
     r.threats_found ?? 0, r.threats ? JSON.stringify(r.threats) : null, r.status
   );
   return Number(info.lastInsertRowid);
+}
+
+// ============== SETTINGS ==============
+
+export function getSetting(key: string): string | null {
+  const row = openDb().prepare(`SELECT value FROM workbench_settings WHERE key = ?`).get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  openDb().prepare(
+    `INSERT INTO workbench_settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(key, value, Date.now());
+}
+
+export function getAllSettings(): Record<string, string> {
+  const rows = openDb().prepare(`SELECT key, value FROM workbench_settings`).all() as Array<{ key: string; value: string }>;
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.key] = r.value;
+  return out;
+}
+
+// ============== NOTIFICATIONS ==============
+
+export function recordNotification(n: { channel: string; severity: string; title: string; body: string; sent_ok: boolean; error?: string }): void {
+  openDb().prepare(
+    `INSERT INTO notification_log (ts, channel, severity, title, body, sent_ok, error) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(Date.now(), n.channel, n.severity, n.title, n.body, n.sent_ok ? 1 : 0, n.error ?? null);
+}
+
+export function hasSeenFinding(hash: string): boolean {
+  const row = openDb().prepare(`SELECT hash FROM seen_findings WHERE hash = ?`).get(hash);
+  return !!row;
+}
+
+export function markFindingSeen(hash: string, notified = false): void {
+  const now = Date.now();
+  openDb().prepare(
+    `INSERT INTO seen_findings (hash, first_seen, last_seen, notified) VALUES (?, ?, ?, ?)
+     ON CONFLICT(hash) DO UPDATE SET last_seen = excluded.last_seen, notified = CASE WHEN seen_findings.notified = 1 THEN 1 ELSE excluded.notified END`
+  ).run(hash, now, now, notified ? 1 : 0);
 }
 
 export function closeDb() {
