@@ -3,6 +3,7 @@ import { useAction } from '@renderer/hooks/useAction.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ForecastProjection, ActionName } from '@shared/types.js';
 import { useState } from 'react';
+import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 function severityClasses(s: ForecastProjection['severity']) {
   switch (s) {
@@ -22,7 +23,11 @@ export function Forecast() {
   const { run, running } = useAction();
   const [toast, setToast] = useState<string | null>(null);
 
-  if (loading) return <div className="p-6 text-text-secondary">Computing forecasts…</div>;
+  if (loading) return (
+    <div className="p-6 flex items-center gap-3 text-text-secondary">
+      <LoadingSpinner size={18} /><span>Computing forecasts…</span>
+    </div>
+  );
   if (error) return <div className="p-6 text-status-warn">Forecast error: {error}</div>;
   if (!data) return <div className="p-6 text-text-secondary">No forecast data yet.</div>;
 

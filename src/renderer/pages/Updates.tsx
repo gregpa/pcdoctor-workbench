@@ -4,6 +4,7 @@ import { useAction } from '@renderer/hooks/useAction.js';
 import { useConfirm } from '@renderer/lib/confirmContext.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
+import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 interface PendingUpdate {
   title: string;
@@ -54,7 +55,11 @@ export function Updates() {
     await load();
   }
 
-  if (loading) return <div className="p-6 text-text-secondary">Querying Windows Update…</div>;
+  if (loading) return (
+    <div className="p-6 flex items-center gap-3 text-text-secondary">
+      <LoadingSpinner size={18} /><span>Querying Windows Update…</span>
+    </div>
+  );
   if (error) return <div className="p-6 text-status-warn">Error: {error}</div>;
   if (!data) return <div className="p-6 text-text-secondary">No data</div>;
 

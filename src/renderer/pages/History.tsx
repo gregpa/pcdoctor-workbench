@@ -3,6 +3,7 @@ import { useConfirm } from '@renderer/lib/confirmContext.js';
 import { formatDurationMs } from '@renderer/lib/formatters.js';
 import { useState } from 'react';
 import type { AuditLogEntry } from '@shared/types.js';
+import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 function groupByDay(entries: AuditLogEntry[]) {
   const groups = new Map<string, AuditLogEntry[]>();
@@ -19,7 +20,11 @@ export function History() {
   const confirm = useConfirm();
   const [toast, setToast] = useState<string | null>(null);
 
-  if (loading) return <div className="p-6 text-text-secondary">Loading audit log…</div>;
+  if (loading) return (
+    <div className="p-6 flex items-center gap-3 text-text-secondary">
+      <LoadingSpinner size={18} /><span>Loading audit log…</span>
+    </div>
+  );
 
   async function doRevert(id: number, label: string) {
     const ok = await confirm({

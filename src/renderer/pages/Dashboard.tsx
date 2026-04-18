@@ -13,7 +13,8 @@ import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
 import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
 import { ACTIONS } from '@shared/actions.js';
-import type { ActionName } from '@shared/types.js';
+import type { ActionName, ServiceHealth } from '@shared/types.js';
+import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 const QUICK_ACTIONS: ActionName[] = [
   'clear_temp_files', 'flush_dns',
@@ -45,8 +46,13 @@ export function Dashboard() {
   const { trend: eventsTrend } = useTrend('events', 'system_count', 7);
   const { data: security } = useSecurityPosture();
   const [toast, setToast] = useState<string | null>(null);
+  const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
 
-  if (loading) return <div className="p-6 text-text-secondary">Loading…</div>;
+  if (loading) return (
+    <div className="p-6 flex items-center gap-3 text-text-secondary">
+      <LoadingSpinner size={18} /><span>Loading diagnostic data…</span>
+    </div>
+  );
   if (error || !status) {
     return (
       <div className="p-6">
@@ -102,7 +108,7 @@ export function Dashboard() {
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Services & Processes</div>
           <div className="grid grid-cols-3 gap-1.5">
             {(status.services ?? []).slice(0, 9).map((s) => (
-              <ServicePill key={s.key} service={s} />
+              <ServicePill key={s.key} service={s} onClick={setSelectedService} />
             ))}
           </div>
         </div>
@@ -111,7 +117,7 @@ export function Dashboard() {
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2 flex items-center gap-1">
             <span>⚡</span><span>One-Click Actions</span>
           </div>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
             {QUICK_ACTIONS.map((name) => (
               <ActionButton key={name} action={ACTIONS[name]} onRun={() => handleAction(name)} disabled={running !== null} />
             ))}
@@ -159,6 +165,41 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {selectedService && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSelectedService(null)}>
+          <div className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-md p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${selectedService.status_severity === 'good' ? 'bg-status-good' : selectedService.status_severity === 'warn' ? 'bg-status-warn' : 'bg-status-crit'}`}></span>
+              <span>{selectedService.display}</span>
+            </h2>
+            <div className="text-sm text-text-secondary space-y-1 mb-4">
+              <div>Status: <span className="text-text-primary font-mono">{selectedService.status}</span></div>
+              {selectedService.start && <div>Start type: <span className="text-text-primary font-mono">{selectedService.start}</span></div>}
+              <div>Service key: <span className="text-text-primary font-mono">{selectedService.key}</span></div>
+              {selectedService.detail && <div className="text-[10px] mt-2">{selectedService.detail}</div>}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setSelectedService(null)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
+                Close
+              </button>
+              <button
+                onClick={async () => {
+                  const name = selectedService.key;
+                  setSelectedService(null);
+                  await run({ name: 'restart_service', params: { service_name: name } });
+                  setToast(`Restart triggered for ${name}`);
+                  setTimeout(() => setToast(null), 4000);
+                }}
+                disabled={running !== null}
+                className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-semibold disabled:opacity-50"
+              >
+                Restart Service
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>

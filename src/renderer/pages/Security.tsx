@@ -3,6 +3,7 @@ import { useAction } from '@renderer/hooks/useAction.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
 import { useState } from 'react';
+import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 function Panel({ title, children, severity }: { title: string; children: React.ReactNode; severity?: string }) {
   const border = severity === 'crit' ? 'border-status-crit/40' : severity === 'warn' ? 'border-status-warn/40' : 'border-surface-600';
@@ -29,7 +30,11 @@ export function Security() {
   const { run, running } = useAction();
   const [toast, setToast] = useState<string | null>(null);
 
-  if (loading) return <div className="p-6 text-text-secondary">Scanning security posture…</div>;
+  if (loading) return (
+    <div className="p-6 flex items-center gap-3 text-text-secondary">
+      <LoadingSpinner size={18} /><span>Scanning security posture…</span>
+    </div>
+  );
   if (error || !data) return <div className="p-6 text-status-warn">Error: {error ?? 'no data'}</div>;
 
   async function applyAction(name: ActionName) {

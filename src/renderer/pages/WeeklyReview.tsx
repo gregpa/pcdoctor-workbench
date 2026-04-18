@@ -3,6 +3,7 @@ import { useAction } from '@renderer/hooks/useAction.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, WeeklyReviewActionItem } from '@shared/types.js';
 import { useState } from 'react';
+import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 function priorityClasses(p: WeeklyReviewActionItem['priority']) {
   switch (p) {
@@ -21,7 +22,11 @@ export function WeeklyReview() {
   const { run, running } = useAction();
   const [toast, setToast] = useState<string | null>(null);
 
-  if (loading) return <div className="p-6 text-text-secondary">Loading weekly review…</div>;
+  if (loading) return (
+    <div className="p-6 flex items-center gap-3 text-text-secondary">
+      <LoadingSpinner size={18} /><span>Loading weekly review…</span>
+    </div>
+  );
   if (!review) {
     return (
       <div className="p-6">
