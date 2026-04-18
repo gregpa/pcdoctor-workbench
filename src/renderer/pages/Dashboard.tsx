@@ -13,6 +13,7 @@ import { AlertCard } from '@renderer/components/dashboard/AlertCard.js';
 import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
 import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
+import { AuthEventsWidget } from '@renderer/components/dashboard/AuthEventsWidget.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
 import { CleanMyPC } from '@renderer/components/dashboard/CleanMyPC.js';
 import { ACTIONS } from '@shared/actions.js';
@@ -189,6 +190,10 @@ export function Dashboard() {
             <div className="text-xs text-text-secondary">Loading security posture…</div>
           )}
         </div>
+      </div>
+
+      <div className="mt-3">
+        <AuthEventsWidget />
       </div>
 
       {selectedService && (
