@@ -9,6 +9,7 @@ import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
 import { startClaudeBridgeWatcher } from './claudeBridgeWatcher.js';
+import { flushBufferedNotifications, getDigestHour } from './notifier.js';
 
 // Hide dock icon / single-instance check
 const gotLock = app.requestSingleInstanceLock();
@@ -160,6 +161,20 @@ app.whenReady().then(() => {
       return;
     }
   });
+
+  // Morning digest flush timer — runs every minute, triggers when hour matches digest_hour
+  let lastFlushHour = -1;
+  setInterval(async () => {
+    const now = new Date();
+    const hour = now.getHours();
+    const digestHour = getDigestHour();
+    if (hour === digestHour && lastFlushHour !== hour) {
+      lastFlushHour = hour;
+      try { await flushBufferedNotifications(); } catch {}
+    }
+    // Reset at next day
+    if (hour !== digestHour) lastFlushHour = -1;
+  }, 60_000);
 });
 
 app.on('window-all-closed', () => {

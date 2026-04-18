@@ -44,6 +44,9 @@ const api = {
   setScheduledTaskEnabled: (name: string, enabled: boolean): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setScheduledTaskEnabled', name, enabled),
   runScheduledTaskNow: (name: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:runScheduledTaskNow', name),
   exportDiagnosticBundle: (): Promise<IpcResult<{ path: string; size_kb: number }>> => ipcRenderer.invoke('api:exportDiagnosticBundle'),
+  flushBufferedNotifications: (): Promise<IpcResult<{ sent: number }>> => ipcRenderer.invoke('api:flushBufferedNotifications'),
+  sendWeeklyDigestEmail: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendWeeklyDigestEmail'),
+  getRecentAuthEvents: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getRecentAuthEvents'),
 };
 
 contextBridge.exposeInMainWorld('api', api);

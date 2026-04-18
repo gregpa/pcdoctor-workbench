@@ -19,6 +19,8 @@ import { PCDOCTOR_ROOT } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
 import { launchClaudeInTerminal, launchClaudeWithContext, resolveClaudePath } from './claudeBridge.js';
 import { testTelegramConnection, sendTelegramMessage } from './telegramBridge.js';
+import { flushBufferedNotifications } from './notifier.js';
+import { sendWeeklyDigestEmail } from './emailDigest.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
@@ -491,6 +493,30 @@ export function registerIpcHandlers() {
       zip.writeZip(outPath);
       const s = await stat(outPath);
       return { ok: true, data: { path: outPath, size_kb: Math.round(s.size / 1024) } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:flushBufferedNotifications', async (): Promise<IpcResult<{ sent: number }>> => {
+    try {
+      const r = await flushBufferedNotifications();
+      return { ok: true, data: r };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:sendWeeklyDigestEmail', async (): Promise<IpcResult<{}>> => {
+    const r = await sendWeeklyDigestEmail();
+    if (r.ok) return { ok: true, data: {} };
+    return { ok: false, error: { code: 'E_EMAIL_DIGEST', message: r.error ?? 'send failed' } };
+  });
+
+  ipcMain.handle('api:getRecentAuthEvents', async (): Promise<IpcResult<any[]>> => {
+    try {
+      const r = await runPowerShellScript<any>('security/Get-RecentAuthEvents.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      return { ok: true, data: r.events ?? [] };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
