@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { LATEST_JSON_PATH } from './constants.js';
 import { recordStatusSnapshot } from './dataStore.js';
+import { emitNewFindingNotifications } from './notifier.js';
 import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
 
 export class PCDoctorBridgeError extends Error {
@@ -44,6 +45,8 @@ export async function getStatus(): Promise<SystemStatus> {
       event_errors_application: m?.event_errors_7d?.application_count,
     });
   } catch {}
+  // Fire notifications for any new critical/warning findings (non-blocking)
+  try { emitNewFindingNotifications(status.findings).catch(() => {}); } catch {}
   return status;
 }
 
