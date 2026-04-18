@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import { DEFAULT_NOTIFICATION_EVENTS } from '@shared/types.js';
+import type { ScheduledTaskInfo } from '@shared/types.js';
 
 const EVENT_LABELS: Record<string, string> = {
   critical_finding: 'Critical finding detected',
@@ -19,6 +20,7 @@ export function Settings() {
   const [toast, setToast] = useState<string | null>(null);
   const [tgToken, setTgToken] = useState('');
   const [tgChat, setTgChat] = useState('');
+  const [tasks, setTasks] = useState<ScheduledTaskInfo[] | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -31,6 +33,27 @@ export function Settings() {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      const r = await api.listScheduledTasks();
+      if (r.ok) setTasks(r.data);
+    })();
+  }, []);
+
+  async function toggleTaskEnabled(name: string, enabled: boolean) {
+    const r = await api.setScheduledTaskEnabled(name, enabled);
+    if (r.ok) {
+      const fresh = await api.listScheduledTasks();
+      if (fresh.ok) setTasks(fresh.data);
+    } else showToast(`Failed: ${r.error.message}`);
+  }
+
+  async function runTaskNow(name: string) {
+    const r = await api.runScheduledTaskNow(name);
+    if (r.ok) showToast(`Task ${name} triggered`);
+    else showToast(`Failed: ${r.error.message}`);
+  }
 
   function showToast(msg: string) {
     setToast(msg);
@@ -174,6 +197,51 @@ export function Settings() {
           <input type="number" min={0} max={23} value={settings.quiet_hours_end ?? '7'} onChange={(e) => saveSetting('quiet_hours_end', e.target.value)} className="w-16 px-2 py-1 rounded-md bg-surface-900 border border-surface-600" />
           <span className="text-text-secondary">(24h clock)</span>
         </div>
+      </section>
+
+      {/* Scheduled tasks */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">⏱ Scheduled Tasks</h2>
+        {!tasks ? (
+          <div className="text-xs text-text-secondary">Loading tasks…</div>
+        ) : (
+          <div className="space-y-1.5">
+            {tasks.map(t => (
+              <div key={t.name} className="flex items-center gap-3 bg-surface-900 border border-surface-700 rounded-md p-2 text-xs">
+                <div className="flex-1">
+                  <div className="font-semibold">{t.name}</div>
+                  <div className="text-[10px] text-text-secondary">
+                    Status: {t.status}
+                    {t.next_run && ` · Next: ${t.next_run}`}
+                    {t.last_run && ` · Last: ${t.last_run}`}
+                  </div>
+                </div>
+                <button onClick={() => runTaskNow(t.name)} className="px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40">Run now</button>
+                <button onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')} className="px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40">
+                  {t.status === 'Disabled' ? 'Enable' : 'Disable'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Diagnostic bundle */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">📦 Diagnostic Bundle</h2>
+        <p className="text-xs text-text-secondary mb-3">
+          Export a zip of current settings (tokens redacted), last diagnostic report, recent weekly reviews, logs, and action history. Useful for bug reports.
+        </p>
+        <button
+          onClick={async () => {
+            const r = await api.exportDiagnosticBundle();
+            if (r.ok) showToast(`✓ Bundle at ${r.data.path} (${r.data.size_kb} KB)`);
+            else showToast(`Export failed: ${r.error.message}`);
+          }}
+          className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold"
+        >
+          Export Diagnostic Bundle
+        </button>
       </section>
 
       {/* About */}

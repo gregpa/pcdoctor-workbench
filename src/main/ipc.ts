@@ -1,7 +1,9 @@
 import { ipcMain, safeStorage } from 'electron';
-import { readFile, readdir, unlink, copyFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, unlink, copyFile, mkdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import AdmZip from 'adm-zip';
+import { spawnSync } from 'node:child_process';
 import { getStatus, PCDoctorBridgeError, setCachedSmart } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
@@ -20,7 +22,7 @@ import { testTelegramConnection, sendTelegramMessage } from './telegramBridge.js
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
-  SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus,
+  SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus, ScheduledTaskInfo,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -38,7 +40,7 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:runAction', async (_evt, req: RunActionRequest): Promise<IpcResult<ActionResult>> => {
     try {
-      const result = await runAction({ name: req.name, params: req.params });
+      const result = await runAction({ name: req.name, params: req.params, dry_run: req.dry_run });
       return { ok: true, data: result };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Action failed' } };
@@ -367,5 +369,130 @@ export function registerIpcHandlers() {
     const r = await sendTelegramMessage('🧪 <b>Test notification from PCDoctor Workbench</b>\n\nThis is a manual test — ignore.');
     if (r.ok) return { ok: true, data: {} };
     return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
+  });
+
+  ipcMain.handle('api:listScheduledTasks', async (): Promise<IpcResult<ScheduledTaskInfo[]>> => {
+    try {
+      const tasks = ['PCDoctor-Workbench-Autostart','PCDoctor-Daily-Quick','PCDoctor-Weekly','PCDoctor-Weekly-Review','PCDoctor-Forecast','PCDoctor-Security-Daily','PCDoctor-Security-Weekly','PCDoctor-Prune-Rollbacks','PCDoctor-Monthly-Deep'];
+      const result: ScheduledTaskInfo[] = [];
+      for (const name of tasks) {
+        const r = spawnSync('schtasks.exe', ['/Query', '/TN', name, '/FO', 'CSV', '/V'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+        if (r.status !== 0) { result.push({ name, status: 'Not registered', next_run: null, last_run: null, last_result: null }); continue; }
+        const lines = (r.stdout ?? '').split(/\r?\n/).filter(Boolean);
+        if (lines.length < 2) { result.push({ name, status: 'Unknown', next_run: null, last_run: null, last_result: null }); continue; }
+        const headers = lines[0].replace(/^"|"$/g, '').split('","');
+        const values = lines[1].replace(/^"|"$/g, '').split('","');
+        const map: Record<string, string> = {};
+        for (let i = 0; i < headers.length; i++) map[headers[i]] = values[i] ?? '';
+        result.push({
+          name,
+          status: map['Status'] ?? map['Scheduled Task State'] ?? 'Unknown',
+          next_run: map['Next Run Time'] ?? null,
+          last_run: map['Last Run Time'] ?? null,
+          last_result: map['Last Result'] ?? null,
+        });
+      }
+      return { ok: true, data: result };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:setScheduledTaskEnabled', async (_evt, name: string, enabled: boolean): Promise<IpcResult<{}>> => {
+    try {
+      const r = spawnSync('schtasks.exe', ['/Change', '/TN', name, enabled ? '/ENABLE' : '/DISABLE'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      if (r.status !== 0) return { ok: false, error: { code: 'E_SCHTASKS', message: r.stderr || 'schtasks failed' } };
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<{}>> => {
+    try {
+      const r = spawnSync('schtasks.exe', ['/Run', '/TN', name], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      if (r.status !== 0) return { ok: false, error: { code: 'E_SCHTASKS', message: r.stderr || 'schtasks failed' } };
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:exportDiagnosticBundle', async (): Promise<IpcResult<{ path: string; size_kb: number }>> => {
+    try {
+      const outDir = path.join(process.env.APPDATA ?? '', 'PCDoctor');
+      if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const outPath = path.join(outDir, `pcdoctor-diag-${ts}.zip`);
+
+      const zip = new AdmZip();
+      const addIfExists = (p: string, zipPath: string) => {
+        if (existsSync(p)) {
+          try {
+            // AdmZip.addLocalFile(localPath, zipPath, zipName): use parent dir in zipPath
+            const parts = zipPath.split('/');
+            const filename = parts.pop()!;
+            const zipDir = parts.join('/');
+            zip.addLocalFile(p, zipDir, filename);
+          } catch {}
+        }
+      };
+
+      // 1. Settings (redact token)
+      try {
+        const settingsRow = (await import('./dataStore.js')).getAllSettings();
+        delete settingsRow.telegram_bot_token;
+        zip.addFile('settings.json', Buffer.from(JSON.stringify(settingsRow, null, 2), 'utf8'));
+      } catch {}
+
+      // 2. Version info
+      const pkgPath = path.join(process.resourcesPath, 'app.asar', 'package.json');
+      const fallbackPkg = path.join(process.cwd(), 'package.json');
+      let version = 'unknown';
+      try {
+        const raw = existsSync(pkgPath) ? await readFile(pkgPath, 'utf8') : await readFile(fallbackPkg, 'utf8');
+        version = JSON.parse(raw).version ?? 'unknown';
+      } catch {}
+      zip.addFile('version.txt', Buffer.from(`PCDoctor Workbench ${version}\nNode ${process.versions.node}\nElectron ${process.versions.electron}\nChrome ${process.versions.chrome}\n`, 'utf8'));
+
+      // 3. Latest report
+      addIfExists('C:\\ProgramData\\PCDoctor\\reports\\latest.json', 'reports/latest.json');
+      addIfExists('C:\\ProgramData\\PCDoctor\\reports\\latest.md', 'reports/latest.md');
+
+      // 4. Recent weekly reviews
+      try {
+        const weeklyReportsDir = 'C:\\ProgramData\\PCDoctor\\reports\\weekly';
+        if (existsSync(weeklyReportsDir)) {
+          const files = (await readdir(weeklyReportsDir)).filter(f => f.endsWith('.md')).slice(-4);
+          for (const f of files) {
+            addIfExists(path.join(weeklyReportsDir, f), `reports/weekly/${f}`);
+          }
+        }
+      } catch {}
+
+      // 5. Recent logs
+      try {
+        const logDir = path.join(process.env.APPDATA ?? '', 'PCDoctor', 'logs');
+        if (existsSync(logDir)) {
+          const files = await readdir(logDir);
+          for (const f of files.slice(-7)) {
+            addIfExists(path.join(logDir, f), `logs/${f}`);
+          }
+        }
+      } catch {}
+
+      // 6. Action history JSON
+      try {
+        const { listActionLog } = await import('./dataStore.js');
+        const logs = listActionLog(500);
+        zip.addFile('audit/actions_log.json', Buffer.from(JSON.stringify(logs, null, 2), 'utf8'));
+      } catch {}
+
+      zip.writeZip(outPath);
+      const s = await stat(outPath);
+      return { ok: true, data: { path: outPath, size_kb: Math.round(s.size / 1024) } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
   });
 }
