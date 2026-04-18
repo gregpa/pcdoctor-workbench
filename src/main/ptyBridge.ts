@@ -15,7 +15,9 @@ async function ensurePtyLoaded(): Promise<boolean> {
   if (ptyAvailable) return true;
   if (ptyModule === null && ptyLoadError === null) {
     try {
-      ptyModule = await import('node-pty');
+      // Use variable to defeat TS module resolution — node-pty is optional.
+      const mod = 'node-pty';
+      ptyModule = await import(/* @vite-ignore */ mod);
       ptyAvailable = true;
       return true;
     } catch (e: any) {
