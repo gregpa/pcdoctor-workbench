@@ -1,5 +1,6 @@
 import { queryMetricTrend, saveForecasts, MetricPoint } from './dataStore.js';
 import type { ForecastData, ForecastProjection } from '@shared/types.js';
+import { notify } from './notifier.js';
 
 interface MetricConfig {
   category: string;
@@ -189,5 +190,20 @@ export function generateForecasts(): ForecastData {
   };
 
   saveForecasts(data);
+
+  // Fire trigger-based notifications for critical projections
+  (async () => {
+    for (const p of projections) {
+      if (p.severity === 'critical' && p.days_until_critical !== null && p.days_until_critical < 7) {
+        await notify({
+          severity: 'critical',
+          title: `Forecast: ${p.metric_label} critical soon`,
+          body: `${p.metric_label} projected to hit threshold in ${Math.round(p.days_until_critical)} days (current: ${Math.round(p.current_value * 10) / 10}, critical: ${p.threshold_critical}).`,
+          eventKey: 'forecast_critical',
+        }).catch(() => {});
+      }
+    }
+  })();
+
   return data;
 }
