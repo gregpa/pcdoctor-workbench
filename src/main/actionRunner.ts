@@ -3,6 +3,7 @@ import type { ActionName, ActionResult } from '@shared/types.js';
 import { runPowerShellScript, PCDoctorScriptError } from './scriptRunner.js';
 import { startActionLog, finishActionLog } from './dataStore.js';
 import { prepareRollback } from './rollbackManager.js';
+import { notify } from './notifier.js';
 
 export interface RunActionInput {
   name: ActionName;
@@ -66,6 +67,15 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     const result = await runPowerShellScript<Record<string, unknown>>(def.ps_script, scriptArgs);
     const duration = Date.now() - start;
     finishActionLog(logId, { status: 'success', duration_ms: duration, result });
+    // Fire success notification (user-triggered only; telegram/scheduled get silent logs)
+    if ((input.triggered_by ?? 'user') === 'user') {
+      notify({
+        severity: 'info',
+        title: `✓ ${def.label}`,
+        body: (result as any)?.message ?? 'Completed',
+        eventKey: 'action_succeeded',
+      }).catch(() => {});
+    }
     return { action: input.name, success: true, duration_ms: duration, result };
   } catch (e) {
     const duration = Date.now() - start;
@@ -73,6 +83,12 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     finishActionLog(logId, {
       status: 'error', duration_ms: duration, error_message: err.message,
     });
+    notify({
+      severity: 'warning',
+      title: `✗ ${def.label} failed`,
+      body: err.message ?? 'Action failed',
+      eventKey: 'action_failed',
+    }).catch(() => {});
     return {
       action: input.name, success: false, duration_ms: duration,
       error: { code: err.code ?? 'E_ACTION_FAILED', message: err.message, details: err.details },
