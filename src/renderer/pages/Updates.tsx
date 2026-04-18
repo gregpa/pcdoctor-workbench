@@ -20,6 +20,8 @@ interface WUDetail {
   pending: PendingUpdate[];
   pending_count: number;
   installed_last_50: Array<{ title: string; date: string }>;
+  stuck: boolean;
+  stuck_signals: Array<{ kind: string; value: string; severity: string }>;
 }
 
 export function Updates() {
@@ -29,6 +31,8 @@ export function Updates() {
   const { run, running } = useAction();
   const confirm = useConfirm();
   const [toast, setToast] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<any>(null);
+  const [nvInfo, setNvInfo] = useState<any>(null);
 
   const load = async () => {
     setLoading(true);
@@ -53,6 +57,20 @@ export function Updates() {
     setToast(`${def.label} completed`);
     setTimeout(() => setToast(null), 6000);
     await load();
+  }
+
+  async function checkReadiness() {
+    setToast('Checking upgrade readiness…');
+    const r = await api.getFeatureUpgradeReadiness();
+    if (r.ok) { setReadiness(r.data); setToast(null); }
+    else { setToast(`Readiness check failed: ${r.error.message}`); setTimeout(() => setToast(null), 4000); }
+  }
+
+  async function checkNvidia() {
+    setToast('Checking Nvidia driver feed…');
+    const r = await api.getNvidiaDriverLatest();
+    if (r.ok) { setNvInfo(r.data); setToast(null); }
+    else { setToast(`Nvidia check failed: ${r.error.message}`); setTimeout(() => setToast(null), 4000); }
   }
 
   if (loading) return (
@@ -84,6 +102,28 @@ export function Updates() {
           </button>
         </div>
       </div>
+
+      {data.stuck && data.stuck_signals.length > 0 && (
+        <div className="mb-4 p-3 bg-status-crit/10 border border-status-crit/40 rounded-lg">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="font-bold text-sm text-status-crit flex items-center gap-2">
+                <span>⚠</span><span>Windows Update Appears Stuck</span>
+              </div>
+              <ul className="text-[11px] text-text-secondary mt-1 list-disc pl-4">
+                {data.stuck_signals.map((s, i) => <li key={i}>{s.value}</li>)}
+              </ul>
+            </div>
+            <button
+              onClick={() => install('repair_windows_update')}
+              disabled={running !== null}
+              className="px-3 py-1.5 rounded-md text-xs bg-status-crit text-white font-bold disabled:opacity-50 whitespace-nowrap"
+            >
+              🔧 Repair Windows Update
+            </button>
+          </div>
+        </div>
+      )}
 
       {data.pending_count > 0 && (
         <div className="mb-4 p-3 bg-surface-800 border border-surface-600 rounded-lg flex items-center gap-3">
@@ -135,6 +175,56 @@ export function Updates() {
               </div>
             ))
           )}
+        </div>
+      </section>
+
+      <section className="mt-6">
+        <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Feature Upgrade Readiness</h2>
+        <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
+          {!readiness ? (
+            <button onClick={checkReadiness} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">
+              Check Readiness
+            </button>
+          ) : (
+            <div>
+              <div className={`text-sm font-bold mb-2 ${readiness.ready ? 'text-status-good' : 'text-status-warn'}`}>
+                {readiness.ready ? '✓ Ready for feature upgrade' : `⚠ ${readiness.blockers.length} blocker(s)`}
+              </div>
+              <div className="space-y-1">
+                {readiness.checks.map((c: any, i: number) => (
+                  <div key={i} className="flex justify-between text-xs">
+                    <span>{c.ok ? '✓' : '✗'} {c.name.replace(/_/g, ' ')}</span>
+                    <span className={c.ok ? 'text-text-secondary' : 'text-status-warn'}>{c.value}</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={checkReadiness} className="mt-3 px-2.5 py-1 rounded-md text-[11px] bg-surface-700 border border-surface-600">Re-check</button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-6">
+        <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Driver Updates</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
+            <div className="font-semibold text-sm mb-1">🎮 Nvidia</div>
+            {!nvInfo ? (
+              <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Check Latest Version</button>
+            ) : (
+              <div className="text-xs space-y-1">
+                <div>Installed: <code>{nvInfo.installed_version ?? '—'}</code></div>
+                <div>Latest: <code>{nvInfo.latest_version ?? 'unknown'}</code></div>
+                <div className="text-text-secondary text-[10px] mt-2">{nvInfo.message}</div>
+                <button onClick={checkNvidia} className="mt-2 px-2.5 py-1 rounded-md text-[11px] bg-surface-700 border border-surface-600">Re-check</button>
+              </div>
+            )}
+          </div>
+          <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
+            <div className="font-semibold text-sm mb-1">💻 Dell Command Update</div>
+            <p className="text-[11px] text-text-secondary mb-2">Alienware-specific updates (BIOS, chipset, GPU). Requires the Dell Command | Update app.</p>
+            <button onClick={() => install('run_dell_command_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50">Run Dell Scan + Apply</button>
+          </div>
         </div>
       </section>
 
