@@ -31,7 +31,7 @@ export default defineConfig({
               fileName: () => '[name].cjs',
             },
             rollupOptions: {
-              external: ['better-sqlite3', 'electron'],
+              external: ['better-sqlite3', 'electron', 'node-pty'],
               output: {
                 entryFileNames: '[name].cjs',
                 chunkFileNames: '[name].cjs',
