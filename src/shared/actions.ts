@@ -300,6 +300,24 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     estimated_duration_s: 60, category: 'update', icon: '🔧',
     tooltip: 'Stops WU services, renames SoftwareDistribution + catroot2, resets WinHTTP proxy, restarts services. Fixes stuck update issues.',
   },
+  hide_kb: {
+    name: 'hide_kb', label: 'Hide KB',
+    ps_script: 'actions/Hide-KB.ps1',
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 10,
+    category: 'update', icon: '🚫',
+    tooltip: 'Hides a specific Windows Update from future offerings. Provide KB ID (e.g., KB5036893).',
+    params_schema: { kb_id: { type: 'string', required: true, description: 'Update KB identifier' } },
+  },
+  install_kb: {
+    name: 'install_kb', label: 'Install KB',
+    ps_script: 'actions/Install-KB.ps1',
+    confirm_level: 'destructive', rollback_tier: 'A',
+    restore_point_description: 'PCDoctor: Install KB',
+    estimated_duration_s: 600,
+    category: 'update', icon: '📥',
+    tooltip: 'Installs a specific Windows Update by KB ID. Creates a restore point first.',
+    params_schema: { kb_id: { type: 'string', required: true, description: 'Update KB identifier' } },
+  },
 
   // ============== INTERNAL ==============
   create_restore_point: {

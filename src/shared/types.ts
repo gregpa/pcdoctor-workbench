@@ -112,6 +112,7 @@ export type ActionName =
   | 'defender_quick_scan' | 'defender_full_scan' | 'update_defender_defs'
   // Windows Update
   | 'install_windows_updates' | 'install_security_updates' | 'repair_windows_update'
+  | 'hide_kb' | 'install_kb'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
