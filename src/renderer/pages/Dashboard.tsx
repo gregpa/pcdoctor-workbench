@@ -12,6 +12,7 @@ import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
 import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
+import { CleanMyPC } from '@renderer/components/dashboard/CleanMyPC.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, ServiceHealth } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
@@ -100,6 +101,10 @@ export function Dashboard() {
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering trend data…</div>
         )}
+      </div>
+
+      <div className="mb-3">
+        <CleanMyPC status={status} />
       </div>
 
       {/* Services + Actions + Alerts row */}
