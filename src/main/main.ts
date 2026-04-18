@@ -4,6 +4,10 @@ import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
 import { getStatus } from './pcdoctorBridge.js';
 import { POLL_INTERVAL_MS } from './constants.js';
+import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMessageText } from './telegramBridge.js';
+import { runAction } from './actionRunner.js';
+import { ACTIONS } from '@shared/actions.js';
+import type { ActionName } from '@shared/types.js';
 
 // Hide dock icon / single-instance check
 const gotLock = app.requestSingleInstanceLock();
@@ -63,12 +67,53 @@ app.whenReady().then(() => {
     onQuit: () => {
       (app as any).isQuitting = true;
       if (pollTimer) clearInterval(pollTimer);
+      stopTelegramPolling();
       app.quit();
     },
   });
 
   backgroundPoll();
   pollTimer = setInterval(backgroundPoll, POLL_INTERVAL_MS);
+
+  // Start Telegram callback polling
+  startTelegramPolling(async (q) => {
+    if (!q.data) { await answerCallbackQuery(q.id, 'Invalid request'); return; }
+    const parts = q.data.split('|');
+    const kind = parts[0];
+
+    if (kind === 'dismiss') {
+      await answerCallbackQuery(q.id, '✓ Dismissed');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id, '✖ <i>Dismissed from Telegram</i>');
+      }
+      return;
+    }
+
+    if (kind === 'act') {
+      const actionName = parts[1] as ActionName;
+      const def = ACTIONS[actionName];
+      if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
+      // Telegram actions are blocked for Tier A destructive by default — confirm-on-phone path
+      if (def.confirm_level === 'destructive') {
+        await answerCallbackQuery(q.id, '⚠ Destructive action — use the dashboard to confirm');
+        return;
+      }
+      await answerCallbackQuery(q.id, `Running ${def.label}…`);
+      try {
+        const result = await runAction({ name: actionName, triggered_by: 'telegram' });
+        const msg = result.success
+          ? `✓ <b>${def.label}</b> completed in ${result.duration_ms}ms`
+          : `✗ <b>${def.label}</b> failed: ${result.error?.message ?? 'unknown'}`;
+        if (q.message) {
+          await editMessageText(q.message.chat.id, q.message.message_id, msg);
+        }
+      } catch (e: any) {
+        if (q.message) {
+          await editMessageText(q.message.chat.id, q.message.message_id, `✗ Error: ${e?.message ?? 'unknown'}`);
+        }
+      }
+    }
+  });
 });
 
 app.on('window-all-closed', () => {

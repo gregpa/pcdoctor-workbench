@@ -1,14 +1,17 @@
 import { Notification } from 'electron';
 import { createHash } from 'node:crypto';
-import { sendTelegramMessage } from './telegramBridge.js';
+import { sendTelegramMessage, makeCallbackData, InlineButton } from './telegramBridge.js';
 import { getSetting, hasSeenFinding, markFindingSeen } from './dataStore.js';
-import type { Finding } from '@shared/types.js';
+import type { Finding, ActionName } from '@shared/types.js';
+import { ACTIONS } from '@shared/actions.js';
 
 interface NotifyOptions {
   severity: 'critical' | 'warning' | 'info';
   title: string;
   body: string;
-  eventKey: string;        // e.g., 'critical_finding', 'weekly_review_ready'
+  eventKey: string;
+  suggested_action?: ActionName;
+  finding_hash?: string;
 }
 
 function isQuietHours(): boolean {
@@ -17,7 +20,7 @@ function isQuietHours(): boolean {
   const now = new Date().getHours();
   if (start === end) return false;
   if (start < end) return now >= start && now < end;
-  return now >= start || now < end;   // crosses midnight
+  return now >= start || now < end;
 }
 
 function toastEnabled(eventKey: string, severity: string): boolean {
@@ -54,7 +57,17 @@ export async function notify(opts: NotifyOptions): Promise<void> {
   if (allowTelegram && (!quiet || bypassQuiet)) {
     const sev = opts.severity === 'critical' ? '🔴' : opts.severity === 'warning' ? '⚠️' : 'ℹ️';
     const text = `${sev} <b>${escape(opts.title)}</b>\n\n${escape(opts.body)}\n\n<i>PCDoctor · ${new Date().toLocaleString()}</i>`;
-    await sendTelegramMessage(text);
+
+    const buttons: InlineButton[][] = [];
+    if (opts.suggested_action && opts.finding_hash && ACTIONS[opts.suggested_action]) {
+      const actDef = ACTIONS[opts.suggested_action];
+      buttons.push([
+        { text: `${actDef.icon} ${actDef.label}`, callback_data: makeCallbackData('act', opts.suggested_action, opts.finding_hash) },
+        { text: '✖ Dismiss', callback_data: makeCallbackData('dismiss', opts.finding_hash) },
+      ]);
+    }
+
+    await sendTelegramMessage(text, buttons.length > 0 ? buttons : undefined);
   }
 }
 
@@ -66,8 +79,6 @@ function hashFinding(f: Finding): string {
   return createHash('sha256').update(`${f.severity}|${f.area}|${f.message}`).digest('hex').slice(0, 16);
 }
 
-/** Given the new findings array from latest.json, emit notifications for any finding
- *  we haven't already notified about. */
 export async function emitNewFindingNotifications(findings: Finding[]): Promise<void> {
   for (const f of findings) {
     if (f.severity !== 'critical' && f.severity !== 'warning') continue;
@@ -80,6 +91,8 @@ export async function emitNewFindingNotifications(findings: Finding[]): Promise<
       title: `${f.severity === 'critical' ? 'Critical' : 'Warning'}: ${f.area}`,
       body: f.message,
       eventKey,
+      suggested_action: f.suggested_action,
+      finding_hash: h,
     });
   }
 }
