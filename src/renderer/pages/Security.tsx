@@ -176,6 +176,16 @@ export function Security() {
                       <button onClick={() => approve(p.identifier, false)} className="px-2 py-0.5 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-crit/40">Reject</button>
                     </>
                   )}
+                  <button
+                    onClick={async () => {
+                      const ctx = `Investigate this persistence item:\n- Kind: ${p.kind}\n- Name: ${p.name}\n- Path: ${p.path ?? 'unknown'}\n- Publisher: ${p.publisher ?? 'unknown'}\n- First seen: ${new Date(p.first_seen).toLocaleString()}\n- Signed: ${p.signed ?? 'unknown'}\n\nIs this legitimate? Should it be removed?`;
+                      await (window as any).api.investigateWithClaude(ctx);
+                    }}
+                    className="px-2 py-0.5 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-info/40"
+                    title="Investigate in Claude"
+                  >
+                    🤖
+                  </button>
                   {p.approved === 1 && <span className="text-[10px] text-status-good">✓ Approved</span>}
                 </div>
               ))}

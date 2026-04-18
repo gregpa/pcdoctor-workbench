@@ -46,14 +46,26 @@ export function AlertCard({ finding, onApply }: AlertCardProps) {
         )}
       </div>
       {actionDef && (
-        <button
-          onClick={handleClick}
-          disabled={busy}
-          className="px-2.5 py-1.5 rounded-md bg-status-warn text-black text-[11px] font-bold shrink-0 disabled:opacity-50 flex items-center gap-1.5"
-          title={actionDef.tooltip}
-        >
-          {busy ? (<><LoadingSpinner size={10} /> <span>Running</span></>) : (<><span>{actionDef.icon}</span><span>Fix</span></>)}
-        </button>
+        <div className="flex gap-1 shrink-0">
+          <button
+            onClick={handleClick}
+            disabled={busy}
+            className="px-2.5 py-1.5 rounded-md bg-status-warn text-black text-[11px] font-bold disabled:opacity-50 flex items-center gap-1.5"
+            title={actionDef.tooltip}
+          >
+            {busy ? (<><LoadingSpinner size={10} /> <span>Running</span></>) : (<><span>{actionDef.icon}</span><span>Fix</span></>)}
+          </button>
+          <button
+            onClick={async () => {
+              const ctx = `Investigate this alert:\n- Area: ${finding.area}\n- Severity: ${finding.severity}\n- Message: ${finding.message}\n- Auto-fixed: ${finding.auto_fixed}\n\nExplain the root cause, describe what the "${actionDef.label}" action would do, and recommend whether to run it.`;
+              await (window as any).api.investigateWithClaude(ctx);
+            }}
+            className="px-2 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] hover:border-status-info/40"
+            title="Investigate this in Claude"
+          >
+            🤖
+          </button>
+        </div>
       )}
     </div>
   );

@@ -74,9 +74,20 @@ export function History() {
                     >
                       Revert
                     </button>
+                  ) : e.status === 'error' ? (
+                    <button
+                      onClick={async () => {
+                        const ctx = `This action failed. Help me understand why and suggest a fix:\n- Action: ${e.action_label}\n- Status: ${e.status}\n- Error: ${e.error_message ?? 'unknown'}\n- Duration: ${e.duration_ms}ms\n- Triggered by: ${e.triggered_by}`;
+                        await (window as any).api.investigateWithClaude(ctx);
+                      }}
+                      className="px-2 py-1 rounded bg-surface-700 border border-surface-600 hover:border-status-info/40 text-[10px]"
+                      title="Investigate failure in Claude"
+                    >
+                      🤖 Investigate
+                    </button>
                   ) : (
                     <span className="w-[56px] text-right text-[10px] text-text-secondary/60">
-                      {e.reverted_at ? 'reverted' : e.status === 'error' ? '—' : 'no rollback'}
+                      {e.reverted_at ? 'reverted' : 'no rollback'}
                     </span>
                   )}
                 </div>
