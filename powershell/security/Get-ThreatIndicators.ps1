@@ -128,13 +128,25 @@ try {
         $_.Message -match 'Logon Type:\s*(10|3)\s'
     }
     if ($rdpFails.Count -gt 10) {
+        # Group by source IP
+        $ipCounts = @{}
+        foreach ($f in $rdpFails) {
+            if ($f.Message -match 'Source Network Address:\s*([0-9\.]+)') {
+                $ipX = $Matches[1]
+                if ($ipX -ne '-' -and $ipX -ne '127.0.0.1') {
+                    if ($ipCounts.ContainsKey($ipX)) { $ipCounts[$ipX]++ } else { $ipCounts[$ipX] = 1 }
+                }
+            }
+        }
+        $topIps = $ipCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 3
         $indicators += @{
             id = [guid]::NewGuid().ToString()
             severity = 'high'
             category = 'rdp_bruteforce'
             detected_at = $now
-            message = "$($rdpFails.Count) failed remote-logon attempts in last 24h"
-            detail = @{ count = $rdpFails.Count }
+            message = "$($rdpFails.Count) failed remote-logon attempts in last 24h; top offenders: $($topIps.Key -join ', ')"
+            detail = @{ count = $rdpFails.Count; top_ips = @($topIps | ForEach-Object { @{ ip = $_.Key; count = $_.Value } }) }
+            auto_block_candidates = @($topIps | Where-Object { $_.Value -ge 10 } | ForEach-Object { $_.Key })
         }
     }
 } catch {}
