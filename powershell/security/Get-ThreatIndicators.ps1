@@ -9,8 +9,23 @@ $indicators = @()
 # 1. Sustained high-CPU unknown process
 try {
     $topCpu = Get-Process | Sort-Object CPU -Descending | Select-Object -First 5
+    $knownGoodProcesses = @(
+        'svchost','System','MsMpEng','chrome','msedge','claude','Code','Cursor','node','pwsh','powershell',
+        'Discord','Spotify','Teams','explorer','Idle','wininit','services','lsass','fontdrvhost',
+        'csrss','winlogon','dwm','ctfmon','RuntimeBroker','SearchHost','SearchIndexer','SearchApp',
+        'ShellExperienceHost','StartMenuExperienceHost','TextInputHost','ApplicationFrameHost',
+        'iCloudPhotos','iCloudServices','iCloudOutlook','AppleMobileDeviceService','AppleMobileDeviceHelper',
+        'OneDrive','GoogleDriveFS','Dropbox','googledrivesync','vmmemWSL','vmmem','Docker Desktop Backend','docker','dockerd',
+        'AwCC','AlienFX','AWCCSvc','AlienwareCoService',
+        'nvcontainer','nvtelemetryservice','NVDisplay.Container','nvidia_smi','nvtopps',
+        'steam','spotify','brave','firefox','edge','teams','outlook','winword','excel','powerpnt','visio',
+        'backgroundTaskHost','SystemSettings','WindowsTerminal','WidgetService','Widgets',
+        'audiodg','WindowsInternal.ComposableShell.Experiences.TextInput.InputApp',
+        'Procmon64','Procexp64','Autoruns64','dotnet','Registry','Memory Compression'
+    )
+    $pattern = '^(' + ($knownGoodProcesses -join '|') + ')$'
     foreach ($p in $topCpu) {
-        if ($p.CPU -gt 10000 -and $p.ProcessName -notmatch '^(svchost|System|MsMpEng|chrome|msedge|claude|Code|node|pwsh|powershell|cursor|Discord|Spotify|Teams|explorer)$') {
+        if ($p.CPU -gt 20000 -and $p.ProcessName -notmatch $pattern) {
             $indicators += @{
                 id = [guid]::NewGuid().ToString()
                 severity = 'medium'
