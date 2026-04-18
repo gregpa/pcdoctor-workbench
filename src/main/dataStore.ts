@@ -103,6 +103,16 @@ CREATE TABLE IF NOT EXISTS seen_findings (
   last_seen INTEGER NOT NULL,
   notified INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS weekly_review_states (
+  review_date TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  state_changed_at INTEGER NOT NULL,
+  applied_action_id INTEGER,
+  notes TEXT,
+  PRIMARY KEY (review_date, item_id)
+);
 `;
 
 let db: Database.Database | null = null;
@@ -427,6 +437,30 @@ export function getMetricWeekDelta(category: string, metric: string, label?: str
     week_ago: weekRow?.value ?? null,
     now: nowRow?.value ?? null,
   };
+}
+
+// ============== WEEKLY REVIEW STATES ==============
+
+export type ReviewItemState = 'pending' | 'applied' | 'dismissed' | 'snoozed' | 'auto_resolved';
+
+export function setReviewItemState(reviewDate: string, itemId: string, state: ReviewItemState, appliedActionId?: number): void {
+  openDb().prepare(
+    `INSERT INTO weekly_review_states (review_date, item_id, state, state_changed_at, applied_action_id)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(review_date, item_id) DO UPDATE SET
+       state = excluded.state,
+       state_changed_at = excluded.state_changed_at,
+       applied_action_id = excluded.applied_action_id`
+  ).run(reviewDate, itemId, state, Date.now(), appliedActionId ?? null);
+}
+
+export function getReviewItemStates(reviewDate: string): Record<string, { state: ReviewItemState; state_changed_at: number; applied_action_id: number | null }> {
+  const rows = openDb().prepare(
+    `SELECT item_id, state, state_changed_at, applied_action_id FROM weekly_review_states WHERE review_date = ?`
+  ).all(reviewDate) as Array<{ item_id: string; state: ReviewItemState; state_changed_at: number; applied_action_id: number | null }>;
+  const out: Record<string, { state: ReviewItemState; state_changed_at: number; applied_action_id: number | null }> = {};
+  for (const r of rows) out[r.item_id] = { state: r.state, state_changed_at: r.state_changed_at, applied_action_id: r.applied_action_id };
+  return out;
 }
 
 export function closeDb() {
