@@ -3,6 +3,7 @@ import path from 'node:path';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { createRollbackRow, getRollback, markRollbackReverted, pruneExpiredRollbacks } from './dataStore.js';
+import { ACTIONS } from '@shared/actions.js';
 import type { ActionDefinition } from '@shared/actions.js';
 
 const SNAPSHOTS_DIR = path.join(PCDOCTOR_ROOT, 'snapshots');
@@ -146,7 +147,6 @@ export async function revertRollback(rollbackId: number): Promise<RevertOutcome>
     // Validate each source path against the originating action's declared snapshot_paths.
     // This prevents a tampered manifest.json (ProgramData is user-writable on dev systems)
     // from steering cpSync to overwrite arbitrary files.
-    const { ACTIONS } = await import('@shared/actions.js');
     const actionDef = ACTIONS[manifest.action_name as keyof typeof ACTIONS];
     const allowedSources = (actionDef?.snapshot_paths ?? []).map(p => path.normalize(p).toLowerCase());
 
