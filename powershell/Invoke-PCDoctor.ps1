@@ -461,6 +461,17 @@ try {
         Add-Finding warning 'NAS' "NAS drives in Unavailable state (auto-reconnect failed): $($unavailable -join ', '). Try Get-SmbMapping then accessing the drive in Explorer." @{ unavailable = $unavailable }
     }
 
+    # Dedupe mappings by local-letter
+    $seen = @{}
+    $deduped = @()
+    foreach ($m in $nasData.mappings) {
+        $k = $m.local
+        if (-not $seen.ContainsKey($k)) {
+            $seen[$k] = $true
+            $deduped += $m
+        }
+    }
+    $nasData.mappings = $deduped
     $metrics = $report.metrics
     $metrics.nas = $nasData
     # ===== End NAS section =====
