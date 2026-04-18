@@ -172,6 +172,35 @@ export function Tools() {
         </div>
       </div>
 
+      <div className="mb-4 bg-surface-800 border border-surface-600 rounded-lg p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold">📊 Import HWiNFO CSV</div>
+            <div className="text-[10px] text-text-secondary mt-0.5">
+              Parses an overnight sensor log into CPU/GPU temperature trends (min/avg/max).
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const file = prompt('Paste full path to HWiNFO CSV file:', 'C:\\Users\\greg_\\Downloads\\test.CSV');
+              if (!file) return;
+              setToast('Parsing HWiNFO CSV…');
+              const r = await (window as any).api.runAction({ name: 'import_hwinfo_csv', params: { csv_path: file } });
+              if (r.ok && r.data.success) {
+                const findings = r.data.result?.findings;
+                setToast(`Parsed ${r.data.result?.samples ?? 0} samples: ${findings ? Object.keys(findings).length : 0} sensor metrics captured`);
+              } else {
+                setToast(`Import failed: ${r.error?.message ?? r.data?.error?.message ?? 'unknown'}`);
+              }
+              setTimeout(() => setToast(null), 8000);
+            }}
+            className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold"
+          >
+            Import…
+          </button>
+        </div>
+      </div>
+
       {TOOL_CATEGORIES.map(cat => {
         const toolsInCat = Object.values(TOOLS).filter(t => t.category === cat.id);
         if (toolsInCat.length === 0) return null;
