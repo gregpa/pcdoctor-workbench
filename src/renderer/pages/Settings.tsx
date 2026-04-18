@@ -57,7 +57,9 @@ export function Settings() {
       const r = await api.getSettings();
       if (r.ok) {
         setSettings(r.data);
-        setTgToken(r.data.telegram_bot_token ?? '');
+        // Token is masked ('***encrypted***' or 'abcd...wxyz') - don't populate input.
+        // User must retype to change. Use Reveal button to inspect actual token.
+        setTgToken('');
         setTgChat(r.data.telegram_chat_id ?? '');
         setEmailRecipient(r.data.email_digest_recipient ?? '');
         setDigestHour(r.data.digest_hour ?? '8');
@@ -167,6 +169,21 @@ export function Settings() {
             <div className="flex gap-2">
               <button onClick={sendTest} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
                 Send test message
+              </button>
+              <button
+                onClick={async () => {
+                  const r = await (api as any).revealTelegramToken();
+                  if (r?.ok && r.data.token) {
+                    const revealed = `${r.data.token.slice(0, 6)}...${r.data.token.slice(-4)}`;
+                    showToast(`Bot token: ${revealed} (copied to clipboard)`);
+                    try { await navigator.clipboard?.writeText(r.data.token); } catch {}
+                  } else {
+                    showToast(`Reveal failed: ${r?.error?.message ?? 'unknown'}`);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+              >
+                Reveal Token
               </button>
               <button onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-crit/40">
                 Disconnect

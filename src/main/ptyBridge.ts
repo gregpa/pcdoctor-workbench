@@ -9,13 +9,13 @@ let ptyModule: any = null;
 let ptyAvailable = false;
 let ptyLoadError: string | null = null;
 
-// Try to load node-pty — swallow any native-module load error.
+// Try to load node-pty - swallow any native-module load error.
 // This runs once on first IPC call, not at module import time.
 async function ensurePtyLoaded(): Promise<boolean> {
   if (ptyAvailable) return true;
   if (ptyModule === null && ptyLoadError === null) {
     try {
-      // Use variable to defeat TS module resolution — node-pty is optional.
+      // Use variable to defeat TS module resolution - node-pty is optional.
       const mod = 'node-pty';
       ptyModule = await import(/* @vite-ignore */ mod);
       ptyAvailable = true;
@@ -44,7 +44,7 @@ async function buildContextFile(contextText?: string): Promise<string> {
     latest = await readFile(LATEST_JSON_PATH, 'utf8');
     if (latest.charCodeAt(0) === 0xFEFF) latest = latest.slice(1);
   } catch {}
-  const ctx = `# PCDoctor Workbench — Claude session context
+  const ctx = `# PCDoctor Workbench - Claude session context
 
 ${contextText ?? 'General diagnostic session. Use Read / Bash / Grep to investigate system state.'}
 

@@ -34,7 +34,7 @@ export function useTools() {
           if (s?.installed) return { ok: true };
         }
       }
-      return { ok: false, message: 'Installed via winget but detection still failing — click Refresh' };
+      return { ok: false, message: 'Installed via winget but detection still failing - click Refresh' };
     } finally {
       setInstalling(prev => { const next = new Set(prev); next.delete(id); return next; });
     }
@@ -44,7 +44,7 @@ export function useTools() {
     const toInstall = statuses.filter(s => !s.installed);
     const failed: string[] = [];
     let succeeded = 0;
-    // Sequential — winget doesn't handle concurrent installs well
+    // Sequential - winget doesn't handle concurrent installs well
     for (const s of toInstall) {
       const r = await install(s.id);
       if (r.ok) succeeded++;

@@ -8,7 +8,7 @@ export function KpiCard({ kpi }: { kpi: KpiValue }) {
     kpi.delta?.severity === 'good' ? 'text-status-good' :
     'text-text-secondary';
 
-  const arrow = kpi.delta?.direction === 'up' ? '▲' : kpi.delta?.direction === 'down' ? '▼' : '—';
+  const arrow = kpi.delta?.direction === 'up' ? '▲' : kpi.delta?.direction === 'down' ? '▼' : '-';
 
   return (
     <div className={`bg-surface-800 border border-surface-600 rounded-lg p-3 ${severityBorderClass[kpi.severity]}`}>

@@ -37,7 +37,7 @@ export function History() {
     if (!ok) return;
     const r = await revert(id);
     if (r.ok) {
-      setToast(r.data.reboot_required ? `Revert scheduled — reboot required. ${r.data.details}` : `Reverted: ${r.data.details}`);
+      setToast(r.data.reboot_required ? `Revert scheduled - reboot required. ${r.data.details}` : `Reverted: ${r.data.details}`);
     } else {
       setToast(`Revert failed: ${r.error.message}`);
     }
@@ -65,7 +65,7 @@ export function History() {
                   <span className="text-text-secondary w-20">{time}</span>
                   <span className="flex-1 font-semibold">{e.action_label}</span>
                   <span className="text-text-secondary w-16 text-right">
-                    {e.duration_ms != null ? formatDurationMs(e.duration_ms) : '—'}
+                    {e.duration_ms != null ? formatDurationMs(e.duration_ms) : '-'}
                   </span>
                   <span className="text-text-secondary w-16 text-right capitalize">{e.triggered_by}</span>
                   {canRevert ? (
@@ -106,7 +106,7 @@ export function History() {
 
             <div className="text-sm text-text-secondary space-y-1 mb-4">
               <div>Ran: <span className="text-text-primary">{new Date(detailItem.ts).toLocaleString()}</span></div>
-              <div>Duration: <span className="text-text-primary">{detailItem.duration_ms != null ? formatDurationMs(detailItem.duration_ms) : '—'}</span></div>
+              <div>Duration: <span className="text-text-primary">{detailItem.duration_ms != null ? formatDurationMs(detailItem.duration_ms) : '-'}</span></div>
               <div>Triggered by: <span className="text-text-primary capitalize">{detailItem.triggered_by}</span></div>
               <div>Status: <span className={detailItem.status === 'success' ? 'text-status-good' : detailItem.status === 'error' ? 'text-status-crit' : 'text-text-primary'}>{detailItem.status}</span></div>
               {detailItem.rollback_id && <div>Rollback ID: <span className="text-text-primary">{detailItem.rollback_id}</span></div>}

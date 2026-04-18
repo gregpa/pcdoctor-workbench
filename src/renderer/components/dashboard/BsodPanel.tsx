@@ -36,9 +36,9 @@ export function BsodPanel() {
             <div className="text-text-secondary">{result.message}</div>
           ) : (
             <>
-              <div><strong>Bug Check:</strong> {result.bug_check ?? '—'} ({result.bug_check_hex ?? '—'})</div>
-              <div><strong>Faulting Module:</strong> <code>{result.faulting_module ?? '—'}</code></div>
-              <div><strong>Probable Cause:</strong> {result.probable_cause ?? '—'}</div>
+              <div><strong>Bug Check:</strong> {result.bug_check ?? '-'} ({result.bug_check_hex ?? '-'})</div>
+              <div><strong>Faulting Module:</strong> <code>{result.faulting_module ?? '-'}</code></div>
+              <div><strong>Probable Cause:</strong> {result.probable_cause ?? '-'}</div>
               <div className="text-[10px] text-text-secondary mt-2">{result.dump_path}</div>
             </>
           )}

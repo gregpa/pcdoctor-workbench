@@ -25,7 +25,7 @@ $cdbCandidates = @(
 )
 $cdb = $cdbCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $cdb) {
-    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; dump_path=$Dump_Path; message='cdb.exe not found — install Windows Debugging Tools (or WinDbg)' } | ConvertTo-Json -Compress
+    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; dump_path=$Dump_Path; message='cdb.exe not found - install Windows Debugging Tools (or WinDbg)' } | ConvertTo-Json -Compress
     exit 0
 }
 

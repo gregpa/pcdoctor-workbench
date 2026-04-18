@@ -46,8 +46,8 @@ export function updateTraySeverity(severity: Severity) {
   currentSeverity = severity;
   tray.setImage(nativeImage.createFromPath(iconPath(severity)));
   tray.setToolTip(
-    severity === 'crit' ? 'PCDoctor — CRITICAL' :
-    severity === 'warn' ? 'PCDoctor — ATTENTION' :
-    'PCDoctor — OK',
+    severity === 'crit' ? 'PCDoctor - CRITICAL' :
+    severity === 'warn' ? 'PCDoctor - ATTENTION' :
+    'PCDoctor - OK',
   );
 }

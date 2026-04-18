@@ -119,7 +119,7 @@ export function Dashboard() {
           </div>
         ))}
         {cpuTrend ? (
-          <TrendLine title="CPU Load — 7 Day Trend" trend={cpuTrend} severity="info" yDomain={[0, 100]} />
+          <TrendLine title="CPU Load - 7 Day Trend" trend={cpuTrend} severity="info" yDomain={[0, 100]} />
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering trend data…</div>
         )}
@@ -166,7 +166,7 @@ export function Dashboard() {
       <div className="grid grid-cols-3 gap-2.5">
         <SmartTable entries={status.smart ?? []} />
         {eventsTrend ? (
-          <TrendBar title="Event Log Errors — 7 Day" trend={eventsTrend} warnAt={300} critAt={500} />
+          <TrendBar title="Event Log Errors - 7 Day" trend={eventsTrend} warnAt={300} critAt={500} />
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
         )}
@@ -176,14 +176,14 @@ export function Dashboard() {
             <div className="space-y-1.5 text-[11px]">
               <SecRow label="Windows Defender" tone={security.defender?.severity} right={security.defender?.realtime_protection ? `Active · Defs ${security.defender.defs_age_hours}h` : 'Disabled'} />
               <SecRow label="Windows Firewall" tone={security.firewall?.severity} right={security.firewall && security.firewall.domain_enabled && security.firewall.private_enabled && security.firewall.public_enabled ? 'All profiles enabled' : 'Partial'} />
-              <SecRow label="Windows Update" tone={security.windows_update?.severity} right={security.windows_update ? `${security.windows_update.pending_count} pending${security.windows_update.pending_security_count > 0 ? ` (${security.windows_update.pending_security_count} security)` : ''}` : '—'} />
+              <SecRow label="Windows Update" tone={security.windows_update?.severity} right={security.windows_update ? `${security.windows_update.pending_count} pending${security.windows_update.pending_security_count > 0 ? ` (${security.windows_update.pending_security_count} security)` : ''}` : '-'} />
               <SecRow label={`Failed Logins (7d)`} tone={security.failed_logins?.severity} right={`${security.failed_logins?.total_7d ?? 0} events`} />
-              <SecRow label="BitLocker" tone={security.bitlocker.some(b => b.protection_on) ? 'good' : 'warn'} right={security.bitlocker.some(b => b.protection_on) ? `${security.bitlocker.filter(b => b.protection_on).length} protected` : 'Off — drives unencrypted'} />
+              <SecRow label="BitLocker" tone={security.bitlocker.some(b => b.protection_on) ? 'good' : 'warn'} right={security.bitlocker.some(b => b.protection_on) ? `${security.bitlocker.filter(b => b.protection_on).length} protected` : 'Off - drives unencrypted'} />
               <SecRow label="UAC" tone={security.uac?.severity} right={security.uac?.enabled ? (security.uac.level === 'Disabled' ? 'Disabled' : 'Enabled') : 'DISABLED'} />
-              <SecRow label="GPU Driver" tone={security.gpu_driver?.severity} right={security.gpu_driver ? `${security.gpu_driver.gpu_current_version}${security.gpu_driver.age_days !== null ? ` — ${security.gpu_driver.age_days}d old` : ''}` : '—'} />
+              <SecRow label="GPU Driver" tone={security.gpu_driver?.severity} right={security.gpu_driver ? `${security.gpu_driver.gpu_current_version}${security.gpu_driver.age_days !== null ? ` - ${security.gpu_driver.age_days}d old` : ''}` : '-'} />
               {security.persistence_new_count > 0 && (
                 <div className="pt-2 mt-2 border-t border-surface-700 text-[10px] text-status-warn">
-                  ⚠ {security.persistence_new_count} new persistence item{security.persistence_new_count === 1 ? '' : 's'} — review in Security page
+                  ⚠ {security.persistence_new_count} new persistence item{security.persistence_new_count === 1 ? '' : 's'} - review in Security page
                 </div>
               )}
             </div>

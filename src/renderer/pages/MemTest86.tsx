@@ -30,7 +30,7 @@ export function MemTest86() {
       title: '2. Create bootable USB with Rufus',
       body: (
         <div>
-          <p className="mb-2">Insert a USB stick (at least 2 GB — everything on it will be ERASED), then launch Rufus.</p>
+          <p className="mb-2">Insert a USB stick (at least 2 GB - everything on it will be ERASED), then launch Rufus.</p>
           <button onClick={() => launchTool('rufus')} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Launch Rufus</button>
           <div className="mt-3 text-[11px] text-text-secondary space-y-1">
             <div>• Device: Your USB stick</div>
@@ -60,7 +60,7 @@ export function MemTest86() {
         <div>
           <p className="mb-3">After your test run, what happened?</p>
           <div className="flex gap-2">
-            <button onClick={() => { setToast('✓ Recorded: MemTest86 passed (no errors). Saved to logs.'); setTimeout(() => setToast(null), 6000); setStep(0); }} className="px-3 py-1.5 rounded-md text-xs bg-status-good text-black font-bold">No errors — PASSED</button>
+            <button onClick={() => { setToast('✓ Recorded: MemTest86 passed (no errors). Saved to logs.'); setTimeout(() => setToast(null), 6000); setStep(0); }} className="px-3 py-1.5 rounded-md text-xs bg-status-good text-black font-bold">No errors - PASSED</button>
             <button onClick={() => { setToast('⚠ Recorded: MemTest86 found errors. Consider RAM replacement.'); setTimeout(() => setToast(null), 6000); setStep(0); }} className="px-3 py-1.5 rounded-md text-xs bg-status-crit text-white font-bold">Errors found</button>
           </div>
           <p className="mt-3 text-[11px] text-text-secondary">If errors found: take a photo of the screen, note the exact error code + affected address ranges, then reseat each DIMM (remove and reinsert) and retest. If errors persist on a specific slot only, that slot is bad. If errors follow a specific DIMM across slots, that DIMM is bad.</p>

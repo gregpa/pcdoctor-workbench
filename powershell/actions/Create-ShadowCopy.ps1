@@ -13,6 +13,6 @@ $sw.Stop()
     duration_ms = $sw.ElapsedMilliseconds
     drive = $Drive
     output = $out.Trim()
-    message = if ($success) { "Shadow copy created for $Drive" } else { "Shadow copy failed — may need admin" }
+    message = if ($success) { "Shadow copy created for $Drive" } else { "Shadow copy failed - may need admin" }
 } | ConvertTo-Json -Compress
 exit 0

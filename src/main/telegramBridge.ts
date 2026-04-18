@@ -86,7 +86,7 @@ interface TgUpdate {
   callback_query?: CallbackQuery;
 }
 
-/** Makes a compact callback_data token — Telegram limits it to 64 bytes. */
+/** Makes a compact callback_data token - Telegram limits it to 64 bytes. */
 export function makeCallbackData(action: string, ...parts: string[]): string {
   const nonce = randomBytes(3).toString('hex');  // 6 chars
   const payload = [action, ...parts, nonce].join('|');
@@ -116,7 +116,8 @@ export function stopTelegramPolling(): void {
 
 async function pollOnce(): Promise<void> {
   const token = resolveTokenValue(getSetting('telegram_bot_token'));
-  const chatId = getSetting('telegram_chat_id');
+  const chatIdRaw = getSetting('telegram_chat_id');
+  const chatId = chatIdRaw?.trim() ?? '';
   if (!token || !chatId || getSetting('telegram_enabled') !== '1') return;
   const r = await tgRequest<TgUpdate[]>(token, 'getUpdates', {
     offset: lastUpdateId + 1,

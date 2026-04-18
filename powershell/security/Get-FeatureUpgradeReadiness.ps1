@@ -17,7 +17,7 @@ $checks += @{ name='os_version'; ok=$true; value="$($os.Caption) $($os.Version)"
 
 # 3) Pending reboot
 $rebootPending = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
-$checks += @{ name='reboot_pending'; ok=(-not $rebootPending); value=if ($rebootPending) { 'Yes — reboot before upgrade' } else { 'No' }; threshold='must be No before upgrade' }
+$checks += @{ name='reboot_pending'; ok=(-not $rebootPending); value=if ($rebootPending) { 'Yes - reboot before upgrade' } else { 'No' }; threshold='must be No before upgrade' }
 
 # 4) Recent BSODs
 try {
@@ -52,6 +52,6 @@ $ready = ($blockers.Count -eq 0)
     ready = $ready
     checks = $checks
     blockers = $blockers
-    message = if ($ready) { 'Ready for feature upgrade' } else { "$($blockers.Count) blocker(s) — resolve before upgrading" }
+    message = if ($ready) { 'Ready for feature upgrade' } else { "$($blockers.Count) blocker(s) - resolve before upgrading" }
 } | ConvertTo-Json -Depth 4 -Compress
 exit 0

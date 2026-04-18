@@ -213,7 +213,7 @@ export function Updates() {
               <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Check Latest Version</button>
             ) : (
               <div className="text-xs space-y-1">
-                <div>Installed: <code>{nvInfo.installed_version ?? '—'}</code></div>
+                <div>Installed: <code>{nvInfo.installed_version ?? '-'}</code></div>
                 <div>Latest: <code>{nvInfo.latest_version ?? 'unknown'}</code></div>
                 <div className="text-text-secondary text-[10px] mt-2">{nvInfo.message}</div>
                 <button onClick={checkNvidia} className="mt-2 px-2.5 py-1 rounded-md text-[11px] bg-surface-700 border border-surface-600">Re-check</button>

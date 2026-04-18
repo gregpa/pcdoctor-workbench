@@ -32,6 +32,11 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   autoUpdater.autoDownload = false;       // ask user before downloading
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowDowngrade = false;
+  // SECURITY NOTE (W9): The update channel is a NAS share that anyone with network write
+  // access can publish to. electron-updater verifies the installer's Authenticode signature
+  // if signtool was applied at build time, but this build pipeline is currently unsigned.
+  // For a hardened release, sign installers with a code-signing cert and set publisherName
+  // below to pin the expected signer. Blast radius is limited to the home lab today.
 
   autoUpdater.on('checking-for-update', () => setStatus({ state: 'checking', message: 'Checking for updates…' }));
   autoUpdater.on('update-available', (info) => {

@@ -73,7 +73,7 @@ export async function sendWeeklyDigestEmail(): Promise<{ ok: boolean; error?: st
     } catch {}
   }
 
-  const subject = `PCDoctor Weekly Digest — ${latestReview?.review_date ?? new Date().toISOString().slice(0, 10)}`;
+  const subject = `PCDoctor Weekly Digest - ${latestReview?.review_date ?? new Date().toISOString().slice(0, 10)}`;
   const html = `
 <!doctype html>
 <html><head><meta charset="utf-8"><title>${subject}</title>
@@ -82,11 +82,11 @@ h1,h2,h3{color:#fff}.crit{color:#ef4444}.warn{color:#f59e0b}.good{color:#22c55e}
 .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;margin-bottom:12px}
 ul{margin:6px 0}li{margin:3px 0;font-size:13px}</style></head><body>
 <h1>🖥 PCDoctor Weekly Digest</h1>
-<p>${latestReview?.hostname ?? 'Unknown host'} · ${new Date().toLocaleString()}</p>
+<p>${escapeHtml(latestReview?.hostname ?? 'Unknown host')} · ${new Date().toLocaleString()}</p>
 ${latestReview ? `
 <div class="card">
   <h2>Summary</h2>
-  <p><strong>${latestReview.summary.overall}</strong> — ${latestReview.summary.critical_count} critical · ${latestReview.summary.warning_count} warnings · ${latestReview.summary.info_count} info</p>
+  <p><strong>${escapeHtml(String(latestReview.summary.overall))}</strong> - ${latestReview.summary.critical_count} critical · ${latestReview.summary.warning_count} warnings · ${latestReview.summary.info_count} info</p>
 </div>
 <div class="card">
   <h2>Action Items (${latestReview.action_items.length})</h2>

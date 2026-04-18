@@ -91,7 +91,7 @@ export function WeeklyReview() {
     <div className="p-5 max-w-5xl">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h1 className="text-lg font-bold">📋 Weekly Review — {review.review_date}</h1>
+          <h1 className="text-lg font-bold">📋 Weekly Review - {review.review_date}</h1>
           <div className="text-[11px] text-text-secondary mt-1">
             {review.hostname} · {review.summary.overall} · {review.summary.critical_count} critical, {review.summary.warning_count} warnings, {review.summary.info_count} info
           </div>
@@ -128,7 +128,7 @@ export function WeeklyReview() {
 
       {crit.length > 0 && (
         <section className="mb-6">
-          <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">🔴 Critical — Act this week</h2>
+          <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">🔴 Critical - Act this week</h2>
           <div className="space-y-2">
             {crit.map(item => <Item key={item.id} item={item} onApply={applyAction} onState={(s) => setItemState(item.id, s)} running={running !== null} />)}
           </div>
@@ -137,7 +137,7 @@ export function WeeklyReview() {
 
       {imp.length > 0 && (
         <section className="mb-6">
-          <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">🟡 Important — Act this month</h2>
+          <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">🟡 Important - Act this month</h2>
           <div className="space-y-2">
             {imp.map(item => <Item key={item.id} item={item} onApply={applyAction} onState={(s) => setItemState(item.id, s)} running={running !== null} />)}
           </div>

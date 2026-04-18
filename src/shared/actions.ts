@@ -332,7 +332,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Create-ShadowCopy.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 30,
     category: 'security', icon: '📸',
-    tooltip: 'Creates a Volume Shadow Copy on the specified drive — recovery snapshot Windows can restore files from.',
+    tooltip: 'Creates a Volume Shadow Copy on the specified drive - recovery snapshot Windows can restore files from.',
     params_schema: { drive: { type: 'string', required: false, description: 'Drive letter (default C:)' } },
   },
   enable_bitlocker: {

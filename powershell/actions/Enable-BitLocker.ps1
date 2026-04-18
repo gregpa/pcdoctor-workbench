@@ -15,7 +15,7 @@ try {
         duration_ms = $sw.ElapsedMilliseconds
         drive = $Drive
         status = "$($info.VolumeStatus)"
-        recovery_key = "Stored on the drive — save it via: manage-bde -protectors -get $Drive"
+        recovery_key = "Stored on the drive - save it via: manage-bde -protectors -get $Drive"
         message = "BitLocker encryption started on $Drive"
     } | ConvertTo-Json -Compress
 } catch {

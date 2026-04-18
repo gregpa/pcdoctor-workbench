@@ -8,7 +8,7 @@ $dcu = @(
     'C:\Program Files\Dell\CommandUpdate\dcu-cli.exe',
     'C:\Program Files (x86)\Dell\CommandUpdate\dcu-cli.exe'
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $dcu) { throw 'Dell Command Update not installed — download from dell.com/support' }
+if (-not $dcu) { throw 'Dell Command Update not installed - download from dell.com/support' }
 
 if ($ApplyAll) {
     # Run scan first

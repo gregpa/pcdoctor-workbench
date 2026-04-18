@@ -43,7 +43,7 @@ export function AuthEventsWidget() {
             <div key={i} className="flex items-center gap-2 py-1 border-b border-surface-700 last:border-0">
               <span className="text-[9px] text-text-secondary shrink-0 w-12">{new Date(e.time).toLocaleTimeString().replace(/:\d\d\s/, ' ')}</span>
               <span className="text-[9px] px-1 rounded bg-status-crit/20 text-status-crit">{e.event_id}</span>
-              <code className="text-[10px] truncate flex-1">{e.source_ip || e.workstation || '—'}</code>
+              <code className="text-[10px] truncate flex-1">{e.source_ip || e.workstation || '-'}</code>
               {e.country && <span className="text-[9px] text-text-secondary">{e.country}</span>}
               <span className="text-[9px] text-text-secondary truncate max-w-[80px]">{e.account}</span>
             </div>

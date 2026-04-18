@@ -24,7 +24,7 @@ function computeDelta(current: number, weekAgo: number | null, badDirection: 'up
   };
 }
 
-/** DB-safe lookup — returns nulls if the DB isn't available (e.g. in test env with mismatched native binding). */
+/** DB-safe lookup - returns nulls if the DB isn't available (e.g. in test env with mismatched native binding). */
 function safeWeekDelta(category: string, metric: string, label?: string): { week_ago: number | null; now: number | null } {
   try { return getMetricWeekDelta(category, metric, label); }
   catch { return { week_ago: null, now: null }; }
@@ -164,7 +164,7 @@ function mapToSystemStatus(r: any): SystemStatus {
     severity: nasSev,
     sub: nasReachable
       ? (nasMappingsOk === 0 ? 'No persistent mappings' : `${nasMappingsOk} mappings`)
-      : `Unreachable @ ${nas.ip ?? '—'}`,
+      : `Unreachable @ ${nas.ip ?? '-'}`,
   });
 
   // --- Services summary ---
@@ -304,7 +304,7 @@ function makeOverallLabel(summary: any): string {
   if (c > 0) parts.push(`${c} critical`);
   if (w > 0) parts.push(`${w} warning${w === 1 ? '' : 's'}`);
   const state = String(summary.overall ?? 'OK').toUpperCase();
-  return parts.length ? `${state} — ${parts.join(', ')}` : state;
+  return parts.length ? `${state} - ${parts.join(', ')}` : state;
 }
 
 // Thresholds used for per-metric severity classification

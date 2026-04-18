@@ -346,7 +346,7 @@ export interface ToolStatus {
 // --- Notification settings ---
 export interface NotificationSettings {
   telegram_enabled: boolean;
-  telegram_bot_token: string;      // Stored unencrypted in SQLite for this release; DPAPI encryption is a hardening follow-up.
+  telegram_bot_token: string;      // DPAPI-encrypted at rest; masked in getSettings responses; revealed only via api:revealTelegramToken.
   telegram_chat_id: string;
   quiet_hours_start: number;       // Hour 0-23
   quiet_hours_end: number;

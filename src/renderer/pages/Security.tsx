@@ -133,7 +133,7 @@ export function Security() {
           {data.gpu_driver ? (
             <>
               <KV label="Version" value={data.gpu_driver.gpu_current_version} />
-              <KV label="Age" value={data.gpu_driver.age_days !== null ? `${data.gpu_driver.age_days} days` : '—'} tone={(data.gpu_driver.age_days ?? 0) > 180 ? 'warn' : 'good'} />
+              <KV label="Age" value={data.gpu_driver.age_days !== null ? `${data.gpu_driver.age_days} days` : '-'} tone={(data.gpu_driver.age_days ?? 0) > 180 ? 'warn' : 'good'} />
             </>
           ) : <div className="text-xs text-text-secondary">No GPU detected</div>}
         </Panel>
@@ -359,7 +359,7 @@ export function Security() {
           </div>
           {!data.uac.enabled && (
             <div className="mt-3 p-3 bg-status-crit/10 border border-status-crit/40 rounded-md text-xs">
-              <strong>UAC is a critical defense layer.</strong> With it disabled, any malware that manages to run with your user token operates with full administrator privilege — no consent prompts, no elevation barrier. This is among the highest-impact single-line security improvements you can make.
+              <strong>UAC is a critical defense layer.</strong> With it disabled, any malware that manages to run with your user token operates with full administrator privilege - no consent prompts, no elevation barrier. This is among the highest-impact single-line security improvements you can make.
               <div className="mt-2">
                 <strong>To re-enable:</strong>
                 <ol className="list-decimal pl-5 mt-1 space-y-0.5">
@@ -389,9 +389,9 @@ export function Security() {
                 <div className="mt-3 p-3 bg-status-warn/10 border border-status-warn/40 rounded-md text-xs">
                   Your GPU driver is over 6 months old. Update via:
                   <ul className="list-disc pl-5 mt-1">
-                    <li><strong>NVIDIA App</strong> (recommended) — launches Games + Driver updater</li>
-                    <li><strong>GeForce Experience</strong> — older UI, same driver source</li>
-                    <li><strong>nvidia.com/drivers</strong> — manual download for cleanest install</li>
+                    <li><strong>NVIDIA App</strong> (recommended) - launches Games + Driver updater</li>
+                    <li><strong>GeForce Experience</strong> - older UI, same driver source</li>
+                    <li><strong>nvidia.com/drivers</strong> - manual download for cleanest install</li>
                   </ul>
                 </div>
               )}

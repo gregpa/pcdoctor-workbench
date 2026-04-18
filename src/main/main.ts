@@ -27,7 +27,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 980,
-    show: false,     // Start hidden — tray click reveals
+    show: false,     // Start hidden - tray click reveals
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
     webPreferences: {
@@ -59,7 +59,7 @@ async function backgroundPoll() {
     const status = await getStatus();
     updateTraySeverity(status.overall_severity);
   } catch {
-    // Silent — backend may not have run yet. Tray stays last-known color.
+    // Silent - backend may not have run yet. Tray stays last-known color.
   }
 }
 
@@ -88,7 +88,7 @@ app.whenReady().then(() => {
 
   try { registerPtyIpc(() => mainWindow); } catch (e) { console.error('pty init failed', e); }
 
-  // Auto-updater — init + check on startup + every 6 hours
+  // Auto-updater - init + check on startup + every 6 hours
   if (app.isPackaged) {
     initAutoUpdater(() => mainWindow);
     setTimeout(() => { checkForUpdates().catch(() => {}); }, 30_000);
@@ -120,7 +120,7 @@ app.whenReady().then(() => {
       if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
       if (def.confirm_level === 'destructive') {
         // Send a confirmation message rather than executing
-        await answerCallbackQuery(q.id, '⚠ Destructive — confirm required');
+        await answerCallbackQuery(q.id, '⚠ Destructive - confirm required');
         if (q.message) {
           const { sendTelegramMessage, makeCallbackData } = await import('./telegramBridge.js');
           await sendTelegramMessage(
@@ -174,7 +174,7 @@ app.whenReady().then(() => {
     }
   });
 
-  // Morning digest flush timer — runs every minute, triggers when hour matches digest_hour
+  // Morning digest flush timer - runs every minute, triggers when hour matches digest_hour
   let lastFlushHour = -1;
   setInterval(async () => {
     const now = new Date();
@@ -190,7 +190,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  // Don't quit — tray keeps app alive.
+  // Don't quit - tray keeps app alive.
 });
 
 app.on('second-instance', () => {

@@ -34,8 +34,8 @@ export function SmartTable({ entries }: SmartTableProps) {
               <tr key={i} className="border-t border-surface-700">
                 <td className="py-1.5">{e.drive}</td>
                 <td className="py-1.5 text-center">{e.health}</td>
-                <td className="py-1.5 text-center">{e.wear_pct != null ? `${e.wear_pct}%` : '—'}</td>
-                <td className="py-1.5 text-center">{e.temp_c != null ? `${e.temp_c}°C` : '—'}</td>
+                <td className="py-1.5 text-center">{e.wear_pct != null ? `${e.wear_pct}%` : '-'}</td>
+                <td className="py-1.5 text-center">{e.temp_c != null ? `${e.temp_c}°C` : '-'}</td>
                 <td className={`py-1.5 text-center ${sevColor}`}>{sevMark}</td>
               </tr>
             );

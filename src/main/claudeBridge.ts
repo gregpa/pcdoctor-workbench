@@ -74,7 +74,7 @@ export async function launchClaudeWithContext(contextText: string): Promise<{ ok
     if (latestJson.charCodeAt(0) === 0xFEFF) latestJson = latestJson.slice(1);
   } catch {}
 
-  const ctx = `# PCDoctor Workbench — Investigation request
+  const ctx = `# PCDoctor Workbench - Investigation request
 
 ${contextText}
 

@@ -13,10 +13,10 @@ export const WORKBENCH_DB_PATH = path.join(PCDOCTOR_ROOT, 'workbench.db');
 /** Path where electron-log should write main-process logs. */
 export const LOG_DIR = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'PCDoctor', 'logs');
 
-/** Default PowerShell executable — prefer 7+ if installed, fallback to 5.1. */
+/** Default PowerShell executable - prefer 7+ if installed, fallback to 5.1. */
 export function resolvePwshPath(): string {
   const pwsh7 = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
-  return pwsh7;   // Caller may fall back to pwsh51 if pwsh7 missing — see scriptRunner
+  return pwsh7;   // Caller may fall back to pwsh51 if pwsh7 missing - see scriptRunner
 }
 export const PWSH_FALLBACK = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 

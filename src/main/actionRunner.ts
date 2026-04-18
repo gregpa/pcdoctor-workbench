@@ -47,7 +47,8 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
         }
       }
     } catch (e) {
-      // Proceeding without rollback — action may still succeed, but revert won't be available.
+      // Proceeding without rollback - action may still succeed, but revert won't be available.
+      console.warn(`actionRunner: prepareRollback failed for ${input.name}:`, e);
     }
   }
 
@@ -56,8 +57,23 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     scriptArgs.push('-DryRun');
   }
   if (input.params) {
+    const schema = def.params_schema ?? {};
     for (const [k, v] of Object.entries(input.params)) {
-      scriptArgs.push(`-${k.charAt(0).toUpperCase() + k.slice(1)}`, String(v));
+      // Validate each value against the declared params_schema type. Reject with E_INVALID_PARAM
+      // so a scheduler, alert handler, or bridge caller can't pass unexpected values through
+      // to the PowerShell arg binder.
+      const def_k = schema[k];
+      const str = String(v);
+      if (def_k) {
+        if (def_k.type === 'number' && !/^-?\d+(\.\d+)?$/.test(str)) {
+          finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: `Invalid param '${k}': expected number, got '${str}'` });
+          return {
+            action: input.name, success: false, duration_ms: 0,
+            error: { code: 'E_INVALID_PARAM', message: `Invalid param '${k}': expected number` },
+          };
+        }
+      }
+      scriptArgs.push(`-${k.charAt(0).toUpperCase() + k.slice(1)}`, str);
     }
   }
 

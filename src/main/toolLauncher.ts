@@ -83,7 +83,7 @@ export async function installToolViaWinget(toolId: string): Promise<{ ok: boolea
       windowsHide: true,
     });
     child.on('exit', (code) => {
-      // winget exits 0 on success; non-zero codes are also used for "already installed" — treat both as ok=true
+      // winget exits 0 on success; non-zero codes are also used for "already installed" - treat both as ok=true
       if (code === 0 || code === -1978335189 /* ALREADY_INSTALLED */) resolve({ ok: true });
       else resolve({ ok: false, error: `winget exited ${code}` });
     });

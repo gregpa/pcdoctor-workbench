@@ -3,7 +3,10 @@ import path from 'node:path';
 import { BrowserWindow } from 'electron';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { runAction } from './actionRunner.js';
+import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
+
+const MAX_PARAMS_BYTES = 1024;
 
 const BRIDGE_DIR = path.join(PCDOCTOR_ROOT, 'claude-bridge');
 const COMMANDS_FILE = path.join(BRIDGE_DIR, 'commands.jsonl');
@@ -33,7 +36,7 @@ export function startClaudeBridgeWatcher(getWindow: () => BrowserWindow | null):
     lastProcessedLine = current.split('\n').filter(l => l.trim()).length;
   } catch { lastProcessedLine = 0; }
 
-  watch(BRIDGE_DIR, async (eventType, filename) => {
+  const watcher = watch(BRIDGE_DIR, async (eventType, filename) => {
     if (filename !== 'commands.jsonl') return;
     if (!existsSync(COMMANDS_FILE)) return;
     try {
@@ -44,12 +47,32 @@ export function startClaudeBridgeWatcher(getWindow: () => BrowserWindow | null):
       for (const line of newLines) {
         try {
           const cmd = JSON.parse(line) as ClaudeCommand;
+          // Schema validation: reject unknown actions and oversized params
+          if (!cmd || typeof cmd.id !== 'string' || typeof cmd.action !== 'string') {
+            console.warn('claude-bridge: rejected command with missing id/action');
+            continue;
+          }
+          if (!(cmd.action in ACTIONS)) {
+            console.warn(`claude-bridge: rejected unknown action '${cmd.action}'`);
+            appendFileSync(RESPONSES_FILE, JSON.stringify({ id: cmd.id, status: 'rejected', reason: 'Unknown action' }) + '\n');
+            continue;
+          }
+          if (cmd.params && Buffer.byteLength(JSON.stringify(cmd.params), 'utf8') > MAX_PARAMS_BYTES) {
+            console.warn(`claude-bridge: rejected command '${cmd.id}' - params exceed ${MAX_PARAMS_BYTES} bytes`);
+            appendFileSync(RESPONSES_FILE, JSON.stringify({ id: cmd.id, status: 'rejected', reason: 'Params too large' }) + '\n');
+            continue;
+          }
           await handleClaudeCommand(cmd, getWindow());
-        } catch {
-          // malformed line
+        } catch (e) {
+          console.warn('claude-bridge: dropped malformed JSONL line', e);
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn('claude-bridge: read error', e);
+    }
+  });
+  watcher.on('error', (err) => {
+    console.error('claude-bridge watcher error', err);
   });
 }
 

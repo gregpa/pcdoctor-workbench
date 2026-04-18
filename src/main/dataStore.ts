@@ -293,7 +293,7 @@ export function recordStatusSnapshot(s: {
 
 export function saveForecasts(data: { generated_at: number; projections: any[] }): void {
   const db = openDb();
-  // Wipe previous forecasts — we want the latest set only
+  // Wipe previous forecasts - we want the latest set only
   db.prepare(`DELETE FROM forecasts`).run();
   const stmt = db.prepare(
     `INSERT INTO forecasts (generated_at, metric, projection_json, preventive_action, due_date) VALUES (?, ?, ?, ?, ?)`

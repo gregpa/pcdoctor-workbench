@@ -29,7 +29,7 @@ export function Claude() {
   async function launchExternal() {
     setBusy(true);
     const r = await api.launchClaude();
-    if (r.ok) setToast('Claude launched in Windows Terminal — check the new tab');
+    if (r.ok) setToast('Claude launched in Windows Terminal - check the new tab');
     else setToast(`Launch failed: ${r.error.message}`);
     setTimeout(() => setToast(null), 6000);
     setBusy(false);
@@ -82,7 +82,7 @@ export function Claude() {
               <div className="mt-3 p-3 bg-status-warn/10 border border-status-warn/40 rounded-md text-[11px] text-status-warn">
                 <strong>Embedded terminal unavailable on this install.</strong><br/>
                 {embeddedError ?? 'node-pty native module failed to load.'}<br/>
-                Use "External Window" mode instead — it launches Claude in a Windows Terminal tab.
+                Use "External Window" mode instead - it launches Claude in a Windows Terminal tab.
               </div>
             )}
           </div>

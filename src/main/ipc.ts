@@ -370,17 +370,53 @@ export function registerIpcHandlers() {
   ipcMain.handle('api:getSettings', async (): Promise<IpcResult<Record<string, string>>> => {
     try {
       const all = getAllSettings();
-      // Decrypt sensitive values before returning
+
+      // Allow-list of keys that the renderer is permitted to read. Anything not matching
+      // is filtered out so that a new sensitive setting added later doesn't leak by default.
+      const RENDERER_SAFE_KEYS = new Set<string>([
+        'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
+        'quiet_hours_start', 'quiet_hours_end',
+        'email_digest_recipient', 'digest_hour',
+        'auto_block_rdp_bruteforce',
+      ]);
+      const isSafeKey = (k: string) => RENDERER_SAFE_KEYS.has(k) || k.startsWith('event:');
+
+      const filtered: Record<string, string> = {};
+      for (const [k, v] of Object.entries(all)) {
+        if (isSafeKey(k)) filtered[k] = v;
+      }
+
+      // Mask sensitive values - never return plaintext tokens to the renderer.
       for (const k of ['telegram_bot_token']) {
-        const v = all[k];
-        if (v?.startsWith('dpapi:') && safeStorage.isEncryptionAvailable()) {
-          try {
-            const ct = Buffer.from(v.slice(6), 'base64');
-            all[k] = safeStorage.decryptString(ct);
-          } catch { all[k] = ''; }
+        const v = filtered[k];
+        if (v) {
+          if (v.startsWith('dpapi:')) {
+            filtered[k] = '***encrypted***';
+          } else {
+            // Legacy unencrypted - mask preserving first/last few chars
+            filtered[k] = v.length > 10 ? `${v.slice(0, 4)}...${v.slice(-4)}` : '***';
+          }
         }
       }
-      return { ok: true, data: all };
+      return { ok: true, data: filtered };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:revealTelegramToken', async (): Promise<IpcResult<{ token: string }>> => {
+    try {
+      const raw = getSetting('telegram_bot_token') ?? '';
+      let token = raw;
+      if (raw.startsWith('dpapi:') && safeStorage.isEncryptionAvailable()) {
+        try {
+          const ct = Buffer.from(raw.slice(6), 'base64');
+          token = safeStorage.decryptString(ct);
+        } catch {
+          token = '';
+        }
+      }
+      return { ok: true, data: { token } };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
@@ -407,7 +443,7 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:sendTestNotification', async (): Promise<IpcResult<{}>> => {
-    const r = await sendTelegramMessage('🧪 <b>Test notification from PCDoctor Workbench</b>\n\nThis is a manual test — ignore.');
+    const r = await sendTelegramMessage('🧪 <b>Test notification from PCDoctor Workbench</b>\n\nThis is a manual test - ignore.');
     if (r.ok) return { ok: true, data: {} };
     return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
   });

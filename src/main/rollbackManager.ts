@@ -40,7 +40,7 @@ export async function prepareRollback(
       seq = typeof result.sequence_number === 'number' ? result.sequence_number : null;
     } catch {
       // If restore point creation fails (common without admin), still record the rollback
-      // with only a label — the Revert button will inform the user it's unavailable.
+      // with only a label - the Revert button will inform the user it's unavailable.
     }
     return createRollbackRow({
       label: `Pre: ${action.label}`,
@@ -50,7 +50,7 @@ export async function prepareRollback(
     });
   }
 
-  // Tier B — file snapshot
+  // Tier B - file snapshot
   const rollbackId = createRollbackRow({
     label: `Pre: ${action.label}`,
     action_id: actionId,
@@ -94,7 +94,7 @@ export async function prepareRollback(
   return rollbackId;
 }
 
-/** Helper — writes snapshot_path to an existing rollback row. */
+/** Helper - writes snapshot_path to an existing rollback row. */
 function updateRollbackSnapshotPath(id: number, snapshotPath: string) {
   // We avoid circular deps by doing this via dataStore in a small patch.
   // For simplicity, use a direct SQL via the shared db connection.
@@ -142,14 +142,46 @@ export async function revertRollback(rollbackId: number): Promise<RevertOutcome>
       return { method: 'none', reboot_required: false, reason: 'Manifest missing' };
     }
     const manifest: SnapshotManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+
+    // Validate each source path against the originating action's declared snapshot_paths.
+    // This prevents a tampered manifest.json (ProgramData is user-writable on dev systems)
+    // from steering cpSync to overwrite arbitrary files.
+    const { ACTIONS } = await import('@shared/actions.js');
+    const actionDef = ACTIONS[manifest.action_name as keyof typeof ACTIONS];
+    const allowedSources = (actionDef?.snapshot_paths ?? []).map(p => path.normalize(p).toLowerCase());
+
     let restored = 0;
+    let rejected = 0;
     for (const p of manifest.paths) {
+      const normalizedSource = path.normalize(p.source).toLowerCase();
+      const isAllowed = allowedSources.some(a => {
+        // Exact match or source is under an allowed directory
+        return normalizedSource === a || normalizedSource.startsWith(a + path.sep);
+      });
+      if (!isAllowed) {
+        rejected++;
+        continue;
+      }
+      // Additional safety: refuse to restore to sensitive system roots unless
+      // the action's own snapshot_paths explicitly allowlists this exact path
+      // (e.g. reset_hosts_file explicitly includes the hosts file path).
+      const forbidden = ['c:\\windows\\system32\\drivers\\etc\\hosts', 'c:\\windows', 'c:\\program files'];
+      const isSystemPath = forbidden.some(f => normalizedSource === f || normalizedSource.startsWith(f + path.sep));
+      const isExplicitlyAllowed = allowedSources.includes(normalizedSource);
+      if (isSystemPath && !isExplicitlyAllowed) {
+        rejected++;
+        continue;
+      }
       try {
         cpSync(p.snapshot, p.source, { recursive: true, force: true });
         restored++;
       } catch {
         // Continue with others
       }
+    }
+    if (rejected > 0 && restored === 0) {
+      markRollbackReverted(rollbackId);
+      return { method: 'none', reboot_required: false, reason: `Manifest rejected: ${rejected} path(s) not in action allow-list` };
     }
     markRollbackReverted(rollbackId);
     return { method: 'file-snapshot', reboot_required: false, files_restored: restored };
@@ -158,7 +190,7 @@ export async function revertRollback(rollbackId: number): Promise<RevertOutcome>
   return { method: 'none', reboot_required: false, reason: 'No recoverable rollback payload' };
 }
 
-/** Periodic cleanup — called daily. */
+/** Periodic cleanup - called daily. */
 export function pruneExpired(): { removed: number } {
   const removed = pruneExpiredRollbacks();
 

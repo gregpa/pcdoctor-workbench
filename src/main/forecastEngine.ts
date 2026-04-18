@@ -111,7 +111,7 @@ export function generateForecasts(): ForecastData {
       if (cfg.threshold_warn !== null) projectedWarnMs = projectThresholdCrossing(reg, current, cfg.threshold_warn, cfg.bad_direction);
       if (cfg.threshold_critical !== null) projectedCritMs = projectThresholdCrossing(reg, current, cfg.threshold_critical, cfg.bad_direction);
     }
-    // EWMA — not forecasting a date, just checking current vs baseline
+    // EWMA - not forecasting a date, just checking current vs baseline
     // We still emit the KPI but without projected_critical_date
     if (cfg.algorithm === 'ewma') {
       const baseline = pts.slice(0, Math.floor(pts.length / 2)).reduce((a, p) => a + p.value, 0) / Math.max(1, Math.floor(pts.length / 2));

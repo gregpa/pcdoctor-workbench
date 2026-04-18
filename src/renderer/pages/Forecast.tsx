@@ -58,7 +58,7 @@ export function Forecast() {
             Forecasts need at least 14 data points across 7 days. Keep the dashboard running; metrics accumulate automatically every 60s.
             <ul className="mt-2 space-y-0.5">
               {data.insufficient_data.map(x => (
-                <li key={x.metric}>• <code>{x.metric}</code> — {x.points} / {x.required} points collected</li>
+                <li key={x.metric}>• <code>{x.metric}</code> - {x.points} / {x.required} points collected</li>
               ))}
             </ul>
           </div>
@@ -88,7 +88,7 @@ export function Forecast() {
                 )}
                 {p.slope_per_day !== null && (
                   <div className="text-[10px] text-text-secondary mt-1">
-                    Slope: {p.slope_per_day > 0 ? '+' : ''}{p.slope_per_day.toFixed(3)}/day · r² = {p.r_squared?.toFixed(2) ?? '—'}
+                    Slope: {p.slope_per_day > 0 ? '+' : ''}{p.slope_per_day.toFixed(3)}/day · r² = {p.r_squared?.toFixed(2) ?? '-'}
                   </div>
                 )}
               </div>

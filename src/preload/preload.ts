@@ -38,6 +38,7 @@ const api = {
   sendClaudeApproval: (id: string, approved: boolean) => ipcRenderer.send(`claude-approval-response-${id}`, approved),
   getSettings: (): Promise<IpcResult<Record<string, string>>> => ipcRenderer.invoke('api:getSettings'),
   setSetting: (key: string, value: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setSetting', key, value),
+  revealTelegramToken: (): Promise<IpcResult<{ token: string }>> => ipcRenderer.invoke('api:revealTelegramToken'),
   testTelegram: (token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => ipcRenderer.invoke('api:testTelegram', token, chatId),
   sendTestNotification: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendTestNotification'),
   listScheduledTasks: (): Promise<IpcResult<ScheduledTaskInfo[]>> => ipcRenderer.invoke('api:listScheduledTasks'),

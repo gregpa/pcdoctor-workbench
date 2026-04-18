@@ -43,18 +43,18 @@ function analyzeRelevance(status: SystemStatus | null): ActionRelevance[] {
   const reasons: Partial<Record<ActionName, ActionRelevance>> = {};
   const set = (name: ActionName, needed: boolean, reason: string) => { reasons[name] = { name, needed, reason }; };
 
-  set('clear_temp_files', diskLow || true, diskLow ? 'C: drive is getting tight — clearing temp reclaims space' : 'Routine cleanup (~500MB–2GB typically reclaimed)');
-  set('clean_recycle_bin', diskLow, diskLow ? 'Free space is low — emptying Recycle Bin helps' : 'Nothing urgent — Recycle Bin rarely matters');
-  set('flush_dns', true, 'Always safe — refreshes DNS resolver cache');
-  set('flush_arp_cache', true, 'Always safe — clears stale LAN address cache');
-  set('trim_ssd', true, 'Safe for modern SSDs — improves sustained write speed');
-  set('clean_browser_cache', diskLow, diskLow ? 'Browser caches can hold multi-GB — worth clearing' : 'Cache is small right now');
+  set('clear_temp_files', diskLow || true, diskLow ? 'C: drive is getting tight - clearing temp reclaims space' : 'Routine cleanup (~500MB–2GB typically reclaimed)');
+  set('clean_recycle_bin', diskLow, diskLow ? 'Free space is low - emptying Recycle Bin helps' : 'Nothing urgent - Recycle Bin rarely matters');
+  set('flush_dns', true, 'Always safe - refreshes DNS resolver cache');
+  set('flush_arp_cache', true, 'Always safe - clears stale LAN address cache');
+  set('trim_ssd', true, 'Safe for modern SSDs - improves sustained write speed');
+  set('clean_browser_cache', diskLow, diskLow ? 'Browser caches can hold multi-GB - worth clearing' : 'Cache is small right now');
   set('clean_onedrive_cache', false, 'Only needed if OneDrive sync acting up');
   set('clean_teams_cache', false, 'Only needed if Teams is slow/failing');
   set('clean_discord_cache', false, 'Only needed if Discord acting up');
   set('clean_spotify_cache', diskLow, diskLow ? 'Spotify cache can be several GB' : 'Small unless you stream a lot');
-  set('rebuild_search_index', searchCorrupt, searchCorrupt ? 'Search index is corrupted — Windows flagged it' : 'Index is healthy');
-  set('compact_docker', ramHigh || diskLow, (ramHigh || diskLow) ? 'Reclaims Docker disk/memory' : 'Low Docker footprint — skip');
+  set('rebuild_search_index', searchCorrupt, searchCorrupt ? 'Search index is corrupted - Windows flagged it' : 'Index is healthy');
+  set('compact_docker', ramHigh || diskLow, (ramHigh || diskLow) ? 'Reclaims Docker disk/memory' : 'Low Docker footprint - skip');
 
   return SUITE_ACTIONS.map(n => reasons[n]!).filter(Boolean);
 }
@@ -153,14 +153,14 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
             onClick={openModal}
             disabled={!canClean}
             className={`px-3 py-1.5 rounded-md text-[11px] font-bold ${canClean ? 'bg-[#238636] text-white' : 'bg-surface-700 text-text-secondary cursor-not-allowed'}`}
-            title={canClean ? 'Open clean suite' : `Only ${pct}% of cleanup steps are needed right now — not worth running the full suite`}
+            title={canClean ? 'Open clean suite' : `Only ${pct}% of cleanup steps are needed right now - not worth running the full suite`}
           >
             {canClean ? `Clean My PC (${needed.length})` : 'Not Needed'}
           </button>
         </div>
         {!canClean && (
           <div className="text-[10px] text-text-secondary mt-1">
-            Your PC looks clean — threshold to enable is {threshold}% of cleanup steps applicable. Individual actions still available in One-Click Actions.
+            Your PC looks clean - threshold to enable is {threshold}% of cleanup steps applicable. Individual actions still available in One-Click Actions.
           </div>
         )}
         {canClean && !running && steps.length === 0 && (
@@ -173,7 +173,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !running && setModalOpen(false)}>
           <div className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-semibold mb-3">🧼 Clean My PC — Suite</h2>
+            <h2 className="text-base font-semibold mb-3">🧼 Clean My PC - Suite</h2>
 
             {!running && steps.length === 0 && (
               <>
@@ -195,11 +195,11 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
                 <div className="mb-4 p-3 bg-status-warn/10 border border-status-warn/40 rounded-md text-xs">
                   <strong>Actions you should ALSO run (not part of suite):</strong>
                   <ul className="list-disc pl-5 mt-1 space-y-0.5">
-                    <li><strong>Run SFC</strong> — scans system files (5–15 min). Different from cleanup; do once a month.</li>
-                    <li><strong>Run DISM Repair</strong> — fixes component store. Do after SFC if it reports issues.</li>
-                    <li><strong>Windows Update</strong> — Updates page. Do monthly or when you see security KBs pending.</li>
-                    <li><strong>MemTest86</strong> — RAM stress test. Only if you've had BSODs (requires reboot into USB).</li>
-                    <li><strong>CPU repaste / heatsink clean</strong> — physical maintenance every 3–5 years.</li>
+                    <li><strong>Run SFC</strong> - scans system files (5–15 min). Different from cleanup; do once a month.</li>
+                    <li><strong>Run DISM Repair</strong> - fixes component store. Do after SFC if it reports issues.</li>
+                    <li><strong>Windows Update</strong> - Updates page. Do monthly or when you see security KBs pending.</li>
+                    <li><strong>MemTest86</strong> - RAM stress test. Only if you've had BSODs (requires reboot into USB).</li>
+                    <li><strong>CPU repaste / heatsink clean</strong> - physical maintenance every 3–5 years.</li>
                   </ul>
                 </div>
 

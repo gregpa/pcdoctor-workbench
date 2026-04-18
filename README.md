@@ -82,8 +82,8 @@ Electron desktop app providing a comprehensive PC maintenance dashboard on top o
 - Telegram setup wizard with test message
 - Notification matrix (events × channels)
 - Quiet hours
-- **Scheduled task editor** — enable/disable/run-now for all 9 PCDoctor scheduled tasks
-- **Diagnostic bundle export** — zips logs, settings (redacted), reports, and audit log for support
+- **Scheduled task editor** - enable/disable/run-now for all 9 PCDoctor scheduled tasks
+- **Diagnostic bundle export** - zips logs, settings (redacted), reports, and audit log for support
 
 ### 🧱 Infrastructure
 - 40+ one-click actions across 8 categories with Tier A/B/C rollback
@@ -121,7 +121,7 @@ Installer produced in `release/PCDoctor Workbench-Setup-<version>.exe`.
 
 - **better-sqlite3 ABI mismatch:** `npx electron-rebuild -f -w better-sqlite3`
 - **"No diagnostic report" banner:** run `Invoke-PCDoctor.ps1 -Mode Report` to seed `latest.json`
-- **SMART tiles empty:** install smartmontools — `winget install smartmontools.smartmontools`
+- **SMART tiles empty:** install smartmontools - `winget install smartmontools.smartmontools`
 - **PSWindowsUpdate not needed:** we use native `Microsoft.Update.Session` COM API
 - **Telegram bot not triggering actions:** ensure polling enabled and chat ID matches configured value
 - **Tray icon missing color:** verify `resources/icons/tray-*.ico` present in install dir

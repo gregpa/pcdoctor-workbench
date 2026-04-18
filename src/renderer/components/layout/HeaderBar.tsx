@@ -18,7 +18,7 @@ export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }:
   return (
     <div className="flex justify-between items-center p-3 px-4 bg-surface-800 border border-surface-600 rounded-lg mb-3">
       <div>
-        <h1 className="text-[17px] font-bold tracking-tight">🖥 PC Doctor — {host}</h1>
+        <h1 className="text-[17px] font-bold tracking-tight">🖥 PC Doctor - {host}</h1>
         <div className="text-[10px] text-text-secondary mt-1">{subtitle}</div>
       </div>
       <div className="flex items-center gap-2">

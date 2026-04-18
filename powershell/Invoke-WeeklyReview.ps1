@@ -111,17 +111,17 @@ $review | ConvertTo-Json -Depth 10 | Out-File -FilePath $jsonPath -Encoding UTF8
 
 # Markdown rendering
 $md = @"
-# PC Doctor Weekly Review — $reviewDate
+# PC Doctor Weekly Review - $reviewDate
 
 **Host:** $($latest.hostname)
-**Overall:** $($review.summary.overall) — $($review.summary.critical_count) critical, $($review.summary.warning_count) warning, $($review.summary.info_count) info
+**Overall:** $($review.summary.overall) - $($review.summary.critical_count) critical, $($review.summary.warning_count) warning, $($review.summary.info_count) info
 
 ---
 
 "@
 
 if ($critical.Count -gt 0) {
-    $md += "## 🔴 Critical — Act this week`n`n"
+    $md += "## 🔴 Critical - Act this week`n`n"
     foreach ($f in $critical) {
         $md += "### $($f.area)`n"
         $md += "$($f.message)`n`n"
@@ -133,7 +133,7 @@ if ($critical.Count -gt 0) {
 }
 
 if ($warnings.Count -gt 0) {
-    $md += "## 🟡 Important — Act this month`n`n"
+    $md += "## 🟡 Important - Act this month`n`n"
     foreach ($f in $warnings) {
         $md += "### $($f.area)`n"
         $md += "$($f.message)`n`n"
