@@ -106,7 +106,27 @@ try {
             if ($byIp.ContainsKey($ip)) { $byIp[$ip]++ } else { $byIp[$ip] = 1 }
         }
     }
-    $topSources = $byIp.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 5 | ForEach-Object { @{ ip = $_.Key; count = $_.Value } }
+    $topSourcesRaw = $byIp.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 5
+    $topSources = @()
+    foreach ($s in $topSourcesRaw) {
+        $ip = $s.Key
+        $count = $s.Value
+        $geo = @{ country = $null; city = $null; isp = $null; org = $null }
+        if ($ip -notmatch '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.0\.0\.1)') {
+            try {
+                $resp = Invoke-RestMethod -Uri "http://ip-api.com/json/$ip?fields=status,country,city,isp,org" -TimeoutSec 3 -ErrorAction Stop
+                if ($resp.status -eq 'success') {
+                    $geo.country = "$($resp.country)"
+                    $geo.city = "$($resp.city)"
+                    $geo.isp = "$($resp.isp)"
+                    $geo.org = "$($resp.org)"
+                }
+            } catch {}
+        } else {
+            $geo.country = 'LAN'
+        }
+        $topSources += @{ ip = $ip; count = $count; country = $geo.country; city = $geo.city; isp = $geo.isp; org = $geo.org }
+    }
     $rdp = Get-WinEvent -FilterHashtable @{ LogName='Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational'; Id=1149; StartTime=$since7 } -ErrorAction SilentlyContinue -MaxEvents 100
     $sev = 'good'
     if ($total7 -gt 50) { $sev = 'warn' }
