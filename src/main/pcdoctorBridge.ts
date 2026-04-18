@@ -191,9 +191,10 @@ function mapToSystemStatus(r: any): SystemStatus {
     const start = typeof val?.start === 'string' ? val.start : undefined;
     // Severity: running = good, Manual-start + Stopped = good (normal), other Stopped = warn, error = crit
     let sev: 'good' | 'warn' | 'crit';
+    const knownManualStopped = new Set(['BITS', 'wuauserv', 'cryptsvc', 'EFS', 'WSearch']);
     if (/run/i.test(statusStr)) sev = 'good';
     else if (/error/i.test(statusStr)) sev = 'crit';
-    else if (statusStr === 'Stopped' && start === 'Manual') sev = 'good';
+    else if (statusStr === 'Stopped' && (start === 'Manual' || start === 'Disabled' || knownManualStopped.has(key))) sev = 'good';
     else if (statusStr === 'Stopped') sev = 'warn';
     else sev = 'warn';
     return {
@@ -239,6 +240,18 @@ function mapAreaToAction(area: string | undefined): ActionName | undefined {
     'Explorer': 'fix_shell_overlays',
     'NAS': 'remap_nas',
     'Startup': 'disable_startup_item',
+    'Firewall': 'reset_firewall',
+    'DNS': 'flush_dns',
+    'Temp': 'clear_temp_files',
+    'RecycleBin': 'clean_recycle_bin',
+    'Browser': 'clean_browser_cache',
+    'Docker': 'compact_docker',
+    'WinSxS': 'cleanup_winsxs',
+    'Defender': 'defender_quick_scan',
+    'WindowsUpdate': 'install_windows_updates',
+    'Hosts': 'reset_hosts_file',
+    'WSL': 'apply_wsl_cap',
+    'Overlays': 'fix_shell_overlays',
   };
   return map[area];
 }
