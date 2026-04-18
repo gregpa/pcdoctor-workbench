@@ -363,6 +363,24 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Launches a Malwarebytes Threat Scan in the background. Requires Malwarebytes installed.',
   },
 
+  run_dell_command_update: {
+    name: 'run_dell_command_update', label: 'Run Dell Command Update',
+    ps_script: 'actions/Run-DellCommandUpdate.ps1',
+    confirm_level: 'risky', rollback_tier: 'A',
+    restore_point_description: 'PCDoctor: Dell Command Update',
+    estimated_duration_s: 300,
+    category: 'update', icon: '💻',
+    tooltip: 'Scans for Alienware/Dell-specific updates (BIOS, chipset, GPU driver). Requires Dell Command | Update app installed.',
+  },
+  import_occt_csv: {
+    name: 'import_occt_csv', label: 'Import OCCT CSV',
+    ps_script: 'actions/Import-OCCT-CSV.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 30,
+    category: 'repair', icon: '🧪',
+    tooltip: 'Parses an OCCT CSV log into per-sensor min/avg/max + error counts.',
+    params_schema: { csv_path: { type: 'string', required: true, description: 'Full path to CSV file' } },
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

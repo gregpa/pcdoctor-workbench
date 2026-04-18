@@ -289,6 +289,24 @@ export function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('api:getFeatureUpgradeReadiness', async (): Promise<IpcResult<any>> => {
+    try {
+      const data = await runPowerShellScript<any>('security/Get-FeatureUpgradeReadiness.ps1', ['-JsonOutput'], { timeoutMs: 60_000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:getNvidiaDriverLatest', async (): Promise<IpcResult<any>> => {
+    try {
+      const data = await runPowerShellScript<any>('security/Check-NvidiaDriverLatest.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
   ipcMain.handle('api:getClaudeStatus', async (): Promise<IpcResult<{ installed: boolean; path: string | null }>> => {
     const p = resolveClaudePath();
     return { ok: true, data: { installed: !!p, path: p } };
