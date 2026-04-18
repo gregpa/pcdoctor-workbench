@@ -36,11 +36,11 @@ export function ActionButton({ action, onRun, disabled }: ActionButtonProps) {
   return (
     <Tooltip text={action.tooltip}>
       <button
-        className="flex flex-col items-center justify-center gap-1 p-3 bg-surface-900 border border-surface-600 rounded-md text-[11px] text-text-primary hover:bg-surface-700 hover:border-status-info/40 transition disabled:opacity-50 disabled:cursor-not-allowed min-h-[70px]"
+        className="flex flex-col items-center justify-center gap-1.5 p-3 bg-surface-900 border border-surface-600 rounded-md text-[11px] text-text-primary hover:bg-surface-700 hover:border-status-info/40 transition disabled:opacity-50 disabled:cursor-not-allowed w-full h-[88px]"
         onClick={handleClick}
         disabled={busy || disabled}
       >
-        <span className="text-lg">{action.icon}</span>
+        <span className="text-xl leading-none">{action.icon}</span>
         <span className="text-center leading-tight">{busy ? 'Running…' : action.label}</span>
       </button>
     </Tooltip>
