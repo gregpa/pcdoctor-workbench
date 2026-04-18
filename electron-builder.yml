@@ -23,7 +23,8 @@ win:
   target:
     - nsis
   icon: resources/icons/icon.ico
-  publisherName: Greg Pajak
+  signtoolOptions:
+    publisherName: Greg Pajak
   requestedExecutionLevel: asInvoker
 
 nsis:
