@@ -10,12 +10,14 @@ import { Updates } from './pages/Updates.js';
 import { MemTest86 } from './pages/MemTest86.js';
 import { Claude } from './pages/Claude.js';
 import { Sidebar } from './components/layout/Sidebar.js';
+import { ClaudeApprovalListener } from './components/layout/ClaudeApprovalListener.js';
 import { ConfirmProvider } from './lib/confirmContext.js';
 import './styles/globals.css';
 
 export function App() {
   return (
     <ConfirmProvider>
+      <ClaudeApprovalListener />
       <HashRouter>
         <div className="flex min-h-screen">
           <Sidebar />
