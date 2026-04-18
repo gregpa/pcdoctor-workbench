@@ -1,14 +1,35 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import * as pty from 'node-pty';
 import path from 'node:path';
 import os from 'node:os';
 import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { PCDOCTOR_ROOT, LATEST_JSON_PATH } from './constants.js';
 import { resolveClaudePath } from './claudeBridge.js';
 
+let ptyModule: any = null;
+let ptyAvailable = false;
+let ptyLoadError: string | null = null;
+
+// Try to load node-pty — swallow any native-module load error.
+// This runs once on first IPC call, not at module import time.
+async function ensurePtyLoaded(): Promise<boolean> {
+  if (ptyAvailable) return true;
+  if (ptyModule === null && ptyLoadError === null) {
+    try {
+      ptyModule = await import('node-pty');
+      ptyAvailable = true;
+      return true;
+    } catch (e: any) {
+      ptyLoadError = e?.message ?? 'node-pty failed to load';
+      ptyModule = null;
+      return false;
+    }
+  }
+  return ptyAvailable;
+}
+
 interface ActiveSession {
   id: string;
-  proc: pty.IPty;
+  proc: any;   // pty.IPty but avoid type import since node-pty may not be loadable
 }
 
 const sessions = new Map<string, ActiveSession>();
@@ -40,9 +61,19 @@ ${latest.slice(0, 15000)}
 }
 
 export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
+  ipcMain.handle('api:claudePty:available', async (): Promise<{ available: boolean; error?: string }> => {
+    const ok = await ensurePtyLoaded();
+    return { available: ok, error: ptyLoadError ?? undefined };
+  });
+
   ipcMain.handle('api:claudePty:spawn', async (_evt, opts: { id: string; contextText?: string; cols?: number; rows?: number }): Promise<{ ok: boolean; error?: string }> => {
     const { id, contextText, cols, rows } = opts;
     if (sessions.has(id)) return { ok: false, error: 'Session already exists' };
+
+    const ok = await ensurePtyLoaded();
+    if (!ok || !ptyModule) {
+      return { ok: false, error: `Embedded terminal unavailable. node-pty failed to load: ${ptyLoadError ?? 'unknown'}. Use the "External Window" mode instead.` };
+    }
 
     const claudePath = resolveClaudePath();
     if (!claudePath) return { ok: false, error: 'Claude CLI not found on PATH' };
@@ -50,7 +81,7 @@ export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
     try {
       const ctxPath = await buildContextFile(contextText);
       const shell = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
-      const proc = pty.spawn(shell, ['/k', `"${claudePath}" --add-dir "${PCDOCTOR_ROOT}"`], {
+      const proc = ptyModule.spawn(shell, ['/k', `"${claudePath}" --add-dir "${PCDOCTOR_ROOT}"`], {
         name: 'xterm-256color',
         cols: cols ?? 100,
         rows: rows ?? 28,
@@ -61,12 +92,12 @@ export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
         },
       });
 
-      proc.onData((data) => {
+      proc.onData((data: string) => {
         const win = getWindow();
         if (win) win.webContents.send(`claudePty:data:${id}`, data);
       });
 
-      proc.onExit(({ exitCode }) => {
+      proc.onExit(({ exitCode }: { exitCode: number }) => {
         const win = getWindow();
         if (win) win.webContents.send(`claudePty:exit:${id}`, { exitCode });
         sessions.delete(id);
@@ -82,14 +113,14 @@ export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('api:claudePty:write', async (_evt, opts: { id: string; data: string }): Promise<{ ok: boolean }> => {
     const s = sessions.get(opts.id);
     if (!s) return { ok: false };
-    s.proc.write(opts.data);
+    try { s.proc.write(opts.data); } catch {}
     return { ok: true };
   });
 
   ipcMain.handle('api:claudePty:resize', async (_evt, opts: { id: string; cols: number; rows: number }): Promise<{ ok: boolean }> => {
     const s = sessions.get(opts.id);
     if (!s) return { ok: false };
-    s.proc.resize(opts.cols, opts.rows);
+    try { s.proc.resize(opts.cols, opts.rows); } catch {}
     return { ok: true };
   });
 

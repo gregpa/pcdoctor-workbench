@@ -8,11 +8,21 @@ export function Claude() {
   const [embeddedStarted, setEmbeddedStarted] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [embeddedAvailable, setEmbeddedAvailable] = useState<boolean | null>(null);
+  const [embeddedError, setEmbeddedError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       const r = await api.getClaudeStatus();
       if (r.ok) setStatus(r.data);
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const r = await (window as any).api.claudePty.available();
+      setEmbeddedAvailable(!!r?.available);
+      setEmbeddedError(r?.error ?? null);
     })();
   }, []);
 
@@ -63,11 +73,18 @@ export function Claude() {
             </p>
             <button
               onClick={() => setEmbeddedStarted(true)}
-              disabled={!status?.installed}
+              disabled={!status?.installed || embeddedAvailable === false}
               className="px-4 py-2 rounded-md bg-[#238636] text-white text-sm font-bold disabled:opacity-50"
             >
               Start Embedded Terminal
             </button>
+            {embeddedAvailable === false && (
+              <div className="mt-3 p-3 bg-status-warn/10 border border-status-warn/40 rounded-md text-[11px] text-status-warn">
+                <strong>Embedded terminal unavailable on this install.</strong><br/>
+                {embeddedError ?? 'node-pty native module failed to load.'}<br/>
+                Use "External Window" mode instead — it launches Claude in a Windows Terminal tab.
+              </div>
+            )}
           </div>
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 200px)' }}>

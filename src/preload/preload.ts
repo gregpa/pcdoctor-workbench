@@ -54,6 +54,8 @@ const api = {
   downloadUpdate: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:downloadUpdate'),
   installUpdateNow: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installUpdateNow'),
   claudePty: {
+    available: (): Promise<{ available: boolean; error?: string }> =>
+      ipcRenderer.invoke('api:claudePty:available'),
     spawn: (opts: { id: string; contextText?: string; cols?: number; rows?: number }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:spawn', opts),
     write: (id: string, data: string): Promise<{ ok: boolean }> =>

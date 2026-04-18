@@ -86,7 +86,7 @@ app.whenReady().then(() => {
     },
   });
 
-  registerPtyIpc(() => mainWindow);
+  try { registerPtyIpc(() => mainWindow); } catch (e) { console.error('pty init failed', e); }
 
   // Auto-updater — init + check on startup + every 6 hours
   if (app.isPackaged) {

@@ -47,6 +47,12 @@ export function ClaudeTerminal({ contextText, onExit }: ClaudeTerminalProps) {
     });
 
     (async () => {
+      const avail = await api.claudePty.available();
+      if (!avail.available) {
+        setStatus('error');
+        setErrorMsg(avail.error ?? 'Embedded terminal unavailable');
+        return;
+      }
       const r = await api.claudePty.spawn({ id: sessionId, contextText, cols: term.cols, rows: term.rows });
       if (r.ok) setStatus('running');
       else { setStatus('error'); setErrorMsg(r.error ?? 'Failed to start'); }
