@@ -2,19 +2,28 @@ import { useState } from 'react';
 import { Tooltip } from '@renderer/components/layout/Tooltip.js';
 import type { ActionDefinition } from '@shared/actions.js';
 import { useConfirm } from '@renderer/lib/confirmContext.js';
+import { ActionParameterModal } from './ActionParameterModal.js';
 
 interface ActionButtonProps {
   action: ActionDefinition;
-  onRun: () => Promise<void>;
+  onRun: (params?: Record<string, string>, dryRun?: boolean) => Promise<void>;
   disabled?: boolean;
 }
 
 export function ActionButton({ action, onRun, disabled }: ActionButtonProps) {
   const [busy, setBusy] = useState(false);
+  const [showParams, setShowParams] = useState(false);
   const confirm = useConfirm();
 
   async function handleClick() {
     if (busy || disabled) return;
+
+    // Parametric actions show the parameter modal (which includes its own confirm)
+    if (action.params_schema && Object.keys(action.params_schema).length > 0) {
+      setShowParams(true);
+      return;
+    }
+
     if (action.confirm_level !== 'none') {
       const ok = await confirm({
         title: action.label,
@@ -33,16 +42,32 @@ export function ActionButton({ action, onRun, disabled }: ActionButtonProps) {
     try { await onRun(); } finally { setBusy(false); }
   }
 
+  async function handleParamSubmit(params: Record<string, string>, dryRun: boolean) {
+    setShowParams(false);
+    setBusy(true);
+    try { await onRun(params, dryRun); } finally { setBusy(false); }
+  }
+
   return (
-    <Tooltip text={action.tooltip}>
-      <button
-        className="flex flex-col items-center justify-center gap-1.5 p-3 bg-surface-900 border border-surface-600 rounded-md text-[11px] text-text-primary hover:bg-surface-700 hover:border-status-info/40 transition disabled:opacity-50 disabled:cursor-not-allowed w-full h-[88px]"
-        onClick={handleClick}
-        disabled={busy || disabled}
-      >
-        <span className="text-xl leading-none">{action.icon}</span>
-        <span className="text-center leading-tight">{busy ? 'Running…' : action.label}</span>
-      </button>
-    </Tooltip>
+    <>
+      <Tooltip text={action.tooltip}>
+        <button
+          className="flex flex-col items-center justify-center gap-1.5 p-3 bg-surface-900 border border-surface-600 rounded-md text-[11px] text-text-primary hover:bg-surface-700 hover:border-status-info/40 transition disabled:opacity-50 disabled:cursor-not-allowed w-full h-[88px]"
+          onClick={handleClick}
+          disabled={busy || disabled}
+        >
+          <span className="text-xl leading-none">{action.icon}</span>
+          <span className="text-center leading-tight">{busy ? 'Running…' : action.label}</span>
+        </button>
+      </Tooltip>
+
+      {showParams && (
+        <ActionParameterModal
+          action={action}
+          onSubmit={handleParamSubmit}
+          onCancel={() => setShowParams(false)}
+        />
+      )}
+    </>
   );
 }
