@@ -23,6 +23,7 @@ export function Settings() {
   const [tasks, setTasks] = useState<ScheduledTaskInfo[] | null>(null);
   const [emailRecipient, setEmailRecipient] = useState(settings.email_digest_recipient ?? '');
   const [digestHour, setDigestHour] = useState(settings.digest_hour ?? '8');
+  const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -44,6 +45,24 @@ export function Settings() {
       if (r.ok) setTasks(r.data);
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      const r = await (api as any).listBlockedIPs?.();
+      if (r?.ok) setBlockedIPs(r.data);
+    })();
+  }, []);
+
+  async function unblockIp(ip: string) {
+    const ok = confirm(`Unblock ${ip}?`);
+    if (!ok) return;
+    const r = await api.runAction({ name: 'unblock_ip', params: { ip } });
+    if (r.ok) {
+      showToast(`Unblocked ${ip}`);
+      const fresh = await (api as any).listBlockedIPs?.();
+      if (fresh?.ok) setBlockedIPs(fresh.data);
+    } else showToast(`Unblock failed: ${r.error.message}`);
+  }
 
   async function toggleTaskEnabled(name: string, enabled: boolean) {
     const r = await api.setScheduledTaskEnabled(name, enabled);
@@ -249,6 +268,41 @@ export function Settings() {
           >
             Send Weekly Digest Now
           </button>
+        </div>
+      </section>
+
+      {/* Blocked IPs */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">🚫 Blocked IP Addresses</h2>
+        {blockedIPs.length === 0 ? (
+          <div className="text-xs text-text-secondary">No PCDoctor-managed block rules. Use Security → Authentication → Block to add them.</div>
+        ) : (
+          <div className="space-y-1">
+            {blockedIPs.map((r, i) => (
+              <div key={i} className="flex items-center gap-3 bg-surface-900 border border-surface-700 rounded-md p-2 text-xs">
+                <span className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-status-crit' : 'bg-surface-600'}`}></span>
+                <code className="flex-1 font-mono">{r.remote_address}</code>
+                <span className="text-[10px] text-text-secondary">{r.direction}</span>
+                <button onClick={() => unblockIp(r.remote_address)} className="px-2 py-1 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-good/40">Unblock</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Automatic Threat Response */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">⚔ Automatic Threat Response</h2>
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={settings.auto_block_rdp_bruteforce === '1'}
+            onChange={(e) => saveSetting('auto_block_rdp_bruteforce', e.target.checked ? '1' : '0')}
+          />
+          <span>Auto-block IPs generating RDP brute-force (&ge;10 failed logons in 24h)</span>
+        </label>
+        <div className="text-[10px] text-text-secondary mt-1 pl-6">
+          When enabled, Security scans automatically apply the Block-IP action to repeat offenders. You can review + unblock above.
         </div>
       </section>
 

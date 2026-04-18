@@ -47,6 +47,8 @@ const api = {
   flushBufferedNotifications: (): Promise<IpcResult<{ sent: number }>> => ipcRenderer.invoke('api:flushBufferedNotifications'),
   sendWeeklyDigestEmail: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendWeeklyDigestEmail'),
   getRecentAuthEvents: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getRecentAuthEvents'),
+  listBlockedIPs: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listBlockedIPs'),
+  listToolResults: (toolId?: string): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listToolResults', toolId),
 };
 
 contextBridge.exposeInMainWorld('api', api);

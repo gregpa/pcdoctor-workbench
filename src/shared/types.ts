@@ -116,6 +116,8 @@ export type ActionName =
   | 'hide_kb' | 'install_kb'
   | 'create_shadow_copy' | 'enable_bitlocker' | 'block_ip' | 'run_mbam_scan'
   | 'run_dell_command_update' | 'import_occt_csv'
+  | 'unblock_ip'
+  | 'analyze_minidump'
   // Internal (not shown in UI)
   | 'create_restore_point';
 

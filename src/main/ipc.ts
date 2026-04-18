@@ -10,8 +10,9 @@ import { revertRollback } from './rollbackManager.js';
 import {
   listActionLog, markActionReverted, queryMetricTrend, loadForecasts,
   upsertPersistence, setPersistenceApproval, countNewPersistence,
-  setSetting, getAllSettings,
+  setSetting, getAllSettings, getSetting,
   setReviewItemState, getReviewItemStates,
+  listToolResults,
 } from './dataStore.js';
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
@@ -252,9 +253,45 @@ export function registerIpcHandlers() {
         overall_severity: posture.overall_severity ?? 'good',
       };
       setCachedSmart(data.smart);
+
+      // Auto-block RDP brute-force source IPs if setting enabled
+      const autoBlockEnabled = getSetting('auto_block_rdp_bruteforce') === '1';
+      if (autoBlockEnabled) {
+        for (const ti of data.threat_indicators) {
+          if (ti.category === 'rdp_bruteforce' && (ti.detail as any)?.auto_block_candidates) {
+            for (const ip of ((ti.detail as any).auto_block_candidates as string[])) {
+              try {
+                await runPowerShellScript('actions/Block-IP.ps1', ['-JsonOutput', '-Ip', ip, '-Reason', 'Auto-block: RDP brute-force'], { timeoutMs: 10_000 });
+              } catch {}
+            }
+          }
+        }
+      }
+
       return { ok: true, data };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Security scan failed' } };
+    }
+  });
+
+  ipcMain.handle('api:listBlockedIPs', async (): Promise<IpcResult<any[]>> => {
+    try {
+      const r = await runPowerShellScript<any>('security/List-BlockedIPs.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      return { ok: true, data: r.rules ?? [] };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:listToolResults', async (_evt, toolId?: string): Promise<IpcResult<any[]>> => {
+    try {
+      const rows = listToolResults(toolId, 20);
+      return { ok: true, data: rows.map(r => ({
+        id: r.id, ts: r.ts, tool_id: r.tool_id, csv_path: r.csv_path, samples: r.samples,
+        summary: r.summary, findings: r.findings_json ? JSON.parse(r.findings_json) : null,
+      })) };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
   });
 
