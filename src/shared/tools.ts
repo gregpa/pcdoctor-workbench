@@ -29,7 +29,7 @@ export const TOOLS: Record<string, ToolDefinition> = {
     id: 'occt', name: 'OCCT', category: 'hardware',
     description: 'CPU/GPU/PSU stress testing', publisher: 'OCBase',
     detect_paths: [
-      'C:\\ProgramData\\PCDoctor\\OCCT (1).exe',
+      'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe',
       'C:\\Program Files\\OCCT\\OCCT.exe',
       'C:\\Program Files (x86)\\OCCT\\OCCT.exe',
     ],
@@ -43,7 +43,7 @@ export const TOOLS: Record<string, ToolDefinition> = {
     description: 'Sensor monitoring + CSV logging', publisher: 'Martin Malik',
     detect_paths: [
       'C:\\Program Files\\HWiNFO64\\HWiNFO64.exe',
-      'C:\\ProgramData\\PCDoctor\\HWiNFO64\\HWiNFO64.exe',
+      'C:\\ProgramData\\PCDoctor\\tools\\HWiNFO64\\HWiNFO64.exe',
     ],
     launch_modes: [
       { id: 'gui', label: 'Open (sensors-only mode)', args: ['-so'], detached: true },
@@ -146,7 +146,7 @@ export const TOOLS: Record<string, ToolDefinition> = {
     id: 'autoruns', name: 'Autoruns', category: 'forensics',
     description: 'All autostart entries across the system', publisher: 'Sysinternals',
     detect_paths: [
-      'C:\\ProgramData\\PCDoctor\\Autoruns\\Autoruns64.exe',
+      'C:\\ProgramData\\PCDoctor\\tools\\Autoruns\\Autoruns64.exe',
       'C:\\Program Files\\Sysinternals\\Autoruns64.exe',
       'C:\\Program Files\\Sysinternals Suite\\Autoruns64.exe',
     ],
