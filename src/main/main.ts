@@ -8,6 +8,7 @@ import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMes
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
+import { startClaudeBridgeWatcher } from './claudeBridgeWatcher.js';
 
 // Hide dock icon / single-instance check
 const gotLock = app.requestSingleInstanceLock();
@@ -85,6 +86,7 @@ app.whenReady().then(() => {
   pollTimer = setInterval(backgroundPoll, POLL_INTERVAL_MS);
 
   // Start Telegram callback polling
+  startClaudeBridgeWatcher(() => mainWindow);
   startTelegramPolling(async (q) => {
     if (!q.data) { await answerCallbackQuery(q.id, 'Invalid request'); return; }
     const parts = q.data.split('|');
@@ -100,11 +102,24 @@ app.whenReady().then(() => {
 
     if (kind === 'act') {
       const actionName = parts[1] as ActionName;
+      const findingHash = parts[2];
       const def = ACTIONS[actionName];
       if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
-      // Telegram actions are blocked for Tier A destructive by default — confirm-on-phone path
       if (def.confirm_level === 'destructive') {
-        await answerCallbackQuery(q.id, '⚠ Destructive action — use the dashboard to confirm');
+        // Send a confirmation message rather than executing
+        await answerCallbackQuery(q.id, '⚠ Destructive — confirm required');
+        if (q.message) {
+          const { sendTelegramMessage, makeCallbackData } = await import('./telegramBridge.js');
+          await sendTelegramMessage(
+            `⚠️ <b>Confirm destructive action</b>\n\n<b>${def.label}</b>\n${def.tooltip}\n\n` +
+            `Rollback: Tier ${def.rollback_tier}\n` +
+            `Tap <b>Confirm</b> below to proceed, or Cancel to skip.`,
+            [[
+              { text: `✓ Confirm ${def.label}`, callback_data: makeCallbackData('act_confirmed', actionName, findingHash) },
+              { text: '✖ Cancel', callback_data: makeCallbackData('dismiss', findingHash) },
+            ]]
+          );
+        }
         return;
       }
       await answerCallbackQuery(q.id, `Running ${def.label}…`);
@@ -121,6 +136,28 @@ app.whenReady().then(() => {
           await editMessageText(q.message.chat.id, q.message.message_id, `✗ Error: ${e?.message ?? 'unknown'}`);
         }
       }
+      return;
+    }
+
+    if (kind === 'act_confirmed') {
+      const actionName = parts[1] as ActionName;
+      const def = ACTIONS[actionName];
+      if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
+      await answerCallbackQuery(q.id, `Running ${def.label}…`);
+      try {
+        const result = await runAction({ name: actionName, triggered_by: 'telegram' });
+        const msg = result.success
+          ? `✓ <b>${def.label}</b> completed in ${result.duration_ms}ms`
+          : `✗ <b>${def.label}</b> failed: ${result.error?.message ?? 'unknown'}`;
+        if (q.message) {
+          await editMessageText(q.message.chat.id, q.message.message_id, msg);
+        }
+      } catch (e: any) {
+        if (q.message) {
+          await editMessageText(q.message.chat.id, q.message.message_id, `✗ Error: ${e?.message ?? 'unknown'}`);
+        }
+      }
+      return;
     }
   });
 });
