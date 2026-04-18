@@ -274,9 +274,24 @@ export function Security() {
               <div className="mt-2">
                 <div className="text-text-secondary mb-1">Top source IPs:</div>
                 {data.failed_logins.top_sources.map(s => (
-                  <div key={s.ip} className="flex justify-between text-xs">
+                  <div key={s.ip} className="flex justify-between items-center text-xs gap-2">
                     <code>{s.ip}</code>
-                    <span className="text-status-warn">{s.count} attempts</span>
+                    <span className="text-status-warn flex-1 text-right">{s.count} attempts</span>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const ok = confirm(`Block ${s.ip} (inbound + outbound firewall rule)?`);
+                        if (!ok) return;
+                        setDetail(null);
+                        await run({ name: 'block_ip', params: { ip: s.ip } });
+                        setToast(`Blocked ${s.ip}`);
+                        setTimeout(() => setToast(null), 4000);
+                        await refresh();
+                      }}
+                      className="px-2 py-0.5 rounded bg-status-crit/20 border border-status-crit/40 text-[10px] hover:bg-status-crit/30"
+                    >
+                      Block
+                    </button>
                   </div>
                 ))}
               </div>
