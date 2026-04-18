@@ -41,12 +41,58 @@ foreach ($h in $history) {
     }
 }
 
+# Stuck-update signals
+$stuckSignals = @()
+
+# Days since last successful install
+$lastSuccess = $null
+foreach ($h in $history) { if ($h.ResultCode -eq 2) { $lastSuccess = $h.Date; break } }
+$daysSince = if ($lastSuccess) { [math]::Round(([DateTime]::Now - $lastSuccess).TotalDays, 1) } else { 999 }
+if ($daysSince -gt 30 -and $pending.Updates.Count -ge 1) {
+    $stuckSignals += @{ kind='stale_no_install'; value="$daysSince days since last successful install with $($pending.Updates.Count) pending"; severity='warn' }
+}
+
+# SoftwareDistribution\Download size
+try {
+    $sdDl = 'C:\Windows\SoftwareDistribution\Download'
+    if (Test-Path $sdDl) {
+        $size = (Get-ChildItem $sdDl -Recurse -Force -ErrorAction SilentlyContinue -File | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+        if ($size -gt 30GB) {
+            $stuckSignals += @{ kind='softwaredist_bloat'; value=("SoftwareDistribution\\Download is {0:N1} GB" -f ($size/1GB)); severity='warn' }
+        }
+    }
+} catch {}
+
+# WU service state
+try {
+    $wu = Get-Service wuauserv -ErrorAction Stop
+    if ($wu.StartType -eq 'Disabled') {
+        $stuckSignals += @{ kind='wuauserv_disabled'; value='wuauserv is Disabled'; severity='crit' }
+    }
+} catch {}
+
+# Single-KB repeat failure
+$failedGrouped = @{}
+foreach ($h in $history) {
+    if ($h.ResultCode -eq 4) {   # Failed
+        $title = "$($h.Title)"
+        if ($failedGrouped.ContainsKey($title)) { $failedGrouped[$title]++ } else { $failedGrouped[$title] = 1 }
+    }
+}
+foreach ($k in $failedGrouped.Keys) {
+    if ($failedGrouped[$k] -ge 3) {
+        $stuckSignals += @{ kind='repeat_fail'; value="$k has failed $($failedGrouped[$k]) times"; severity='warn' }
+    }
+}
+
 $result = @{
     success = $true
     duration_ms = $sw.ElapsedMilliseconds
     pending = $pendingList
     pending_count = $pendingList.Count
     installed_last_50 = $installed
+    stuck_signals = $stuckSignals
+    stuck = ($stuckSignals.Count -gt 0)
 }
 $result | ConvertTo-Json -Depth 6 -Compress
 exit 0
