@@ -61,6 +61,15 @@ async function backgroundPoll() {
 
 app.whenReady().then(() => {
   registerIpcHandlers();
+
+  // Auto-register PCDoctor scheduled tasks (best-effort, once per session)
+  (async () => {
+    try {
+      const { runPowerShellScript } = await import('./scriptRunner.js');
+      await runPowerShellScript('Register-All-Tasks.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+    } catch { /* non-fatal */ }
+  })();
+
   createWindow();
   createTray({
     getWindow: () => mainWindow,
