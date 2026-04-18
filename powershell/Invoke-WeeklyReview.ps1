@@ -165,6 +165,15 @@ $md | Out-File -FilePath $mdPath -Encoding UTF8 -Force
 $flagPath = Join-Path $weeklyDir '.pending-review'
 Set-Content -Path $flagPath -Value $reviewDate -Encoding ASCII -Force
 
+# Auto-archive to Obsidian Vault
+$obsidianDir = 'C:\Users\greg_\Documents\Claude Cowork\Obsidian Vault\PC Doctor\Weekly Reviews'
+try {
+    if (-not (Test-Path $obsidianDir)) { New-Item -ItemType Directory -Path $obsidianDir -Force | Out-Null }
+    Copy-Item -Path $mdPath -Destination (Join-Path $obsidianDir "$reviewDate.md") -Force
+} catch {
+    # non-fatal
+}
+
 $sw.Stop()
 
 $result = @{
