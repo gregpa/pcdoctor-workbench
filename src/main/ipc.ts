@@ -1,5 +1,5 @@
 import { ipcMain, safeStorage } from 'electron';
-import { readFile, readdir, unlink } from 'node:fs/promises';
+import { readFile, readdir, unlink, copyFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { getStatus, PCDoctorBridgeError, setCachedSmart } from './pcdoctorBridge.js';
@@ -9,6 +9,7 @@ import {
   listActionLog, markActionReverted, queryMetricTrend, loadForecasts,
   upsertPersistence, setPersistenceApproval, countNewPersistence,
   setSetting, getAllSettings,
+  setReviewItemState, getReviewItemStates,
 } from './dataStore.js';
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
@@ -127,19 +128,65 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:getWeeklyReview', async (): Promise<IpcResult<WeeklyReview | null>> => {
+  ipcMain.handle('api:getWeeklyReview', async (_evt, reviewDate?: string): Promise<IpcResult<WeeklyReview | null>> => {
     try {
       if (!existsSync(weeklyDir)) return { ok: true, data: null };
       const files = (await readdir(weeklyDir)).filter(f => f.endsWith('.json')).sort().reverse();
       if (files.length === 0) return { ok: true, data: null };
-      const latestFile = path.join(weeklyDir, files[0]);
-      let raw = await readFile(latestFile, 'utf8');
+      const pickFile = reviewDate ? files.find(f => f.startsWith(reviewDate)) : files[0];
+      if (!pickFile) return { ok: true, data: null };
+      const filePath = path.join(weeklyDir, pickFile);
+      let raw = await readFile(filePath, 'utf8');
       if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
       const data = JSON.parse(raw) as WeeklyReview;
       data.has_pending_flag = existsSync(path.join(weeklyDir, '.pending-review'));
+      // Merge persisted states
+      const states = getReviewItemStates(data.review_date);
+      for (const item of data.action_items) {
+        const s = states[item.id];
+        if (s) {
+          item.state = s.state as any;
+        }
+      }
       return { ok: true, data };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to load weekly review' } };
+    }
+  });
+
+  ipcMain.handle('api:listWeeklyReviews', async (): Promise<IpcResult<string[]>> => {
+    try {
+      if (!existsSync(weeklyDir)) return { ok: true, data: [] };
+      const files = (await readdir(weeklyDir))
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace(/\.json$/, ''))
+        .sort().reverse();
+      return { ok: true, data: files };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:setWeeklyReviewItemState', async (_evt, reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<{}>> => {
+    try {
+      setReviewItemState(reviewDate, itemId, state as any, appliedActionId);
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:archiveWeeklyReviewToObsidian', async (_evt, reviewDate: string): Promise<IpcResult<{ archive_path: string }>> => {
+    try {
+      const sourceMd = path.join(weeklyDir, `${reviewDate}.md`);
+      if (!existsSync(sourceMd)) return { ok: false, error: { code: 'E_NOT_FOUND', message: 'Review markdown not found' } };
+      const obsidianDir = path.join('C:', 'Users', 'greg_', 'Documents', 'Claude Cowork', 'Obsidian Vault', 'PC Doctor', 'Weekly Reviews');
+      await mkdir(obsidianDir, { recursive: true });
+      const destPath = path.join(obsidianDir, `${reviewDate}.md`);
+      await copyFile(sourceMd, destPath);
+      return { ok: true, data: { archive_path: destPath } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
   });
 

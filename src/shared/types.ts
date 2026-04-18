@@ -205,7 +205,7 @@ export interface WeeklyReviewActionItem {
   message: string;
   detail?: unknown;
   suggested_action?: { action_name: string; label: string };
-  state?: 'pending' | 'applied' | 'dismissed' | 'snoozed';
+  state?: 'pending' | 'applied' | 'dismissed' | 'snoozed' | 'auto_resolved';
 }
 
 export interface WeeklyReview {
