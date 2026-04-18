@@ -34,9 +34,9 @@ function ToolTile({ def, installed, onLaunch, onInstall, running }: {
               <button
                 onClick={() => setShowModes(!showModes)}
                 disabled={running}
-                className="w-full px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] hover:border-status-info/40 disabled:opacity-50"
+                className="w-full px-2.5 py-1.5 rounded-md bg-[#238636] text-white text-[11px] font-semibold disabled:opacity-50"
               >
-                Launch ▾
+                ▶ Launch ▾
               </button>
               {showModes && (
                 <div className="absolute top-full mt-1 left-0 right-0 bg-surface-800 border border-surface-600 rounded-md shadow-xl z-10">
