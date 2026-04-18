@@ -24,6 +24,10 @@ const api = {
   getWindowsUpdateDetail: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getWindowsUpdateDetail'),
   getClaudeStatus: (): Promise<IpcResult<{ installed: boolean; path: string | null }>> => ipcRenderer.invoke('api:getClaudeStatus'),
   launchClaude: (): Promise<IpcResult<{ pid?: number }>> => ipcRenderer.invoke('api:launchClaude'),
+  getSettings: (): Promise<IpcResult<Record<string, string>>> => ipcRenderer.invoke('api:getSettings'),
+  setSetting: (key: string, value: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setSetting', key, value),
+  testTelegram: (token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => ipcRenderer.invoke('api:testTelegram', token, chatId),
+  sendTestNotification: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendTestNotification'),
 };
 
 contextBridge.exposeInMainWorld('api', api);

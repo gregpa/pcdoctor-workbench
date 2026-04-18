@@ -8,12 +8,14 @@ import { revertRollback } from './rollbackManager.js';
 import {
   listActionLog, markActionReverted, queryMetricTrend, loadForecasts,
   upsertPersistence, setPersistenceApproval, countNewPersistence,
+  setSetting, getAllSettings,
 } from './dataStore.js';
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
 import { launchClaudeInTerminal, resolveClaudePath } from './claudeBridge.js';
+import { testTelegramConnection, sendTelegramMessage } from './telegramBridge.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
@@ -237,5 +239,27 @@ export function registerIpcHandlers() {
     const r = await launchClaudeInTerminal();
     if (r.ok) return { ok: true, data: { pid: r.pid } };
     return { ok: false, error: { code: 'E_CLAUDE_LAUNCH', message: r.error ?? 'Launch failed' } };
+  });
+
+  ipcMain.handle('api:getSettings', async (): Promise<IpcResult<Record<string, string>>> => {
+    try { return { ok: true, data: getAllSettings() }; }
+    catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
+  });
+
+  ipcMain.handle('api:setSetting', async (_evt, key: string, value: string): Promise<IpcResult<{}>> => {
+    try { setSetting(key, value); return { ok: true, data: {} }; }
+    catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
+  });
+
+  ipcMain.handle('api:testTelegram', async (_evt, token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => {
+    const r = await testTelegramConnection(token, chatId);
+    if (r.ok) return { ok: true, data: { bot_username: r.bot_username } };
+    return { ok: false, error: { code: 'E_TG_TEST', message: r.error ?? 'test failed' } };
+  });
+
+  ipcMain.handle('api:sendTestNotification', async (): Promise<IpcResult<{}>> => {
+    const r = await sendTelegramMessage('🧪 <b>Test notification from PCDoctor Workbench</b>\n\nThis is a manual test — ignore.');
+    if (r.ok) return { ok: true, data: {} };
+    return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
   });
 }
