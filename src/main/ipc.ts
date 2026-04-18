@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, safeStorage } from 'electron';
 import { readFile, readdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -242,13 +242,36 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:getSettings', async (): Promise<IpcResult<Record<string, string>>> => {
-    try { return { ok: true, data: getAllSettings() }; }
-    catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
+    try {
+      const all = getAllSettings();
+      // Decrypt sensitive values before returning
+      for (const k of ['telegram_bot_token']) {
+        const v = all[k];
+        if (v?.startsWith('dpapi:') && safeStorage.isEncryptionAvailable()) {
+          try {
+            const ct = Buffer.from(v.slice(6), 'base64');
+            all[k] = safeStorage.decryptString(ct);
+          } catch { all[k] = ''; }
+        }
+      }
+      return { ok: true, data: all };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
   });
 
   ipcMain.handle('api:setSetting', async (_evt, key: string, value: string): Promise<IpcResult<{}>> => {
-    try { setSetting(key, value); return { ok: true, data: {} }; }
-    catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
+    try {
+      if (key === 'telegram_bot_token' && value && safeStorage.isEncryptionAvailable()) {
+        const encrypted = safeStorage.encryptString(value).toString('base64');
+        setSetting(key, `dpapi:${encrypted}`);
+      } else {
+        setSetting(key, value);
+      }
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
   });
 
   ipcMain.handle('api:testTelegram', async (_evt, token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => {

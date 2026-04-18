@@ -1,6 +1,19 @@
 import https from 'node:https';
 import { createHash, randomBytes } from 'node:crypto';
+import { safeStorage } from 'electron';
 import { getSetting, recordNotification } from './dataStore.js';
+
+function resolveTokenValue(raw: string | null): string | null {
+  if (!raw) return null;
+  if (raw.startsWith('dpapi:')) {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    try {
+      const ct = Buffer.from(raw.slice(6), 'base64');
+      return safeStorage.decryptString(ct);
+    } catch { return null; }
+  }
+  return raw;
+}
 
 interface TelegramResponse<T> { ok: boolean; result?: T; description?: string; }
 
@@ -34,7 +47,7 @@ export interface InlineButton {
 }
 
 export async function sendTelegramMessage(text: string, buttons?: InlineButton[][]): Promise<{ ok: boolean; error?: string; message_id?: number }> {
-  const token = getSetting('telegram_bot_token');
+  const token = resolveTokenValue(getSetting('telegram_bot_token'));
   const chatId = getSetting('telegram_chat_id');
   if (!token || !chatId) return { ok: false, error: 'Telegram not configured' };
   const params: Record<string, unknown> = {
@@ -102,7 +115,7 @@ export function stopTelegramPolling(): void {
 }
 
 async function pollOnce(): Promise<void> {
-  const token = getSetting('telegram_bot_token');
+  const token = resolveTokenValue(getSetting('telegram_bot_token'));
   const chatId = getSetting('telegram_chat_id');
   if (!token || !chatId || getSetting('telegram_enabled') !== '1') return;
   const r = await tgRequest<TgUpdate[]>(token, 'getUpdates', {
@@ -120,13 +133,13 @@ async function pollOnce(): Promise<void> {
 }
 
 export async function answerCallbackQuery(queryId: string, text?: string): Promise<void> {
-  const token = getSetting('telegram_bot_token');
+  const token = resolveTokenValue(getSetting('telegram_bot_token'));
   if (!token) return;
   await tgRequest(token, 'answerCallbackQuery', { callback_query_id: queryId, text: text ?? '' });
 }
 
 export async function editMessageText(chatId: number, messageId: number, text: string): Promise<void> {
-  const token = getSetting('telegram_bot_token');
+  const token = resolveTokenValue(getSetting('telegram_bot_token'));
   if (!token) return;
   await tgRequest(token, 'editMessageText', {
     chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML',
