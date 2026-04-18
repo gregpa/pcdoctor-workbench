@@ -19,6 +19,8 @@ import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
 import { launchClaudeInTerminal, launchClaudeWithContext, resolveClaudePath } from './claudeBridge.js';
+import { checkForUpdates, downloadUpdate, installNow, getStatus as getUpdaterStatus } from './autoUpdater.js';
+import type { UpdateStatus } from './autoUpdater.js';
 import { testTelegramConnection, sendTelegramMessage } from './telegramBridge.js';
 import { flushBufferedNotifications } from './notifier.js';
 import { sendWeeklyDigestEmail } from './emailDigest.js';
@@ -557,5 +559,24 @@ export function registerIpcHandlers() {
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
+  });
+
+  ipcMain.handle('api:getUpdateStatus', async (): Promise<IpcResult<UpdateStatus>> => {
+    return { ok: true, data: getUpdaterStatus() };
+  });
+
+  ipcMain.handle('api:checkForUpdates', async (): Promise<IpcResult<UpdateStatus>> => {
+    await checkForUpdates();
+    return { ok: true, data: getUpdaterStatus() };
+  });
+
+  ipcMain.handle('api:downloadUpdate', async (): Promise<IpcResult<UpdateStatus>> => {
+    await downloadUpdate();
+    return { ok: true, data: getUpdaterStatus() };
+  });
+
+  ipcMain.handle('api:installUpdateNow', async (): Promise<IpcResult<{}>> => {
+    installNow();
+    return { ok: true, data: {} };
   });
 }

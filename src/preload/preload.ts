@@ -49,6 +49,32 @@ const api = {
   getRecentAuthEvents: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getRecentAuthEvents'),
   listBlockedIPs: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listBlockedIPs'),
   listToolResults: (toolId?: string): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listToolResults', toolId),
+  getUpdateStatus: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getUpdateStatus'),
+  checkForUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:checkForUpdates'),
+  downloadUpdate: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:downloadUpdate'),
+  installUpdateNow: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installUpdateNow'),
+  claudePty: {
+    spawn: (opts: { id: string; contextText?: string; cols?: number; rows?: number }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('api:claudePty:spawn', opts),
+    write: (id: string, data: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('api:claudePty:write', { id, data }),
+    resize: (id: string, cols: number, rows: number): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('api:claudePty:resize', { id, cols, rows }),
+    kill: (id: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('api:claudePty:kill', id),
+    onData: (id: string, cb: (chunk: string) => void): (() => void) => {
+      const channel = `claudePty:data:${id}`;
+      const handler = (_e: any, d: string) => cb(d);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onExit: (id: string, cb: (info: { exitCode: number }) => void): (() => void) => {
+      const channel = `claudePty:exit:${id}`;
+      const handler = (_e: any, info: any) => cb(info);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);

@@ -2,6 +2,10 @@ appId: com.gregpajak.pcdoctor-workbench
 productName: PCDoctor Workbench
 artifactName: "${productName}-Setup-${version}.${ext}"
 
+publish:
+  - provider: generic
+    url: file://192.168.50.226/Backups/pcdoctor-updates
+
 directories:
   output: release
   buildResources: resources

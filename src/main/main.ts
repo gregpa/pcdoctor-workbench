@@ -10,6 +10,8 @@ import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
 import { startClaudeBridgeWatcher } from './claudeBridgeWatcher.js';
 import { flushBufferedNotifications, getDigestHour } from './notifier.js';
+import { initAutoUpdater, checkForUpdates } from './autoUpdater.js';
+import { registerPtyIpc, killAllPtySessions } from './ptyBridge.js';
 
 // Hide dock icon / single-instance check
 const gotLock = app.requestSingleInstanceLock();
@@ -79,9 +81,19 @@ app.whenReady().then(() => {
       (app as any).isQuitting = true;
       if (pollTimer) clearInterval(pollTimer);
       stopTelegramPolling();
+      killAllPtySessions();
       app.quit();
     },
   });
+
+  registerPtyIpc(() => mainWindow);
+
+  // Auto-updater — init + check on startup + every 6 hours
+  if (app.isPackaged) {
+    initAutoUpdater(() => mainWindow);
+    setTimeout(() => { checkForUpdates().catch(() => {}); }, 30_000);
+    setInterval(() => { checkForUpdates().catch(() => {}); }, 6 * 60 * 60 * 1000);
+  }
 
   backgroundPoll();
   pollTimer = setInterval(backgroundPoll, POLL_INTERVAL_MS);

@@ -24,6 +24,33 @@ export function Settings() {
   const [emailRecipient, setEmailRecipient] = useState(settings.email_digest_recipient ?? '');
   const [digestHour, setDigestHour] = useState(settings.digest_hour ?? '8');
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
+  const [updateStatus, setUpdateStatus] = useState<any>({ state: 'idle' });
+
+  async function refreshUpdateStatus() {
+    const r = await (api as any).getUpdateStatus?.();
+    if (r?.ok) setUpdateStatus(r.data);
+  }
+
+  async function checkForUpdatesNow() {
+    showToast('Checking for updates…');
+    const r = await (api as any).checkForUpdates?.();
+    if (r?.ok) setUpdateStatus(r.data);
+  }
+
+  async function downloadUpdate() {
+    const r = await (api as any).downloadUpdate?.();
+    if (r?.ok) setUpdateStatus(r.data);
+  }
+
+  async function installUpdate() {
+    await (api as any).installUpdateNow?.();
+  }
+
+  useEffect(() => {
+    refreshUpdateStatus();
+    const id = setInterval(refreshUpdateStatus, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -349,6 +376,44 @@ export function Settings() {
         >
           Export Diagnostic Bundle
         </button>
+      </section>
+
+      {/* Auto-Update */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">🔄 Auto-Update</h2>
+        <div className="text-xs text-text-secondary mb-3">
+          Checks <code>\\192.168.50.226\Backups\pcdoctor-updates</code> every 6 hours.
+          New builds dropped there auto-download (with your approval).
+        </div>
+        <div className="bg-surface-900 border border-surface-700 rounded-md p-3 mb-3">
+          <div className="text-[10px] uppercase tracking-wider text-text-secondary mb-1">Status</div>
+          <div className="text-sm font-semibold">
+            {updateStatus.state === 'idle' && 'Idle'}
+            {updateStatus.state === 'checking' && 'Checking…'}
+            {updateStatus.state === 'available' && `Update ${updateStatus.version} available`}
+            {updateStatus.state === 'downloading' && `Downloading ${updateStatus.progress_pct ?? 0}%`}
+            {updateStatus.state === 'ready' && `Ready to install ${updateStatus.version}`}
+            {updateStatus.state === 'not_available' && 'On latest version'}
+            {updateStatus.state === 'error' && `Error: ${updateStatus.message}`}
+          </div>
+          {updateStatus.message && updateStatus.state !== 'error' && (
+            <div className="text-[10px] text-text-secondary mt-1">{updateStatus.message}</div>
+          )}
+          {updateStatus.state === 'downloading' && (
+            <div className="mt-2 h-1.5 bg-surface-700 rounded-full overflow-hidden">
+              <div className="h-full bg-status-info transition-all" style={{ width: `${updateStatus.progress_pct ?? 0}%` }} />
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={checkForUpdatesNow} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Check Now</button>
+          {updateStatus.state === 'available' && (
+            <button onClick={downloadUpdate} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Download Update</button>
+          )}
+          {updateStatus.state === 'ready' && (
+            <button onClick={installUpdate} className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-semibold">Install and Restart</button>
+          )}
+        </div>
       </section>
 
       {/* About */}
