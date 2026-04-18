@@ -12,8 +12,17 @@
   FileClose $0
   ExecWait 'schtasks.exe /Create /TN "PCDoctor-Workbench-Autostart" /XML "$TEMP\PCDoctor-Autostart.xml" /F'
   Delete "$TEMP\PCDoctor-Autostart.xml"
+
+  ; After first launch the app calls Register-All-Tasks.ps1 which sets up the rest.
+  ; As a redundancy + so tasks exist even before app opens, trigger the registration now:
+  ExecWait 'pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Register-All-Tasks.ps1"'
 !macroend
 
 !macro customUnInstall
   ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Workbench-Autostart" /F'
+  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Weekly-Review" /F'
+  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Forecast" /F'
+  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Security-Daily" /F'
+  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Security-Weekly" /F'
+  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Prune-Rollbacks" /F'
 !macroend
