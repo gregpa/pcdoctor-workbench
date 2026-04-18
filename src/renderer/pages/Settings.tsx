@@ -21,6 +21,8 @@ export function Settings() {
   const [tgToken, setTgToken] = useState('');
   const [tgChat, setTgChat] = useState('');
   const [tasks, setTasks] = useState<ScheduledTaskInfo[] | null>(null);
+  const [emailRecipient, setEmailRecipient] = useState(settings.email_digest_recipient ?? '');
+  const [digestHour, setDigestHour] = useState(settings.digest_hour ?? '8');
 
   useEffect(() => {
     (async () => {
@@ -29,6 +31,8 @@ export function Settings() {
         setSettings(r.data);
         setTgToken(r.data.telegram_bot_token ?? '');
         setTgChat(r.data.telegram_chat_id ?? '');
+        setEmailRecipient(r.data.email_digest_recipient ?? '');
+        setDigestHour(r.data.digest_hour ?? '8');
       }
       setLoading(false);
     })();
@@ -196,6 +200,55 @@ export function Settings() {
           <span>to</span>
           <input type="number" min={0} max={23} value={settings.quiet_hours_end ?? '7'} onChange={(e) => saveSetting('quiet_hours_end', e.target.value)} className="w-16 px-2 py-1 rounded-md bg-surface-900 border border-surface-600" />
           <span className="text-text-secondary">(24h clock)</span>
+        </div>
+      </section>
+
+      {/* Email digest */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">📧 Email Digest + Quiet Hours Buffering</h2>
+        <div className="text-xs text-text-secondary mb-3">
+          During quiet hours, non-critical notifications buffer and release as a single morning digest.
+          Weekly summary can also ship to your email (requires gws-gmail CLI).
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1">Morning digest hour (0-23)</label>
+            <input
+              type="number" min={0} max={23} value={digestHour}
+              onChange={(e) => { setDigestHour(e.target.value); saveSetting('digest_hour', e.target.value); }}
+              className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1">Email digest recipient</label>
+            <input
+              type="email" value={emailRecipient}
+              onChange={(e) => { setEmailRecipient(e.target.value); saveSetting('email_digest_recipient', e.target.value); }}
+              placeholder="you@example.com"
+              className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-xs"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={async () => {
+              const r = await api.flushBufferedNotifications();
+              showToast(r.ok ? `Flushed ${r.data.sent} buffered notifications` : `Failed: ${r.error.message}`);
+            }}
+            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+          >
+            Flush Buffer Now
+          </button>
+          <button
+            onClick={async () => {
+              const r = await api.sendWeeklyDigestEmail();
+              showToast(r.ok ? '✓ Email digest sent' : `Email failed: ${r.error.message}`);
+            }}
+            disabled={!emailRecipient}
+            className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50"
+          >
+            Send Weekly Digest Now
+          </button>
         </div>
       </section>
 
