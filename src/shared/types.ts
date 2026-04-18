@@ -90,6 +90,7 @@ export type ActionName =
   | 'run_dism'
   | 'trim_ssd'
   | 'generate_system_report'
+  | 'import_hwinfo_csv'
   // Network
   | 'release_renew_ip'
   | 'reset_winsock'
@@ -320,6 +321,7 @@ export interface SecurityPosture {
   persistence_new_count: number;
   persistence_items: PersistenceItem[];
   threat_indicators: ThreatIndicator[];
+  smart: SmartEntry[];
   overall_severity: 'good' | 'warn' | 'crit';
 }
 

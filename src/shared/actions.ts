@@ -115,6 +115,14 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'repair', icon: '📄',
     tooltip: 'Runs msinfo32 /report + Get-ComputerInfo + driver list. Produces a .txt/.nfo bundle for support tickets.',
   },
+  import_hwinfo_csv: {
+    name: 'import_hwinfo_csv', label: 'Import HWiNFO CSV',
+    ps_script: 'actions/Import-HWiNFO-CSV.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    category: 'repair', icon: '📊',
+    tooltip: 'Parse an HWiNFO sensor-log CSV into CPU/GPU/RAM temperature statistics.',
+    params_schema: { csv_path: { type: 'string', required: true, description: 'Full path to CSV file' } },
+  },
 
   // ============== NETWORK ==============
   release_renew_ip: {

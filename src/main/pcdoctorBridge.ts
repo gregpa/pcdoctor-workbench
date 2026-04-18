@@ -1,8 +1,34 @@
 import { readFile } from 'node:fs/promises';
 import { LATEST_JSON_PATH } from './constants.js';
-import { recordStatusSnapshot } from './dataStore.js';
+import { recordStatusSnapshot, getMetricWeekDelta } from './dataStore.js';
 import { emitNewFindingNotifications } from './notifier.js';
 import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
+
+let cachedSmart: SmartEntry[] = [];
+export function setCachedSmart(entries: SmartEntry[]) {
+  cachedSmart = entries;
+}
+
+function computeDelta(current: number, weekAgo: number | null, badDirection: 'up' | 'down'): { direction: 'up' | 'down' | 'neutral'; text: string; severity: Severity } | undefined {
+  if (weekAgo === null || !Number.isFinite(weekAgo)) return undefined;
+  const diff = current - weekAgo;
+  const abs = Math.abs(diff);
+  if (abs < 1) return { direction: 'neutral', text: 'no change', severity: 'good' };
+  const dir: 'up' | 'down' = diff > 0 ? 'up' : 'down';
+  const isBad = dir === badDirection;
+  const sev: Severity = isBad ? (abs > 10 ? 'crit' : 'warn') : 'good';
+  return {
+    direction: dir,
+    text: `${diff > 0 ? '+' : ''}${diff.toFixed(1)} vs last week`,
+    severity: sev,
+  };
+}
+
+/** DB-safe lookup — returns nulls if the DB isn't available (e.g. in test env with mismatched native binding). */
+function safeWeekDelta(category: string, metric: string, label?: string): { week_ago: number | null; now: number | null } {
+  try { return getMetricWeekDelta(category, metric, label); }
+  catch { return { week_ago: null, now: null }; }
+}
 
 export class PCDoctorBridgeError extends Error {
   code: string;
@@ -59,12 +85,14 @@ function mapToSystemStatus(r: any): SystemStatus {
   // --- CPU load ---
   if (typeof m.cpu_load_pct === 'number') {
     const cpuSev = classifyLoad(m.cpu_load_pct);
+    const cpuDelta = safeWeekDelta('cpu', 'load_pct');
     kpis.push({
       label: 'CPU Load',
       value: m.cpu_load_pct,
       unit: '%',
       severity: cpuSev,
       sub: 'Note: temps require HWiNFO import',
+      delta: computeDelta(m.cpu_load_pct, cpuDelta.week_ago, 'up'),
     });
     gauges.push({
       label: 'CPU Load',
@@ -80,12 +108,14 @@ function mapToSystemStatus(r: any): SystemStatus {
     const ramSev = classifyRam(m.ram_used_pct);
     const total = m.ram_total_gb ?? 0;
     const free = m.ram_free_gb ?? 0;
+    const ramDelta = safeWeekDelta('ram', 'used_pct');
     kpis.push({
       label: 'RAM Usage',
       value: m.ram_used_pct,
       unit: '%',
       severity: ramSev,
       sub: `${free.toFixed(1)} GB free of ${total.toFixed(1)} GB`,
+      delta: computeDelta(m.ram_used_pct, ramDelta.week_ago, 'up'),
     });
     gauges.push({
       label: 'RAM Usage',
@@ -101,12 +131,14 @@ function mapToSystemStatus(r: any): SystemStatus {
   const cDrive = disks.find((d: any) => d?.drive === 'C:');
   if (cDrive) {
     const sev = classifyDiskFree(cDrive.free_pct);
+    const cDelta = safeWeekDelta('disk', 'free_pct', 'C:');
     kpis.push({
       label: 'C: Drive Free',
       value: Math.round(cDrive.free_pct),
       unit: '%',
       severity: sev,
       sub: `${cDrive.free_gb.toFixed(0)} of ${cDrive.size_gb.toFixed(0)} GB`,
+      delta: computeDelta(cDrive.free_pct, cDelta.week_ago, 'down'),
     });
     gauges.push({
       label: 'C: Drive Used',
@@ -207,7 +239,7 @@ function mapToSystemStatus(r: any): SystemStatus {
     };
   });
 
-  // SMART placeholder — real data integrated in Plan 3b once smartctl bridge exists
+  // SMART: prefer latest.json embedded data; fall back to cache populated by the Security scan.
   const smart: SmartEntry[] = Array.isArray(r.metrics?.smart) ? r.metrics.smart.map((s: any) => ({
     drive: s.drive ?? 'unknown',
     model: s.model,
@@ -217,7 +249,7 @@ function mapToSystemStatus(r: any): SystemStatus {
     media_errors: s.media_errors,
     power_on_hours: s.power_on_hours,
     status_severity: s.health === 'PASSED' ? 'good' : s.health === 'FAILED' ? 'crit' : 'warn',
-  })) : [];
+  })) : cachedSmart;
 
   return {
     generated_at: Number.isFinite(generated_at) ? generated_at : 0,

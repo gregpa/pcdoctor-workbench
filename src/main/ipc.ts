@@ -2,7 +2,7 @@ import { ipcMain, safeStorage } from 'electron';
 import { readFile, readdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { getStatus, PCDoctorBridgeError } from './pcdoctorBridge.js';
+import { getStatus, PCDoctorBridgeError, setCachedSmart } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
 import {
@@ -158,6 +158,7 @@ export function registerIpcHandlers() {
       const posture = await runPowerShellScript<any>('security/Get-SecurityPosture.ps1', ['-JsonOutput'], { timeoutMs: 120_000 });
       const audit = await runPowerShellScript<any>('security/Audit-Persistence.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ items: [] }));
       const threats = await runPowerShellScript<any>('security/Get-ThreatIndicators.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ indicators: [] }));
+      const smart = await runPowerShellScript<any>('security/Get-SMART.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ drives: [] }));
 
       // Upsert persistence items into baseline and compute is_new flag
       const persistenceItems: PersistenceItem[] = [];
@@ -187,8 +188,19 @@ export function registerIpcHandlers() {
         persistence_new_count: countNewPersistence(24),
         persistence_items: persistenceItems.filter(i => i.is_new || i.approved !== 1).slice(0, 100),
         threat_indicators: (threats.indicators ?? []) as ThreatIndicator[],
+        smart: (smart.drives ?? []).map((d: any) => ({
+          drive: d.drive,
+          model: d.model,
+          health: d.health,
+          wear_pct: d.wear_pct,
+          temp_c: d.temp_c,
+          media_errors: d.media_errors,
+          power_on_hours: d.power_on_hours,
+          status_severity: d.status_severity ?? 'good',
+        })),
         overall_severity: posture.overall_severity ?? 'good',
       };
+      setCachedSmart(data.smart);
       return { ok: true, data };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Security scan failed' } };

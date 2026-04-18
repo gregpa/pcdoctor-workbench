@@ -410,6 +410,25 @@ export function markFindingSeen(hash: string, notified = false): void {
   ).run(hash, now, now, notified ? 1 : 0);
 }
 
+export function getMetricWeekDelta(category: string, metric: string, label?: string): { week_ago: number | null; now: number | null } {
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const tolerance = 2 * 24 * 60 * 60 * 1000;  // find the closest point within 2 days of a week ago
+
+  const nowRow = openDb().prepare(
+    `SELECT value FROM metrics WHERE category = ? AND metric = ? ${label ? 'AND label = ?' : ''} ORDER BY ts DESC LIMIT 1`
+  ).get(...(label ? [category, metric, label] : [category, metric])) as { value: number } | undefined;
+
+  const weekRow = openDb().prepare(
+    `SELECT value FROM metrics WHERE category = ? AND metric = ? ${label ? 'AND label = ?' : ''} AND ts BETWEEN ? AND ? ORDER BY ABS(ts - ?) ASC LIMIT 1`
+  ).get(...(label ? [category, metric, label, weekAgo - tolerance, weekAgo + tolerance, weekAgo] : [category, metric, weekAgo - tolerance, weekAgo + tolerance, weekAgo])) as { value: number } | undefined;
+
+  return {
+    week_ago: weekRow?.value ?? null,
+    now: nowRow?.value ?? null,
+  };
+}
+
 export function closeDb() {
   db?.close();
   db = null;
