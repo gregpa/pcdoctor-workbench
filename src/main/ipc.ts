@@ -15,7 +15,7 @@ import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
-import { launchClaudeInTerminal, resolveClaudePath } from './claudeBridge.js';
+import { launchClaudeInTerminal, launchClaudeWithContext, resolveClaudePath } from './claudeBridge.js';
 import { testTelegramConnection, sendTelegramMessage } from './telegramBridge.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
@@ -314,6 +314,12 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:launchClaude', async (): Promise<IpcResult<{ pid?: number }>> => {
     const r = await launchClaudeInTerminal();
+    if (r.ok) return { ok: true, data: { pid: r.pid } };
+    return { ok: false, error: { code: 'E_CLAUDE_LAUNCH', message: r.error ?? 'Launch failed' } };
+  });
+
+  ipcMain.handle('api:investigateWithClaude', async (_evt, contextText: string): Promise<IpcResult<{ pid?: number }>> => {
+    const r = await launchClaudeWithContext(contextText);
     if (r.ok) return { ok: true, data: { pid: r.pid } };
     return { ok: false, error: { code: 'E_CLAUDE_LAUNCH', message: r.error ?? 'Launch failed' } };
   });

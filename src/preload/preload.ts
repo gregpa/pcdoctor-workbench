@@ -29,6 +29,13 @@ const api = {
   getNvidiaDriverLatest: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getNvidiaDriverLatest'),
   getClaudeStatus: (): Promise<IpcResult<{ installed: boolean; path: string | null }>> => ipcRenderer.invoke('api:getClaudeStatus'),
   launchClaude: (): Promise<IpcResult<{ pid?: number }>> => ipcRenderer.invoke('api:launchClaude'),
+  investigateWithClaude: (contextText: string): Promise<IpcResult<{ pid?: number }>> => ipcRenderer.invoke('api:investigateWithClaude', contextText),
+  onClaudeApprovalRequest: (cb: (req: { id: string; action: string; params?: any; context?: string }) => void) => {
+    const handler = (_evt: any, req: any) => cb(req);
+    ipcRenderer.on('claude-approval-request', handler);
+    return () => ipcRenderer.removeListener('claude-approval-request', handler);
+  },
+  sendClaudeApproval: (id: string, approved: boolean) => ipcRenderer.send(`claude-approval-response-${id}`, approved),
   getSettings: (): Promise<IpcResult<Record<string, string>>> => ipcRenderer.invoke('api:getSettings'),
   setSetting: (key: string, value: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setSetting', key, value),
   testTelegram: (token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => ipcRenderer.invoke('api:testTelegram', token, chatId),

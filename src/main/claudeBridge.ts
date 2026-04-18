@@ -61,6 +61,65 @@ When the user asks about system state, check the JSON above first, then use Read
   return ctxPath;
 }
 
+export async function launchClaudeWithContext(contextText: string): Promise<{ ok: boolean; pid?: number; error?: string }> {
+  const claudePath = resolveClaudePath();
+  if (!claudePath) {
+    return { ok: false, error: 'Claude CLI not found' };
+  }
+  const sessionDir = path.join(os.tmpdir(), `pcdoctor-claude-${Date.now()}`);
+  await mkdir(sessionDir, { recursive: true });
+  let latestJson = 'unavailable';
+  try {
+    latestJson = await readFile(LATEST_JSON_PATH, 'utf8');
+    if (latestJson.charCodeAt(0) === 0xFEFF) latestJson = latestJson.slice(1);
+  } catch {}
+
+  const ctx = `# PCDoctor Workbench — Investigation request
+
+${contextText}
+
+## Current latest.json
+\`\`\`json
+${latestJson.slice(0, 15000)}
+\`\`\`
+
+## Workspace paths
+- PCDoctor scripts: C:\\ProgramData\\PCDoctor\\
+- SQLite DB: C:\\ProgramData\\PCDoctor\\workbench.db
+- Claude-bridge directory: C:\\ProgramData\\PCDoctor\\claude-bridge\\
+  If the user approves an action you can request it by writing a JSON line to commands.jsonl:
+  {"id":"cmd-123","action":"flush_dns","params":{}}
+  Read responses.jsonl for results.
+`;
+  const ctxPath = path.join(sessionDir, 'context.md');
+  await writeFile(ctxPath, ctx, 'utf8');
+
+  const wtPath = 'C:\\Windows\\System32\\wt.exe';
+  const useWt = existsSync(wtPath);
+
+  try {
+    if (useWt) {
+      const cmd = `& '${claudePath}' --add-dir 'C:\\ProgramData\\PCDoctor'`;
+      const child = spawn('wt.exe', [
+        'new-tab',
+        '--title', 'Claude (Investigate)',
+        'pwsh.exe', '-NoExit', '-Command',
+        `$env:PCDOCTOR_CONTEXT='${ctxPath}'; Write-Host 'Context pre-loaded at: $env:PCDOCTOR_CONTEXT' -ForegroundColor Yellow; Write-Host 'Type: Get-Content $env:PCDOCTOR_CONTEXT to see full context' -ForegroundColor Cyan; ${cmd}`,
+      ], { detached: true, stdio: 'ignore', windowsHide: false });
+      child.unref();
+      return { ok: true, pid: child.pid };
+    } else {
+      const child = spawn('cmd.exe', ['/c', 'start', '""', 'cmd.exe', '/k', `"${claudePath}" --add-dir "C:\\ProgramData\\PCDoctor"`], {
+        detached: true, stdio: 'ignore', windowsHide: false,
+      });
+      child.unref();
+      return { ok: true, pid: child.pid };
+    }
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'Spawn failed' };
+  }
+}
+
 export async function launchClaudeInTerminal(): Promise<{ ok: boolean; pid?: number; error?: string }> {
   const claudePath = resolveClaudePath();
   if (!claudePath) {
