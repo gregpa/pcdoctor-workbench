@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { ToolStatus } from '@shared/types.js';
 import { TOOLS } from '@shared/tools.js';
@@ -7,12 +7,29 @@ function expandEnvVars(p: string): string {
   return p.replace(/%([^%]+)%/g, (_, v) => process.env[v] ?? `%${v}%`);
 }
 
+/** Returns true if `winget list --id <id>` reports the package installed. */
+function isWingetInstalled(wingetId: string): boolean {
+  try {
+    const r = spawnSync('winget', ['list', '--id', wingetId, '--exact', '--source', 'winget'], {
+      encoding: 'utf8', timeout: 10_000, windowsHide: true,
+    });
+    if (r.status !== 0 || !r.stdout) return false;
+    // winget list prints the id only when a match exists
+    return r.stdout.toLowerCase().includes(wingetId.toLowerCase());
+  } catch { return false; }
+}
+
 export function getToolStatus(toolId: string): ToolStatus {
   const def = TOOLS[toolId];
   if (!def) return { id: toolId, installed: false, resolved_path: null };
+  // Fast path: probe known file locations
   for (const candidate of def.detect_paths) {
     const resolved = expandEnvVars(candidate);
     if (existsSync(resolved)) return { id: toolId, installed: true, resolved_path: resolved };
+  }
+  // Fallback: ask winget
+  if (def.winget_id && isWingetInstalled(def.winget_id)) {
+    return { id: toolId, installed: true, resolved_path: null };
   }
   return { id: toolId, installed: false, resolved_path: null };
 }
@@ -26,7 +43,21 @@ export async function launchTool(toolId: string, modeId: string): Promise<{ ok: 
   if (!def) return { ok: false, error: `Unknown tool: ${toolId}` };
   const mode = def.launch_modes.find(m => m.id === modeId) ?? def.launch_modes[0];
   if (!mode) return { ok: false, error: 'No launch mode defined' };
-  const status = getToolStatus(toolId);
+  let status = getToolStatus(toolId);
+
+  // If detection returned installed-via-winget but no resolved_path, try launching via winget
+  if (status.installed && !status.resolved_path && def.winget_id) {
+    try {
+      const child = spawn('winget', ['run', '--id', def.winget_id], {
+        detached: true, stdio: 'ignore', windowsHide: false,
+      });
+      child.unref();
+      return { ok: true, pid: child.pid };
+    } catch (e: any) {
+      // Fall through to the path-based path even though we know it won't work
+    }
+  }
+
   if (!status.installed || !status.resolved_path) {
     return { ok: false, error: `Tool not installed: ${def.name}` };
   }
@@ -47,12 +78,13 @@ export async function installToolViaWinget(toolId: string): Promise<{ ok: boolea
   const def = TOOLS[toolId];
   if (!def?.winget_id) return { ok: false, error: 'No winget_id configured for this tool' };
   return new Promise((resolve) => {
-    const child = spawn('winget', ['install', '--id', def.winget_id!, '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
+    const child = spawn('winget', ['install', '--id', def.winget_id!, '--exact', '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
       stdio: 'ignore',
       windowsHide: true,
     });
     child.on('exit', (code) => {
-      if (code === 0) resolve({ ok: true });
+      // winget exits 0 on success; non-zero codes are also used for "already installed" — treat both as ok=true
+      if (code === 0 || code === -1978335189 /* ALREADY_INSTALLED */) resolve({ ok: true });
       else resolve({ ok: false, error: `winget exited ${code}` });
     });
     child.on('error', (e) => resolve({ ok: false, error: e.message }));
