@@ -28,13 +28,13 @@ describe('getToolStatus', () => {
   });
 
   it('fast-path: first detect_path that exists → installed=true, winget is never called', () => {
-    // occt: first candidate is C:\ProgramData\PCDoctor\OCCT (1).exe
+    // occt: first candidate is C:\ProgramData\PCDoctor\tools\OCCT\OCCT.exe
     (existsSync as any).mockImplementation((p: string) =>
-      p === 'C:\\ProgramData\\PCDoctor\\OCCT (1).exe'
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
     );
     const status = getToolStatus('occt');
     expect(status.installed).toBe(true);
-    expect(status.resolved_path).toBe('C:\\ProgramData\\PCDoctor\\OCCT (1).exe');
+    expect(status.resolved_path).toBe('C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe');
     expect(spawnSync as any).not.toHaveBeenCalled();
   });
 
