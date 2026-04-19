@@ -66,6 +66,19 @@ export const TOOLS: Record<string, ToolDefinition> = {
     launch_modes: [{ id: 'gui', label: 'Open Command Center', args: [], detached: true }],
     icon: '👽',
   },
+  dcu: {
+    id: 'dcu', name: 'Dell Command Update', category: 'diagnostic',
+    description: 'Dell firmware + driver updater (BIOS, chipset, AWCC, etc.)', publisher: 'Dell Inc.',
+    detect_paths: [
+      'C:\\Program Files (x86)\\Dell\\CommandUpdate\\DellCommandUpdate.exe',
+      'C:\\Program Files\\Dell\\CommandUpdate\\DellCommandUpdate.exe',
+    ],
+    winget_id: 'Dell.CommandUpdate',
+    launch_modes: [
+      { id: 'gui', label: 'Open Dell Command Update', args: [], detached: true },
+    ],
+    icon: '💻',
+  },
   'gpu-z': {
     id: 'gpu-z', name: 'GPU-Z', category: 'hardware',
     description: 'GPU information + logging', publisher: 'TechPowerUp',
