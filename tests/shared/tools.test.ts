@@ -29,14 +29,21 @@ describe('TOOLS catalog', () => {
     }
   });
 
-  it('every tool has at least one detect_path', () => {
+  it('every tool has at least one detect mechanism (detect_paths OR msix_app_id OR winget_id)', () => {
     for (const [key, def] of Object.entries(TOOLS)) {
       expect(Array.isArray(def.detect_paths), `${key} detect_paths not array`).toBe(true);
-      expect(def.detect_paths.length, `${key} has empty detect_paths`).toBeGreaterThan(0);
+      const hasPaths = def.detect_paths.length > 0;
+      const hasMsix = !!def.msix_app_id && !!def.msix_package_family;
+      const hasWinget = !!def.winget_id;
+      expect(hasPaths || hasMsix || hasWinget, `${key} has no detection mechanism`).toBe(true);
+      // Any detect_paths present must still be absolute
       for (const p of def.detect_paths) {
-        // Must be an absolute Windows path OR contain an env-var placeholder
         const looksAbsolute = /^[A-Za-z]:\\/.test(p) || /%[^%]+%/.test(p);
         expect(looksAbsolute, `${key} detect_path "${p}" not absolute`).toBe(true);
+      }
+      // MSIX AppID must include the bang-notation class name
+      if (def.msix_app_id) {
+        expect(def.msix_app_id, `${key} msix_app_id missing !ClassName`).toMatch(/![A-Za-z0-9]+$/);
       }
     }
   });

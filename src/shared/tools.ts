@@ -17,6 +17,13 @@ export interface ToolDefinition {
   detect_paths: string[];           // absolute Windows paths (env vars allowed)
   winget_id?: string;
   download_url?: string;
+  /** For MSIX/Store apps: full AppID (e.g. "DellInc.AlienwareCommandCenter_htrsf667h5kn2!App").
+   *  When present, tool is launched via explorer.exe shell:AppsFolder\<AppID>
+   *  and detected via Get-AppxPackage instead of filesystem probe. */
+  msix_app_id?: string;
+  /** For MSIX apps: PackageFamilyName (e.g. "DellInc.AlienwareCommandCenter_htrsf667h5kn2").
+   *  Used for fast filesystem-based install detection (Packages dir). */
+  msix_package_family?: string;
   launch_modes: ToolLaunchMode[];
   expected_duration_min?: number;
   expected_duration_max?: number;
@@ -49,6 +56,15 @@ export const TOOLS: Record<string, ToolDefinition> = {
       { id: 'gui', label: 'Open (sensors-only mode)', args: ['-so'], detached: true },
     ],
     icon: '🌡',
+  },
+  awcc: {
+    id: 'awcc', name: 'Alienware Command Center', category: 'hardware',
+    description: 'Thermal, fan curve, lighting, OC controls', publisher: 'Dell Inc.',
+    detect_paths: [],
+    msix_app_id: 'DellInc.AlienwareCommandCenter_htrsf667h5kn2!App',
+    msix_package_family: 'DellInc.AlienwareCommandCenter_htrsf667h5kn2',
+    launch_modes: [{ id: 'gui', label: 'Open Command Center', args: [], detached: true }],
+    icon: '👽',
   },
   'gpu-z': {
     id: 'gpu-z', name: 'GPU-Z', category: 'hardware',
