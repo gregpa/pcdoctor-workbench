@@ -555,13 +555,21 @@ try {
         }
     }
 
-    # WSL check (not a service -- check via wsl.exe --status)
-    try {
-        $wslOut = & wsl.exe --status 2>&1
-        $wslStatus = if ($LASTEXITCODE -eq 0) { 'healthy' } else { 'error' }
-        $svcs['WSL'] = @{ display='Windows Subsystem for Linux'; status=$wslStatus; detail=("$wslOut" -replace "`r?`n"," | ") }
-    } catch {
-        $svcs['WSL'] = @{ display='Windows Subsystem for Linux'; status='unreachable' }
+    # WSL check: prefer the real Windows service (WSLService on Win11 / LxssManager legacy).
+    # Avoid wsl.exe --status because it returns UTF-16 nonsense from SYSTEM context.
+    $wslSvc = Get-Service -Name 'WSLService','LxssManager' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($wslSvc) {
+        $svcs[$wslSvc.Name] = @{
+            display = 'Windows Subsystem for Linux'
+            status  = "$($wslSvc.Status)"
+            start   = "$($wslSvc.StartType)"
+        }
+    } else {
+        $svcs['WSLService'] = @{
+            display = 'Windows Subsystem for Linux'
+            status  = 'Not installed'
+            start   = 'N/A'
+        }
     }
     $report.metrics.services = $svcs
 } catch { Log "Service check error: $_" }
