@@ -83,7 +83,22 @@ export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
     try {
       const ctxPath = await buildContextFile(contextText);
       const shell = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
-      const proc = ptyModule.spawn(shell, ['/k', `"${claudePath}" --add-dir "${PCDOCTOR_ROOT}"`], {
+
+      // Batch-file trampoline: passing the full quoted command as a /k arg
+      // double-escapes on Windows (cmd + node-pty both quote) and cmd.exe
+      // sees the whole path as a bogus token, producing:
+      //   '"C:\...\claude.cmd"' is not recognized
+      // Writing the command into a temp .bat and spawning `cmd /k <bat>`
+      // avoids every layer of the quoting dance.
+      const batPath = path.join(os.tmpdir(), `pcdoctor-claude-${Date.now()}-${id}.bat`);
+      const batContents = [
+        '@echo off',
+        `call "${claudePath}" --add-dir "${PCDOCTOR_ROOT}"`,
+        '',
+      ].join('\r\n');
+      await writeFile(batPath, batContents, 'utf8');
+
+      const proc = ptyModule.spawn(shell, ['/k', batPath], {
         name: 'xterm-256color',
         cols: cols ?? 100,
         rows: rows ?? 28,
