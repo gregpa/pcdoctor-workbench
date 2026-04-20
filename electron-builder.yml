@@ -52,8 +52,11 @@ win:
   target:
     - nsis
   icon: resources/icons/icon.ico
-  signtoolOptions:
-    publisherName: Greg Pajak
+  # signtoolOptions.publisherName is intentionally omitted. When set,
+  # electron-updater enforces Authenticode signature verification against
+  # that publisher on every downloaded update; since we are not code-signing
+  # (cert is a planned v3 feature), the check fails with "not signed by the
+  # application owner". Re-enable once a cert is purchased.
   requestedExecutionLevel: asInvoker
 
 nsis:
