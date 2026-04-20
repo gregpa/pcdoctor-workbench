@@ -176,6 +176,13 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'network', icon: '🧰',
     tooltip: 'Launches wf.msc (Windows Firewall with Advanced Security MMC) so you can review and edit rules manually. No state change.',
   },
+  open_windows_security: {
+    name: 'open_windows_security', label: 'Open Windows Security',
+    ps_script: 'actions/Open-WindowsSecurity.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
+    category: 'hardening', icon: '🛡',
+    tooltip: 'Opens the Windows Security -> Virus & threat protection page directly. Use this when Tamper Protection blocks Set-MpPreference (for toggling PUA Protection, Controlled Folder Access, etc.). No state change.',
+  },
   disable_firewall_temporarily: {
     name: 'disable_firewall_temporarily', label: 'Disable Firewall Temporarily',
     ps_script: 'actions/Disable-FirewallTemporary.ps1',

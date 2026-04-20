@@ -429,6 +429,14 @@ export function recommendAction(
       return { level: 'consider', reason: 'On-demand tool — use when you\'ve identified a rogue process. Not part of routine maintenance.' };
     }
 
+    case 'open_windows_security': {
+      return { level: 'consider', reason: 'Opens the Windows Security UI. Use when Tamper Protection blocks PUA/CFA toggles and you need to change them there.' };
+    }
+
+    case 'open_firewall_console': {
+      return { level: 'consider', reason: 'Opens wf.msc (Windows Firewall MMC) for manual rule review/edit.' };
+    }
+
     default:
       return { level: 'consider', reason: 'No state-based recommendation yet.' };
   }

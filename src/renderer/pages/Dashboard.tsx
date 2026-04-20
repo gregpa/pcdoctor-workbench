@@ -50,6 +50,7 @@ const HARDEN_ACTIONS: ActionName[] = [
   'enable_controlled_folder_access',
   'update_hosts_stevenblack',
   'defender_full_scan',
+  'open_windows_security',
 ];
 
 function SecRow({ label, tone, right }: { label: string; tone?: 'good' | 'warn' | 'crit' | 'info'; right: string }) {
@@ -161,6 +162,15 @@ export function Dashboard() {
       if (err.code === 'E_NEEDS_ADMIN') {
         setToastVariant('admin');
         setToast(`${ACTIONS[name].label} requires Admin — relaunch Workbench as Administrator.`);
+      } else if (err.code === 'E_TAMPER_PROTECTION') {
+        // v2.4.4: Tamper Protection blocks Set-MpPreference. Auto-open the
+        // Windows Security UI so the user can toggle the setting there.
+        setToastVariant('admin');
+        setToast(`${ACTIONS[name].label} is blocked by Windows Tamper Protection. Opening Windows Security...`);
+        await handleAction('open_windows_security');
+      } else if (err.code === 'E_UAC_DISABLED') {
+        setToastVariant('admin');
+        setToast(`${ACTIONS[name].label} failed: UAC is disabled. Re-enable UAC (Security → UAC detail) + reboot.`);
       } else {
         setToastVariant('error');
         setToast(`${ACTIONS[name].label} failed: ${err.message}`);

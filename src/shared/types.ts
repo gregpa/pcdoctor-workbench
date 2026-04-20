@@ -140,6 +140,7 @@ export type ActionName =
   | 'reset_winsock'
   | 'reset_firewall'
   | 'open_firewall_console'
+  | 'open_windows_security'
   | 'disable_firewall_temporarily'
   | 'flush_arp_cache'
   | 'reset_network_adapters'

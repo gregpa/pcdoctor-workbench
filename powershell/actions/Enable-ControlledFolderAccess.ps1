@@ -54,6 +54,20 @@ $before = switch ($beforeRaw) {
     default { "Unknown($beforeRaw)" }
 }
 
+# v2.4.4: Tamper Protection blocks this (see Enable-PUAProtection.ps1 note).
+try {
+    $status = Get-MpComputerStatus -ErrorAction Stop
+    if ($status.IsTamperProtected) {
+        $err = @{
+            code='E_TAMPER_PROTECTION'
+            message='Tamper Protection blocks Set-MpPreference. Enable CFA manually in Windows Security -> Virus & threat protection -> Ransomware protection -> Manage ransomware protection.'
+            open_windows_security = $true
+        } | ConvertTo-Json -Compress
+        Write-Host "PCDOCTOR_ERROR:$err"
+        exit 1
+    }
+} catch {}
+
 $changed = $false
 if ($beforeRaw -ne 1) {
     Set-MpPreference -EnableControlledFolderAccess Enabled -ErrorAction Stop

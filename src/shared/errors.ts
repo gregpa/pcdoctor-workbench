@@ -20,6 +20,7 @@ export const ERROR_CODES = {
   NEEDS_ADMIN: 'E_NEEDS_ADMIN',
   UAC_CANCELLED: 'E_UAC_CANCELLED',
   UAC_DISABLED: 'E_UAC_DISABLED',
+  TAMPER_PROTECTION: 'E_TAMPER_PROTECTION',
   ELEVATION_FAILED: 'E_ELEVATION_FAILED',
   ELEVATED_TEMP_EXISTS: 'E_ELEVATED_TEMP_EXISTS',
 
@@ -61,6 +62,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   E_NEEDS_ADMIN: 'This action requires administrator privileges.',
   E_UAC_CANCELLED: 'UAC prompt was cancelled.',
   E_UAC_DISABLED: 'UAC is disabled; admin-only actions cannot elevate.',
+  E_TAMPER_PROTECTION: 'Windows Tamper Protection blocks this change. Use Windows Security UI instead.',
   E_ELEVATION_FAILED: 'Could not elevate to administrator.',
   E_ELEVATED_TEMP_EXISTS: 'Temp file collision during elevated action.',
   E_SCHTASKS: 'Scheduled task operation failed.',

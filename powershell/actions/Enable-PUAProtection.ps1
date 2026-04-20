@@ -50,6 +50,23 @@ try { $pref = Get-MpPreference -ErrorAction Stop } catch {
 $beforeRaw = $pref.PUAProtection
 $before = switch ($beforeRaw) { 0 { 'Disabled' } 1 { 'Enabled' } 2 { 'AuditMode' } default { "Unknown($beforeRaw)" } }
 
+# v2.4.4: Tamper Protection blocks Set-MpPreference by design. Detect up
+# front + return a structured E_TAMPER_PROTECTION so the UI can guide the
+# user to the Windows Security settings page (the only supported way to
+# toggle this with Tamper Protection on).
+try {
+    $status = Get-MpComputerStatus -ErrorAction Stop
+    if ($status.IsTamperProtected) {
+        $err = @{
+            code='E_TAMPER_PROTECTION'
+            message='Tamper Protection is enabled and blocks Set-MpPreference. Toggle PUA in Windows Security manually: Virus & threat protection -> Manage settings -> Potentially unwanted app blocking.'
+            open_windows_security = $true
+        } | ConvertTo-Json -Compress
+        Write-Host "PCDOCTOR_ERROR:$err"
+        exit 1
+    }
+} catch {}
+
 $changed = $false
 if ($beforeRaw -ne 1) {
     Set-MpPreference -PUAProtection Enabled -ErrorAction Stop
@@ -62,15 +79,39 @@ try {
     $after = switch ($after2) { 0 { 'Disabled' } 1 { 'Enabled' } 2 { 'AuditMode' } default { "Unknown($after2)" } }
 } catch {}
 
+# v2.4.4: Also report SmartScreen-side PUA state (it's a different
+# subsystem, toggled via App & browser -> Reputation-based protection).
+# For a home user, SmartScreen PUA ON is ~90% of the practical posture
+# even if Defender PUA stays off.
+$smartScreen = @{ enabled = $null; block_apps = $null; block_downloads = $null; source = 'unknown' }
+try {
+    # SmartScreenPuaEnabled is the official key.
+    $ssKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\SmartScreen'
+    $ssVal = (Get-ItemProperty -Path $ssKey -Name 'EnableSmartScreen' -EA SilentlyContinue).EnableSmartScreen
+    $puaPolicyKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'
+    $puaVal = (Get-ItemProperty -Path $puaPolicyKey -Name 'ShellSmartScreenLevel' -EA SilentlyContinue).ShellSmartScreenLevel
+    # Consumer (per-user) path is the real source for the Reputation-based
+    # UI toggles in Windows Security on Win 11.
+    $userKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost'
+    $ssEnabled = (Get-ItemProperty -Path $userKey -Name 'EnableWebContentEvaluation' -EA SilentlyContinue).EnableWebContentEvaluation
+    $smartScreen.enabled = if ($ssVal -ne $null) { [bool]$ssVal } elseif ($ssEnabled -ne $null) { [bool]$ssEnabled } else { $null }
+    $smartScreen.source = if ($ssVal -ne $null) { 'policy' } elseif ($ssEnabled -ne $null) { 'user' } else { 'unknown' }
+} catch {}
+
 $sw.Stop()
 $result = @{
-    success      = $true
-    no_op        = (-not $changed)
-    duration_ms  = $sw.ElapsedMilliseconds
-    before_state = $before
-    after_state  = $after
-    changed      = $changed
-    message      = if ($changed) { "PUA protection: $before -> $after" } else { "Already in desired state: PUA protection is already $before" }
+    success        = $true
+    no_op          = (-not $changed)
+    duration_ms    = $sw.ElapsedMilliseconds
+    defender_pua_before = $before
+    defender_pua_after  = $after
+    smartscreen_pua     = $smartScreen
+    changed        = $changed
+    message        = if ($changed) {
+        "Defender PUA: $before -> $after. SmartScreen PUA (separate) is $(if ($smartScreen.enabled -eq $true) { 'ON' } elseif ($smartScreen.enabled -eq $false) { 'OFF' } else { 'unknown' })."
+    } else {
+        "Already in desired state: Defender PUA is $before. SmartScreen PUA is $(if ($smartScreen.enabled -eq $true) { 'ON' } elseif ($smartScreen.enabled -eq $false) { 'OFF' } else { 'unknown' })."
+    }
 }
 $result | ConvertTo-Json -Depth 3 -Compress
 exit 0
