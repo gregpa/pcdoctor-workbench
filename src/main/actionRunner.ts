@@ -133,8 +133,12 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     // Actions flagged needs_admin are spawned via Start-Process -Verb RunAs
     // (triggers a UAC prompt per invocation). Keeps the Workbench itself
     // non-elevated while still allowing privileged actions.
+    // v2.3.15: per-action timeout_ms override for legitimately long actions
+    // (defender_full_scan up to 4h; shrink_component_store 45m; the 5m
+    // default fired on these before, cancelling mid-run).
     const runner = def.needs_admin ? runElevatedPowerShellScript : runPowerShellScript;
-    const result = await runner<Record<string, unknown>>(def.ps_script, scriptArgs);
+    const runnerOpts = def.timeout_ms ? { timeoutMs: def.timeout_ms } : undefined;
+    const result = await runner<Record<string, unknown>>(def.ps_script, scriptArgs, runnerOpts);
     const duration = Date.now() - start;
     finishActionLog(logId, { status: 'success', duration_ms: duration, result });
     // Capture tool-import results into tool_results history

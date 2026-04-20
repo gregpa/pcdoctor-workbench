@@ -17,7 +17,17 @@
   ;   - Root + scripts (read-only for Users): SYSTEM:F, Admins:F, Users:RX
   ;   - Data subdirs (writable for Users):    + Users:M on data paths
   ; SIDs are locale-safe (SYSTEM=S-1-5-18, Admins=S-1-5-32-544, Users=S-1-5-32-545).
+  ; v2.3.15: stop Defender real-time scan from holding PS files open during
+  ; the icacls pass (observed in v2.3.13: two Defender-config scripts ended
+  ; up with zero ACEs because Defender locked them). Temporarily exclude the
+  ; PCDoctor directory, run icacls, then remove the exclusion.
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Add-MpPreference -ExclusionPath C:\ProgramData\PCDoctor -ErrorAction SilentlyContinue"'
   ExecWait 'icacls.exe "C:\ProgramData\PCDoctor" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" /grant:r "*S-1-5-32-544:(OI)(CI)F" /grant:r "*S-1-5-32-545:(OI)(CI)RX" /T /C /Q'
+  ; Second pass: re-enable inheritance on any file that ended up with zero
+  ; ACEs because icacls /grant:r silently failed on an in-use file. This is
+  ; a self-healing step that catches the v2.3.13 Defender-lock bug.
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Repair-ScriptAcls.ps1"'
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-MpPreference -ExclusionPath C:\ProgramData\PCDoctor -ErrorAction SilentlyContinue"'
   CreateDirectory "C:\ProgramData\PCDoctor\logs"
   CreateDirectory "C:\ProgramData\PCDoctor\reports"
   CreateDirectory "C:\ProgramData\PCDoctor\snapshots"

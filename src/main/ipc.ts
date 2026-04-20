@@ -98,6 +98,59 @@ export function registerIpcHandlers() {
     }
   });
 
+  // v2.4.0: tool update checking. Reads the cache written by Check-ToolUpdates.ps1
+  // (weekly scheduled task). Returns { last_checked, upgrades: [...] }.
+  ipcMain.handle('api:getToolUpdates', async (): Promise<IpcResult<any>> => {
+    try {
+      const cachePath = path.join(PCDOCTOR_ROOT, 'tools', 'updates.json');
+      if (!existsSync(cachePath)) {
+        return { ok: true, data: { winget_available: null, count: 0, upgrades: [], checked_at: null } };
+      }
+      const raw = await readFile(cachePath, 'utf8');
+      return { ok: true, data: JSON.parse(raw) };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  // Trigger a fresh check now (ignores the weekly cache).
+  ipcMain.handle('api:refreshToolUpdates', async (): Promise<IpcResult<any>> => {
+    try {
+      const data = await runPowerShellScript<any>('Check-ToolUpdates.ps1', ['-JsonOutput'], { timeoutMs: 2 * 60 * 1000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  // Upgrade a single tool via winget (runs elevated).
+  ipcMain.handle('api:upgradeTool', async (_evt, wingetId: string): Promise<IpcResult<any>> => {
+    // Restrict winget_id to a safe charset - the value gets interpolated into
+    // a PS -Command string for the elevated upgrade. winget IDs are alnum +
+    // dot + hyphen + underscore in practice.
+    if (typeof wingetId !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(wingetId)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid winget id' } };
+    }
+    try {
+      const { runElevatedPowerShellScript } = await import('./scriptRunner.js');
+      const data = await runElevatedPowerShellScript<any>('Upgrade-Tool.ps1', ['-WingetId', wingetId], { timeoutMs: 30 * 60 * 1000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  // Upgrade all tools with pending updates via winget (runs elevated).
+  ipcMain.handle('api:upgradeAllTools', async (): Promise<IpcResult<any>> => {
+    try {
+      const { runElevatedPowerShellScript } = await import('./scriptRunner.js');
+      const data = await runElevatedPowerShellScript<any>('Upgrade-Tool.ps1', ['-All'], { timeoutMs: 2 * 60 * 60 * 1000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
   // Map of action_name -> most-recent successful-run ts (ms). Used by the
   // recommendations engine so "Last emptied Xd ago" reflects reality instead
   // of always showing "Never".

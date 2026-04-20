@@ -5,12 +5,15 @@ import { useEffect, useState } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
-function ToolTile({ def, status, installing, onLaunch, onInstall, working }: {
+function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpgrade, upgrading, working }: {
   def: ToolDefinition;
   status: ToolStatus | undefined;
   installing: boolean;
+  upgrade?: { current: string; available: string } | null;
   onLaunch: (modeId: string) => void;
   onInstall: () => void;
+  onUpgrade: () => void;
+  upgrading: boolean;
   working: boolean;
 }) {
   const [showModes, setShowModes] = useState(false);
@@ -18,13 +21,23 @@ function ToolTile({ def, status, installing, onLaunch, onInstall, working }: {
   const installed = status?.installed ?? false;
 
   return (
-    <div className="bg-surface-900 border border-surface-600 rounded-lg p-3 flex flex-col gap-2 relative h-full">
+    <div className={`bg-surface-900 border rounded-lg p-3 flex flex-col gap-2 relative h-full ${upgrade ? 'border-status-warn/50' : 'border-surface-600'}`}>
+      {upgrade && (
+        <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-status-warn/20 text-status-warn border border-status-warn/40">
+          Update
+        </div>
+      )}
       <div className="flex items-start gap-2">
         <div className="text-2xl">{def.icon}</div>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-sm truncate">{def.name}</div>
           <div className="text-[10px] text-text-secondary leading-tight">{def.description}</div>
           <div className="text-[9px] text-text-secondary/80 mt-0.5">{def.publisher}</div>
+          {upgrade && (
+            <div className="text-[9px] text-status-warn mt-0.5">
+              {upgrade.current} → <strong>{upgrade.available}</strong>
+            </div>
+          )}
         </div>
       </div>
       <div className="mt-auto space-y-2">
@@ -38,12 +51,32 @@ function ToolTile({ def, status, installing, onLaunch, onInstall, working }: {
               Installing…
             </button>
           </>
+        ) : upgrading ? (
+          <>
+            <div className="text-[10px] text-status-warn flex items-center gap-1.5">
+              <div className="w-3 h-3 border-2 border-status-warn/30 border-t-status-warn rounded-full animate-spin"></div>
+              <span>Upgrading via winget…</span>
+            </div>
+            <button disabled className="w-full px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] opacity-50">
+              Upgrading…
+            </button>
+          </>
         ) : installed ? (
           <>
             <div className="text-[10px] text-status-good flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-status-good"></span>
-              <span>Installed</span>
+              <span>{upgrade ? `Installed · ${upgrade.current}` : 'Installed'}</span>
             </div>
+            {upgrade && (
+              <button
+                onClick={onUpgrade}
+                disabled={working}
+                className="w-full px-2.5 py-1.5 rounded-md bg-status-warn/15 border border-status-warn/40 text-status-warn text-[11px] font-semibold hover:bg-status-warn/25 disabled:opacity-50"
+                title={`Upgrade from ${upgrade.current} to ${upgrade.available} via winget. Requires admin (UAC).`}
+              >
+                ⬆ Upgrade to {upgrade.available}
+              </button>
+            )}
             {hasMultipleModes ? (
               <div className="relative">
                 <button
@@ -113,6 +146,10 @@ export function Tools() {
   const [toast, setToast] = useState<string | null>(null);
   const [bulkInstalling, setBulkInstalling] = useState(false);
   const [recentResults, setRecentResults] = useState<any[]>([]);
+  const [toolUpdates, setToolUpdates] = useState<{ checked_at: string | null; upgrades: Array<{ winget_id: string; current: string; available: string }>; winget_available?: boolean | null }>({ checked_at: null, upgrades: [], winget_available: null });
+  const [upgrading, setUpgrading] = useState<Set<string>>(new Set());
+  const [bulkUpgrading, setBulkUpgrading] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -120,6 +157,85 @@ export function Tools() {
       if (r?.ok) setRecentResults(r.data);
     })();
   }, [statuses]);
+
+  useEffect(() => {
+    (async () => {
+      const r = await (api as any).getToolUpdates?.();
+      if (r?.ok) setToolUpdates({
+        checked_at: r.data.checked_at ?? null,
+        upgrades: r.data.upgrades ?? [],
+        winget_available: r.data.winget_available ?? null,
+      });
+    })();
+  }, []);
+
+  // Build winget_id -> {current, available} map for per-tile lookup.
+  const upgradesByWingetId = new Map<string, { current: string; available: string }>();
+  for (const u of toolUpdates.upgrades) {
+    if (u.winget_id) upgradesByWingetId.set(u.winget_id, { current: u.current, available: u.available });
+  }
+
+  async function onCheckUpdates() {
+    setCheckingUpdates(true);
+    setToast('Checking for tool updates via winget...');
+    const r = await (api as any).refreshToolUpdates?.();
+    if (r?.ok) {
+      setToolUpdates({
+        checked_at: r.data.checked_at ?? null,
+        upgrades: r.data.upgrades ?? [],
+        winget_available: r.data.winget_available ?? null,
+      });
+      setToast(`${r.data.count ?? 0} update(s) available`);
+    } else {
+      setToast(`Check failed: ${r?.error?.message ?? 'unknown'}`);
+    }
+    setCheckingUpdates(false);
+    setTimeout(() => setToast(null), 6000);
+  }
+
+  async function onUpgrade(wingetId: string, toolName: string) {
+    setUpgrading(s => new Set(s).add(wingetId));
+    setToast(`Upgrading ${toolName} via winget...`);
+    const r = await (api as any).upgradeTool?.(wingetId);
+    setUpgrading(s => { const n = new Set(s); n.delete(wingetId); return n; });
+    if (r?.ok) {
+      setToast(`${toolName} upgraded`);
+      // Refresh cache so the badge disappears.
+      const fresh = await (api as any).getToolUpdates?.();
+      if (fresh?.ok) setToolUpdates({
+        checked_at: fresh.data.checked_at ?? null,
+        upgrades: fresh.data.upgrades ?? [],
+        winget_available: fresh.data.winget_available ?? null,
+      });
+      refresh();
+    } else {
+      setToast(`Upgrade failed: ${r?.error?.message ?? 'unknown'}`);
+    }
+    setTimeout(() => setToast(null), 6000);
+  }
+
+  async function onUpgradeAll() {
+    const n = toolUpdates.upgrades.length;
+    if (n === 0) return;
+    if (!confirm(`Upgrade all ${n} tools with pending updates via winget? Each fires a UAC prompt; total may take 5-20 minutes.`)) return;
+    setBulkUpgrading(true);
+    setToast(`Upgrading ${n} tools...`);
+    const r = await (api as any).upgradeAllTools?.();
+    setBulkUpgrading(false);
+    if (r?.ok) {
+      setToast(`Upgraded ${r.data.upgraded_count ?? 0} / ${n} tools`);
+      const fresh = await (api as any).getToolUpdates?.();
+      if (fresh?.ok) setToolUpdates({
+        checked_at: fresh.data.checked_at ?? null,
+        upgrades: fresh.data.upgrades ?? [],
+        winget_available: fresh.data.winget_available ?? null,
+      });
+      refresh();
+    } else {
+      setToast(`Bulk upgrade failed: ${r?.error?.message ?? 'unknown'}`);
+    }
+    setTimeout(() => setToast(null), 10000);
+  }
 
   if (loading) return (
     <div className="p-6 flex items-center gap-3 text-text-secondary">
@@ -163,9 +279,33 @@ export function Tools() {
           <h1 className="text-lg font-bold">🧰 Tools & Scanners</h1>
           <div className="text-[11px] text-text-secondary mt-1">
             {installedCount} of {statuses.length} tools installed
+            {toolUpdates.upgrades.length > 0 && (
+              <> · <span className="text-status-warn font-semibold">{toolUpdates.upgrades.length} update{toolUpdates.upgrades.length === 1 ? '' : 's'} available</span></>
+            )}
+            {toolUpdates.checked_at && (
+              <> · <span className="text-text-secondary/70">checked {new Date(toolUpdates.checked_at).toLocaleString()}</span></>
+            )}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {toolUpdates.upgrades.length > 0 && (
+            <button
+              onClick={onUpgradeAll}
+              disabled={bulkUpgrading || upgrading.size > 0}
+              className="px-3 py-1.5 rounded-md text-xs bg-status-warn/15 border border-status-warn/40 text-status-warn font-semibold hover:bg-status-warn/25 disabled:opacity-50"
+              title="Upgrade every tool with a pending update via winget. Single UAC prompt per tool."
+            >
+              {bulkUpgrading ? 'Upgrading all…' : `⬆ Upgrade All (${toolUpdates.upgrades.length})`}
+            </button>
+          )}
+          <button
+            onClick={onCheckUpdates}
+            disabled={checkingUpdates}
+            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-50"
+            title="Run winget upgrade to refresh the update list. Weekly scheduled task also does this automatically."
+          >
+            {checkingUpdates ? 'Checking…' : '🔄 Check for Updates'}
+          </button>
           {notInstalledCount > 0 && (
             <button
               onClick={onInstallAll}
@@ -247,9 +387,12 @@ export function Tools() {
                   def={def}
                   status={statusById.get(def.id)}
                   installing={installing.has(def.id)}
+                  upgrade={def.winget_id ? upgradesByWingetId.get(def.winget_id) : null}
+                  upgrading={def.winget_id ? upgrading.has(def.winget_id) : false}
                   onLaunch={(modeId) => onLaunch(def.id, modeId)}
                   onInstall={() => onInstall(def.id)}
-                  working={installing.size > 0 || bulkInstalling}
+                  onUpgrade={() => def.winget_id && onUpgrade(def.winget_id, def.name)}
+                  working={installing.size > 0 || bulkInstalling || bulkUpgrading || upgrading.size > 0}
                 />
               ))}
             </div>

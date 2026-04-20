@@ -110,10 +110,11 @@ describe('runAction param allow-list (v2.3.13)', () => {
   });
 
   it('accepts a numeric value for a number-typed param (validation passes)', async () => {
+    // v2.4.0: run_hwinfo_log flagged needs_admin (HWiNFO sensor access).
+    // Validation still passes; the action just routes to the elevated runner.
     const r = await runAction({ name: 'run_hwinfo_log', params: { duration: 60 } });
-    // scriptRunner mock returns success
     expect(r.success).toBe(true);
-    expect(runPowerShellScript).toHaveBeenCalledTimes(1);
+    expect(runElevatedPowerShellScript).toHaveBeenCalledTimes(1);
   });
 
   it('accepts a valid ip for block_ip and routes to elevated runner (needs_admin)', async () => {

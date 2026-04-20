@@ -30,6 +30,12 @@ export interface ActionDefinition {
    * user approve per-action without keeping the Workbench itself elevated.
    */
   needs_admin?: boolean;
+  /**
+   * Override the default 5-minute script timeout. Use for legitimately
+   * long-running actions (defender_full_scan, shrink_component_store). If
+   * unset, DEFAULT_SCRIPT_TIMEOUT_MS (5 min) applies.
+   */
+  timeout_ms?: number;
 }
 
 export const ACTIONS: Record<ActionName, ActionDefinition> = {
@@ -63,8 +69,10 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Cleanup WinSxS',
     estimated_duration_s: 600,
+    timeout_ms: 45 * 60 * 1000,
+    needs_admin: true,
     category: 'repair', icon: '📦',
-    tooltip: 'Runs DISM /StartComponentCleanup /ResetBase. Removes superseded Windows updates. Typically reclaims 5-15 GB. Irreversible after completion.',
+    tooltip: 'Runs DISM /StartComponentCleanup /ResetBase. Removes superseded Windows updates. Typically reclaims 5-15 GB. Irreversible. Admin required.',
   },
   clean_onedrive_cache: {
     name: 'clean_onedrive_cache', label: 'Clean OneDrive Cache', ps_script: 'actions/Clean-OneDrive-Cache.ps1',
@@ -105,22 +113,28 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   run_sfc: {
     name: 'run_sfc', label: 'Run SFC', ps_script: 'actions/Run-SFC.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 600,
-    category: 'repair', icon: '🛡',
-    tooltip: 'System File Checker - scans all Windows system files, repairs corrupt ones. Takes 5-15 min. Read-mostly; any repairs are logged.',
+    timeout_ms: 30 * 60 * 1000,  // 30 min - full scans on larger installs can stretch
+    needs_admin: true,
+    category: 'repair', icon: '🛡', informational: true,
+    tooltip: 'System File Checker - scans all Windows system files, repairs corrupt ones. Takes 5-30 min. Admin required.',
   },
   run_dism: {
     name: 'run_dism', label: 'Run DISM Repair', ps_script: 'actions/Run-DISM.ps1',
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: DISM RestoreHealth',
     estimated_duration_s: 900,
+    timeout_ms: 45 * 60 * 1000,  // 45 min - Windows Update downloads can be slow
+    needs_admin: true,
     category: 'repair', icon: '💊',
-    tooltip: 'DISM /Online /Cleanup-Image /RestoreHealth. Repairs component store. Downloads from Windows Update. 10-20 min.',
+    tooltip: 'DISM /Online /Cleanup-Image /RestoreHealth. Repairs component store. Downloads from Windows Update. 10-40 min. Admin required.',
   },
   trim_ssd: {
     name: 'trim_ssd', label: 'TRIM SSDs', ps_script: 'actions/Trim-SSD.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    timeout_ms: 15 * 60 * 1000,
+    needs_admin: true,
     category: 'repair', icon: '💿',
-    tooltip: 'Runs defrag /L on every SSD to signal free blocks. Improves sustained write speed. Safe on modern SSDs.',
+    tooltip: 'Runs defrag /L on every SSD to signal free blocks. Admin required on system drive.',
   },
   generate_system_report: {
     name: 'generate_system_report', label: 'Generate System Report',
@@ -151,8 +165,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Reset Winsock', reboot_required: true,
     estimated_duration_s: 10,
+    needs_admin: true,
     category: 'network', icon: '🔌',
-    tooltip: 'netsh winsock reset. Repairs the Windows networking socket layer. REQUIRES REBOOT. Use only if you have persistent networking issues.',
+    tooltip: 'netsh winsock reset. Repairs the Windows networking socket layer. REQUIRES REBOOT + admin.',
   },
   open_firewall_console: {
     name: 'open_firewall_console', label: 'Open Firewall Rules',
@@ -178,8 +193,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Reset Firewall',
     estimated_duration_s: 15,
+    needs_admin: true,
     category: 'network', icon: '🔥',
-    tooltip: 'netsh advfirewall reset. Removes ALL custom firewall rules, returns to Windows defaults. Apps may need to re-request network access.',
+    tooltip: 'netsh advfirewall reset. Removes ALL custom firewall rules, returns to Windows defaults. Admin required.',
   },
   flush_arp_cache: {
     name: 'flush_arp_cache', label: 'Flush ARP Cache',
@@ -193,8 +209,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Reset-Network-Adapters.ps1',
     confirm_level: 'destructive', rollback_tier: 'C',
     estimated_duration_s: 30,
+    needs_admin: true,
     category: 'network', icon: '📡',
-    tooltip: 'Disables and re-enables all physical network adapters. Briefly disconnects all network. Fixes stuck adapter states.',
+    tooltip: 'Disables and re-enables all physical network adapters. Admin required.',
   },
   remap_nas: {
     name: 'remap_nas', label: 'Remap NAS Drives',
@@ -211,8 +228,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'restart_service', label: 'Restart Service…',
     ps_script: 'actions/Restart-Service.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 10,
+    needs_admin: true,
     category: 'service', icon: '🔁',
-    tooltip: 'Restart any Windows service by name. Provides warnings for services with dependencies.',
+    tooltip: 'Restart any Windows service by name. Most system services require admin to restart.',
     params_schema: {
       service_name: { type: 'string', required: true, description: 'Service name (e.g., WSearch, BITS, wuauserv)' },
     },
@@ -229,8 +247,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Restart-Network-Stack.ps1',
     confirm_level: 'destructive', rollback_tier: 'C',
     estimated_duration_s: 20,
+    needs_admin: true,
     category: 'service', icon: '📶',
-    tooltip: 'Restarts: Dhcp, Dnscache, NlaSvc, nsi. Clears deep network issues. Briefly disconnects everything.',
+    tooltip: 'Restarts: Dhcp, Dnscache, NlaSvc, nsi. Admin required.',
   },
   kill_process: {
     name: 'kill_process', label: 'Kill Process…',
@@ -295,30 +314,37 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'B',
     snapshot_paths: ['C:\\Windows\\System32\\drivers\\etc\\hosts'],
     estimated_duration_s: 3,
+    needs_admin: true,
     category: 'security', icon: '🔒',
-    tooltip: 'Replaces C:\\Windows\\System32\\drivers\\etc\\hosts with the Microsoft default (only 127.0.0.1 / ::1 loopback). Original backed up for revert.',
+    tooltip: 'Replaces C:\\Windows\\System32\\drivers\\etc\\hosts with the Microsoft default (only 127.0.0.1 / ::1 loopback). Admin required; original backed up for revert.',
   },
 
   defender_quick_scan: {
     name: 'defender_quick_scan', label: 'Defender Quick Scan',
     ps_script: 'actions/Run-DefenderQuickScan.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 600,
+    timeout_ms: 30 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '🛡',
-    tooltip: 'Starts a Windows Defender Quick Scan in the background. Takes 5-15 min; does not block the UI.',
+    tooltip: 'Starts a Windows Defender Quick Scan. Takes 5-15 min. Admin required.',
   },
   defender_full_scan: {
     name: 'defender_full_scan', label: 'Defender Full Scan',
     ps_script: 'actions/Run-DefenderFullScan.ps1',
     confirm_level: 'destructive', rollback_tier: 'C', estimated_duration_s: 7200,
+    timeout_ms: 4 * 60 * 60 * 1000,  // 4 hours - full scan on Greg's box takes ~90 min
+    needs_admin: true,
     category: 'security', icon: '🔍',
-    tooltip: 'Starts a Windows Defender Full Scan. Takes 1-4 hours. Uses significant CPU.',
+    tooltip: 'Starts a Windows Defender Full Scan. Takes 1-4 hours. Uses significant CPU. Admin required.',
   },
   update_defender_defs: {
     name: 'update_defender_defs', label: 'Update Defender Definitions',
     ps_script: 'actions/Update-DefenderDefs.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    timeout_ms: 5 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '📥',
-    tooltip: 'Downloads the latest Microsoft Defender threat definitions (bypassing the normal schedule).',
+    tooltip: 'Downloads the latest Microsoft Defender threat definitions. Admin required.',
   },
 
   // ============== WINDOWS UPDATE ==============
@@ -328,7 +354,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Install Windows Updates',
     estimated_duration_s: 1800, category: 'update', icon: '🪟',
-    tooltip: 'Downloads and installs all pending Windows Updates. May take 30+ minutes. Creates a restore point before starting.',
+    timeout_ms: 2 * 60 * 60 * 1000,  // 2 hours - large cumulative updates are slow
+    needs_admin: true,
+    tooltip: 'Downloads and installs all pending Windows Updates. 30+ minutes. Creates a restore point. Admin required.',
   },
   install_security_updates: {
     name: 'install_security_updates', label: 'Install Security Only',
@@ -336,21 +364,26 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Install Security Updates',
     estimated_duration_s: 900, category: 'update', icon: '🛡',
-    tooltip: 'Installs only updates classified as Security. Creates a restore point before starting.',
+    timeout_ms: 60 * 60 * 1000,  // 1 hour
+    needs_admin: true,
+    tooltip: 'Installs only updates classified as Security. Creates a restore point. Admin required.',
   },
   repair_windows_update: {
     name: 'repair_windows_update', label: 'Repair Windows Update',
     ps_script: 'actions/Repair-WindowsUpdate.ps1',
     confirm_level: 'destructive', rollback_tier: 'C',
-    estimated_duration_s: 60, category: 'update', icon: '🔧',
-    tooltip: 'Stops WU services, renames SoftwareDistribution + catroot2, resets WinHTTP proxy, restarts services. Fixes stuck update issues.',
+    estimated_duration_s: 60,
+    needs_admin: true,
+    category: 'update', icon: '🔧',
+    tooltip: 'Stops WU services, renames SoftwareDistribution + catroot2, resets WinHTTP proxy, restarts services. Admin required.',
   },
   hide_kb: {
     name: 'hide_kb', label: 'Hide KB',
     ps_script: 'actions/Hide-KB.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 10,
+    needs_admin: true,
     category: 'update', icon: '🚫',
-    tooltip: 'Hides a specific Windows Update from future offerings. Provide KB ID (e.g., KB5036893).',
+    tooltip: 'Hides a specific Windows Update from future offerings. Admin required.',
     params_schema: { kb_id: { type: 'string', required: true, description: 'Update KB identifier' } },
   },
   install_kb: {
@@ -359,8 +392,10 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Install KB',
     estimated_duration_s: 600,
+    timeout_ms: 60 * 60 * 1000,  // 1 hour
+    needs_admin: true,
     category: 'update', icon: '📥',
-    tooltip: 'Installs a specific Windows Update by KB ID. Creates a restore point first.',
+    tooltip: 'Installs a specific Windows Update by KB ID. Creates a restore point. Admin required.',
     params_schema: { kb_id: { type: 'string', required: true, description: 'Update KB identifier' } },
   },
 
@@ -368,8 +403,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'create_shadow_copy', label: 'Create Shadow Copy',
     ps_script: 'actions/Create-ShadowCopy.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 30,
+    needs_admin: true,
     category: 'security', icon: '📸',
-    tooltip: 'Creates a Volume Shadow Copy on the specified drive - recovery snapshot Windows can restore files from.',
+    tooltip: 'Creates a Volume Shadow Copy on the specified drive - recovery snapshot Windows can restore files from. Admin required.',
     params_schema: { drive: { type: 'string', required: false, description: 'Drive letter (default C:)' } },
   },
   enable_bitlocker: {
@@ -378,8 +414,10 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Enable BitLocker',
     estimated_duration_s: 300,
+    timeout_ms: 15 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '🔐',
-    tooltip: 'Starts BitLocker encryption on the specified drive with TPM + Recovery Password. Save the recovery key immediately after.',
+    tooltip: 'Starts BitLocker encryption on the specified drive with TPM + Recovery Password. Save the recovery key immediately after. Admin required.',
     params_schema: { drive: { type: 'string', required: false, description: 'Drive letter (default C:)' } },
   },
   block_ip: {
@@ -415,8 +453,10 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'run_mbam_scan', label: 'Run Malwarebytes Scan',
     ps_script: 'actions/Run-MalwarebytesScan.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 1800,
+    timeout_ms: 2 * 60 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '🧪',
-    tooltip: 'Launches a Malwarebytes Threat Scan in the background. Requires Malwarebytes installed.',
+    tooltip: 'Launches a Malwarebytes Threat Scan. Requires Malwarebytes installed + admin.',
   },
 
   run_dell_command_update: {
@@ -425,8 +465,10 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'risky', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Dell Command Update',
     estimated_duration_s: 300,
+    timeout_ms: 30 * 60 * 1000,
+    needs_admin: true,
     category: 'update', icon: '💻',
-    tooltip: 'Scans for Alienware/Dell-specific updates (BIOS, chipset, GPU driver). Requires Dell Command | Update app installed.',
+    tooltip: 'Scans for Alienware/Dell-specific updates (BIOS, chipset, GPU driver). Requires Dell Command | Update app installed + admin.',
   },
   import_occt_csv: {
     name: 'import_occt_csv', label: 'Import OCCT CSV',
@@ -452,6 +494,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Shrink-ComponentStore.ps1',
     confirm_level: 'destructive', rollback_tier: 'C',
     estimated_duration_s: 1200,
+    timeout_ms: 45 * 60 * 1000,  // 45 min - DISM /ResetBase can be slow on congested drives
     needs_admin: true,
     category: 'disk', icon: '📦',
     tooltip: 'Runs DISM /StartComponentCleanup /ResetBase against WinSxS. Reclaims 5-15 GB but becomes irreversible after completion (you cannot uninstall superseded updates). Admin required.',
@@ -471,6 +514,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Empty-RecycleBins.ps1',
     confirm_level: 'destructive', rollback_tier: 'C',
     estimated_duration_s: 10,
+    timeout_ms: 10 * 60 * 1000,  // 10 min - NAS-mapped bins on slow networks can block
     category: 'disk', icon: '🗑',
     tooltip: 'Empties the Recycle Bin on every fixed drive. Reports freed bytes per drive. Irreversible.',
   },
@@ -518,29 +562,37 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'run_malwarebytes_cli', label: 'Malwarebytes CLI Scan',
     ps_script: 'actions/Run-MalwarebytesCli.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 1800,
+    timeout_ms: 60 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '🧪', informational: true,
-    tooltip: 'Runs a Malwarebytes quick scan via CLI and parses the log file. Read-only (detection-only).',
+    tooltip: 'Runs a Malwarebytes quick scan via CLI and parses the log file. Admin required.',
   },
   run_adwcleaner_scan: {
     name: 'run_adwcleaner_scan', label: 'AdwCleaner Scan (report-only)',
     ps_script: 'actions/Run-AdwCleanerScan.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 600,
+    timeout_ms: 30 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '🧽', informational: true,
-    tooltip: 'Runs AdwCleaner in /scan mode and writes a report. Never auto-removes; review required.',
+    tooltip: 'Runs AdwCleaner in /scan mode and writes a report. Admin required. Never auto-removes.',
   },
   run_safety_scanner: {
     name: 'run_safety_scanner', label: 'Microsoft Safety Scanner',
     ps_script: 'actions/Run-SafetyScanner.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 3600,
+    timeout_ms: 2 * 60 * 60 * 1000,
+    needs_admin: true,
     category: 'security', icon: '🩺', informational: true,
-    tooltip: 'Runs msert.exe /Q /N (quiet, no auto-clean) and returns the exit code + log path.',
+    tooltip: 'Runs msert.exe /Q /N (quiet, no auto-clean). Admin required.',
   },
   run_hwinfo_log: {
     name: 'run_hwinfo_log', label: 'HWiNFO Sensor Log',
     ps_script: 'actions/Run-HwinfoLog.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 7200,
+    timeout_ms: 3 * 60 * 60 * 1000,
+    needs_admin: true,
     category: 'diagnostic', icon: '🌡',
-    tooltip: 'Starts HWiNFO64 sensor logging for -Duration seconds, then closes it and saves the CSV.',
+    tooltip: 'Starts HWiNFO64 sensor logging for -Duration seconds. Admin required for full sensor coverage.',
     params_schema: { duration: { type: 'number', required: false, description: 'Seconds (default 7200 = 2h)' } },
   },
   parse_hwinfo_delta: {
@@ -571,8 +623,9 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Create-RestorePoint.ps1',
     confirm_level: 'none', rollback_tier: 'none',
     estimated_duration_s: 15,
+    needs_admin: true,
     category: 'internal', icon: '📍',
-    tooltip: 'Internal: creates a Windows System Restore point. Used by the rollback manager before running Tier A actions.',
+    tooltip: 'Internal: creates a Windows System Restore point. Admin required.',
     params_schema: {
       description: { type: 'string', required: true, description: 'Restore point label' },
     },

@@ -155,6 +155,19 @@ app.whenReady().then(() => {
     } catch { /* non-fatal */ }
   })();
 
+  // v2.3.15: ACL repair. v2.3.13's installer icacls run occasionally left
+  // files with zero ACEs (observed on the two Defender-config scripts -
+  // likely because Defender held them open during the icacls pass).
+  // Run the repair on every startup as a cheap self-healer. If the user's
+  // account can't restore the ACL (because the file's owner is SYSTEM and
+  // we're not elevated), the script flags that case without failing.
+  (async () => {
+    try {
+      const { runPowerShellScript } = await import('./scriptRunner.js');
+      await runPowerShellScript('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+    } catch { /* non-fatal; most users will never hit this path */ }
+  })();
+
   // v2.3.0 first-run self-test: fires once per major version, only if Telegram
   // is configured. Also bumps the selftest_version marker so 2.3.0 installs
   // ping the channel to confirm tokens still work after the upgrade.

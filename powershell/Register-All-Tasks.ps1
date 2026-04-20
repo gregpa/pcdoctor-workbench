@@ -40,6 +40,9 @@ $userAutopilotTasks = @(
     @{ name = 'PCDoctor-Autopilot-HwinfoLog';                 sched = '/SC MONTHLY /MO FIRST /D SAT /ST 23:00';  script = "$root\actions\Run-HwinfoLog.ps1" }
     @{ name = 'PCDoctor-Autopilot-SafetyScanner';             sched = '/SC MONTHLY /MO THIRD /D SAT /ST 04:00';  script = "$root\actions\Run-SafetyScanner.ps1" }
     @{ name = 'PCDoctor-Autopilot-UpdateHostsStevenBlack';    sched = '/SC MONTHLY /MO FIRST /D SUN /ST 04:00';  script = "$root\actions\Update-HostsFromStevenBlack.ps1" }
+    # v2.4.0 tool updates: weekly winget upgrade check (reports only; user
+    # presses Upgrade in the Tools page to actually apply).
+    @{ name = 'PCDoctor-Weekly-Tool-Updates';                  sched = '/SC WEEKLY /D SUN /ST 04:00';            script = "$root\Check-ToolUpdates.ps1" }
 )
 
 $systemAutopilotTasks = @(

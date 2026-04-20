@@ -29,9 +29,44 @@ if ($DryRun) {
     exit 0
 }
 
+# v2.3.15: SFC silently fake-succeeds in 5s when run non-elevated (it prints
+# "You must be an administrator..." to stdout and exits 0). Pre-check so we
+# emit a clear E_NOT_ADMIN rather than reporting a bogus success.
+$currentId = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object System.Security.Principal.WindowsPrincipal($currentId)
+if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $err = @{ code='E_NOT_ADMIN'; message='sfc /scannow requires administrator privileges' } | ConvertTo-Json -Compress
+    Write-Host "PCDOCTOR_ERROR:$err"
+    exit 1
+}
+
+# sfc.exe writes progress to the console with CR-only line endings; PowerShell
+# captures those as separate lines. We parse the final outcome from the output.
 $output = & sfc /scannow 2>&1 | Out-String
 $exit = $LASTEXITCODE
-$result = @{ success = ($exit -eq 0); duration_ms = $sw.ElapsedMilliseconds; exit_code = $exit; output = ($output.Trim() -split "`r?`n" | Select-Object -Last 10) -join "`n"; message = 'SFC scan completed; check CBS.log for details' }
+
+# Verify SFC actually ran a scan. If stdout has neither the start banner nor
+# any outcome keywords, it was blocked (another instance, no console session).
+$didScan = $output -match 'Beginning system scan|Verification \d+%|Windows Resource Protection'
+$foundViolations = $output -match 'found (integrity violations|corrupt files)'
+$repaired = $output -match 'successfully repaired'
+$unrepaired = $output -match 'unable to fix some of them'
+
+$result = @{
+    success = ($exit -eq 0 -and $didScan)
+    duration_ms = $sw.ElapsedMilliseconds
+    exit_code = $exit
+    did_scan = [bool]$didScan
+    found_violations = [bool]$foundViolations
+    repaired = [bool]$repaired
+    unrepaired = [bool]$unrepaired
+    output = ($output.Trim() -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^\s*$' } | Select-Object -Last 10) -join "`n"
+    message = if (-not $didScan) { 'SFC did not actually run - check output (another instance? no console session?)' }
+              elseif ($repaired) { 'SFC found + repaired corrupt files; reboot to verify' }
+              elseif ($unrepaired) { 'SFC found corrupt files but could not repair - run DISM /RestoreHealth next' }
+              elseif ($foundViolations) { 'SFC found violations - see output' }
+              else { 'SFC clean: no integrity violations' }
+}
 
 $sw.Stop()
 $result | ConvertTo-Json -Depth 3 -Compress
