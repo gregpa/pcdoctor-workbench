@@ -21,7 +21,8 @@ files:
   - package.json
   - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
-  - "!**/node_modules/node-pty/**/*"
+  # node-pty is now bundled (repo moved to a space-free path so the native
+  # rebuild succeeds). Embedded Claude terminal works in the packaged app.
 
 extraResources:
   - from: resources/icons
@@ -32,6 +33,17 @@ extraResources:
     to: powershell
 
 asar: true
+
+# node-pty ships N-API prebuilds that work under Electron's Node ABI without
+# a local rebuild. Skipping the native rebuild step avoids a Python 3.14
+# distutils incompatibility (node-gyp hasn't caught up yet). better-sqlite3
+# still needs its own rebuild, which we do manually via `npm rebuild
+# better-sqlite3` before packaging.
+npmRebuild: false
+
+asarUnpack:
+  - "**/node_modules/node-pty/**/*"
+  - "**/node_modules/better-sqlite3/**/*"
 
 win:
   target:
