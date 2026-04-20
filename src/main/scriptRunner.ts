@@ -189,19 +189,23 @@ export async function runElevatedPowerShellScript<T = unknown>(
   const safeExit = exitPath.replace(/'/g, "''");
   const argsStr = args.map(a => `'${a.replace(/'/g, "''")}'`).join(',');
 
-  // Streams are kept separate:
-  //   1>  stdout        -> outPath     (expected to contain JSON)
-  //   2>  error stream  -> errPath     (PS errors, Write-Error)
-  //   $LASTEXITCODE     -> exitPath    (the actual exit code)
-  // Write-Warning / Write-Verbose / Write-Information stream to their
-  // respective channels and are dropped so they can't poison JSON.
+  // v2.4.5: capture ALL streams (not just 1 + 2). PowerShell's Write-Host
+  // writes to the information stream (stream 6), not stdout (stream 1),
+  // so "1>out 2>err" dropped the PCDOCTOR_ERROR sentinel on the floor and
+  // the elevated action failed with "Elevated script exited with code 1"
+  // instead of the actionable error the script was trying to report.
+  //   $output collects success(1) + error(2) + warning(3) + verbose(4) +
+  //           debug(5) + information(6) via the *>&1 merge operator
+  //   errPath keeps a copy of the merged output for diagnostics
+  //   exitPath stores the real exit code separately
   const innerCmd =
     `try { ` +
-    `  & '${safeScript}' ${argsStr ? `@(${argsStr})` : ''} 1>'${safeOut}' 2>'${safeErr}'; ` +
+    `  $output = & '${safeScript}' ${argsStr ? `@(${argsStr})` : ''} *>&1 | Out-String; ` +
+    `  Set-Content -Path '${safeOut}' -Value $output -Encoding utf8; ` +
     `  $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }; ` +
     `  Set-Content -Path '${safeExit}' -Value $code -Encoding ascii ` +
     `} catch { ` +
-    `  $_ | Out-String | Add-Content -Path '${safeErr}'; ` +
+    `  $_ | Out-String | Set-Content -Path '${safeOut}' -Encoding utf8; ` +
     `  Set-Content -Path '${safeExit}' -Value 1 -Encoding ascii ` +
     `}`;
 
