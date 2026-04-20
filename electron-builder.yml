@@ -1,6 +1,9 @@
 appId: com.gregpajak.pcdoctor-workbench
 productName: PCDoctor Workbench
-artifactName: "${productName}-Setup-${version}.${ext}"
+# Hyphenated artifactName (no space) — GitHub Releases rewrites spaces in
+# uploaded asset names to "." which breaks electron-updater's download
+# (latest.yml keeps the literal hyphen and 404s on the renamed asset).
+artifactName: "PCDoctor-Workbench-Setup-${version}.${ext}"
 
 # GitHub Releases as the auto-update feed. electron-updater pulls
 # `latest.yml` + the .exe from the repo's Releases page. Public repo so no
