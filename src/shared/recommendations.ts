@@ -270,19 +270,27 @@ export function recommendAction(
       if (pendingReboot) {
         return { level: 'blocked', reason: 'Reboot the pending changes first or SFC can fail mid-way.' };
       }
-      // Stability/BSOD signal → urgent
       const stabilityFinding = status?.findings.some(f =>
         f.area?.toLowerCase().includes('stability') ||
         f.message?.toLowerCase().includes('bsod') ||
         f.message?.toLowerCase().includes('blue screen')
       ) ?? false;
+      // v2.4.3: if SFC already ran recently, stop telling the user to re-run
+      // it every time they open the app. A clean SFC is proof that file
+      // corruption is NOT the cause; the stability finding is then
+      // pointing at drivers / thermal / hardware, not system files.
+      if (stabilityFinding && daysSinceLast !== null && daysSinceLast < 7) {
+        return {
+          level: 'skip',
+          reason: `SFC ran ${daysSinceLast}d ago — file corruption ruled out. Stability issues are likely driver/thermal/hardware, not system files.`,
+        };
+      }
       if (stabilityFinding) {
         return { level: 'recommended', reason: 'Stability issue detected (possible BSOD signal) — run SFC to check for corrupt system files.', priority: 2 };
       }
       if (daysSinceLast !== null && daysSinceLast < 14) {
         return { level: 'skip', reason: `SFC ran ${daysSinceLast}d ago — quarterly cadence is fine.` };
       }
-      // > 90 days → recommended priority 6
       if (daysSinceLast === null || daysSinceLast > 90) {
         return { level: 'recommended', reason: daysSinceLast === null ? 'Never run — quarterly SFC scan recommended.' : `SFC last ran ${daysSinceLast}d ago — quarterly maintenance due.`, priority: 6 };
       }

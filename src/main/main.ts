@@ -155,16 +155,31 @@ app.whenReady().then(() => {
     } catch { /* non-fatal */ }
   })();
 
-  // v2.3.15: ACL repair. v2.3.13's installer icacls run occasionally left
-  // files with zero ACEs (observed on the two Defender-config scripts -
-  // likely because Defender held them open during the icacls pass).
-  // Run the repair on every startup as a cheap self-healer. If the user's
-  // account can't restore the ACL (because the file's owner is SYSTEM and
-  // we're not elevated), the script flags that case without failing.
+  // v2.3.15 + v2.4.3: ACL self-healer. Two-phase:
+  //   (1) Run non-elevated. If it finds files with readable ACEs but the
+  //       empty "no ACEs" pattern, it repairs them directly.
+  //   (2) If unreadable files remain (user can't even Get-Acl because the
+  //       file has zero ACEs and no inherited read), it returns
+  //       needs_elevation:true. Workbench then re-runs with -Elevated via
+  //       the UAC-elevated path, which uses icacls to restore inheritance.
+  //   (3) Remember the last repair_version so we don't spam UAC on every
+  //       startup - only re-prompt when a new version ships.
   (async () => {
     try {
-      const { runPowerShellScript } = await import('./scriptRunner.js');
-      await runPowerShellScript('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
+      const { getSetting, setSetting } = await import('./dataStore.js');
+      const thisVersion = app.getVersion();
+      const lastRepair = getSetting('last_acl_repair_version');
+      const r = await runPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      if (r?.needs_elevation && lastRepair !== thisVersion) {
+        // Prompt UAC once per Workbench upgrade. The one-shot elevated
+        // run restores inheritance on every stripped file.
+        try {
+          await runElevatedPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput', '-Elevated'], { timeoutMs: 60_000 });
+        } catch { /* user declined UAC; we'll try again next upgrade */ }
+      }
+      // Record this version either way so we don't prompt repeatedly.
+      setSetting('last_acl_repair_version', thisVersion);
     } catch { /* non-fatal; most users will never hit this path */ }
   })();
 

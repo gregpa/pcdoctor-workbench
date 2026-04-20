@@ -10,6 +10,7 @@
  */
 import { useState } from 'react';
 import type { ActionDefinition } from '@shared/actions.js';
+import { api } from '@renderer/lib/ipc.js';
 
 export interface ActionResultModalProps {
   action: ActionDefinition;
@@ -153,12 +154,36 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
     ? new Date((result.generated_at as number) * 1000).toLocaleString()
     : new Date().toLocaleString();
 
+  // v2.4.3: main-process clipboard (navigator.clipboard silently fails in
+  // the sandboxed renderer). Show a feedback flash so the user sees the
+  // copy actually happened instead of the button doing nothing visible.
+  const [copyFlash, setCopyFlash] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyResult = async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
-    } catch {
-      /* clipboard not available */
-    }
+    const payload = [
+      `# ${action.label} - Result`,
+      `Generated: ${ts}`,
+      '',
+      '```json',
+      JSON.stringify(result, null, 2),
+      '```',
+    ].join('\n');
+    const r = await (api as any).writeClipboard?.(payload);
+    setCopyFlash(r?.ok ? 'copied' : 'failed');
+    setTimeout(() => setCopyFlash('idle'), 2500);
+  };
+
+  const saveResult = async () => {
+    const payload = [
+      `# ${action.label} - Result`,
+      `Generated: ${ts}`,
+      '',
+      '```json',
+      JSON.stringify(result, null, 2),
+      '```',
+    ].join('\n');
+    const r = await (api as any).saveActionResult?.(action.name, Date.now(), payload);
+    setCopyFlash(r?.ok ? 'copied' : 'failed');
+    setTimeout(() => setCopyFlash('idle'), 4000);
   };
 
   let body: JSX.Element;
@@ -188,12 +213,24 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
         </h2>
         <div className="text-[10px] text-text-secondary mb-3">Generated at {ts}</div>
         <div>{body}</div>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-surface-700">
+        <div className="flex justify-end items-center gap-2 mt-4 pt-3 border-t border-surface-700">
+          {copyFlash !== 'idle' && (
+            <span className={`text-[11px] mr-2 ${copyFlash === 'copied' ? 'text-status-good' : 'text-status-crit'}`}>
+              {copyFlash === 'copied' ? '✓ Copied' : '✗ Failed'}
+            </span>
+          )}
+          <button
+            onClick={saveResult}
+            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            title="Save to C:\\ProgramData\\PCDoctor\\exports\\"
+          >
+            💾 Save
+          </button>
           <button
             onClick={copyResult}
             className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:bg-surface-600"
           >
-            Copy Result
+            📋 Copy Result
           </button>
           <button
             onClick={onClose}
