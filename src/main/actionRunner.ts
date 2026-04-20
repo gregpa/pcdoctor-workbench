@@ -1,6 +1,6 @@
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, ActionResult } from '@shared/types.js';
-import { runPowerShellScript, runElevatedPowerShellScript, PCDoctorScriptError } from './scriptRunner.js';
+import { runPowerShellScript, runElevatedPowerShellScript, isUacEnabled, PCDoctorScriptError } from './scriptRunner.js';
 import { startActionLog, finishActionLog, insertToolResult, updateActionLogRollbackId } from './dataStore.js';
 import { prepareRollback } from './rollbackManager.js';
 import { notify } from './notifier.js';
@@ -111,6 +111,21 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
   // Special case: install_security_updates uses same script as install_windows_updates but with -SecurityOnly flag
   if (input.name === 'install_security_updates') {
     scriptArgs.push('-SecurityOnly');
+  }
+
+  // v2.3.14: when UAC is disabled, Start-Process -Verb RunAs silently runs
+  // as the current user (no elevation dialog). The action script's admin
+  // check then fails with E_NOT_ADMIN and the user sees "Script exited with
+  // code 1" with no context. Fail fast here with a clear actionable message.
+  if (def.needs_admin && !isUacEnabled()) {
+    const msg = 'UAC is disabled on this system, so the elevation prompt for this action cannot be shown. ' +
+      'Enable UAC (Security page -> UAC detail -> Re-enable + reboot), or run the Workbench as Administrator ' +
+      '(right-click the app, Run as administrator) to use admin-only actions.';
+    finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: msg });
+    return {
+      action: input.name, success: false, duration_ms: 0,
+      error: { code: 'E_UAC_DISABLED', message: msg },
+    };
   }
 
   const start = Date.now();

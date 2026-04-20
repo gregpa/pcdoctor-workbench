@@ -1,4 +1,4 @@
-import { spawn, type SpawnOptions } from 'node:child_process';
+import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -130,6 +130,32 @@ export async function runPowerShellScript<T = unknown>(
  *   - Keep stdout, stderr, and exit code on separate files so warnings /
  *     Write-Host noise in one stream doesn't poison the JSON parser.
  */
+/**
+ * Check whether UAC is enabled on this machine. When EnableLUA=0, every
+ * "Start-Process -Verb RunAs" attempt silently runs unelevated - the action
+ * script's IsInRole(Administrator) check then returns False and we emit
+ * E_NOT_ADMIN 300-500ms later with no dialog ever shown. Callers can use
+ * this to short-circuit with a clear error rather than a confusing exit 1.
+ */
+let _uacCache: { value: boolean; at: number } | null = null;
+export function isUacEnabled(): boolean {
+  // Cache for 60s - the check is cheap but runs on every admin action.
+  if (_uacCache && Date.now() - _uacCache.at < 60_000) return _uacCache.value;
+  try {
+    const r = spawnSync('reg.exe', [
+      'query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System',
+      '/v', 'EnableLUA',
+    ], { encoding: 'utf8', timeout: 3_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Output contains e.g. "EnableLUA    REG_DWORD    0x1"
+    const m = (r.stdout ?? '').match(/EnableLUA\s+REG_DWORD\s+0x([0-9a-fA-F]+)/);
+    const enabled = m ? parseInt(m[1], 16) !== 0 : true;
+    _uacCache = { value: enabled, at: Date.now() };
+    return enabled;
+  } catch {
+    return true; // conservative default
+  }
+}
+
 export async function runElevatedPowerShellScript<T = unknown>(
   relativeScriptPath: string,
   args: string[] = [],

@@ -51,9 +51,9 @@ export function Security() {
   );
   if (error || !data) return <div className="p-6 text-status-warn">Error: {error ?? 'no data'}</div>;
 
-  async function applyAction(name: ActionName) {
+  async function applyAction(name: ActionName, params?: Record<string, string | number>) {
     setToast(`Running ${ACTIONS[name].label}…`);
-    await run({ name });
+    await run({ name, params });
     setToast(`${ACTIONS[name].label} completed`);
     setTimeout(() => setToast(null), 4000);
     await refresh();
@@ -235,7 +235,37 @@ export function Security() {
           title="Windows Firewall" icon="🔥" severity={data.firewall.severity}
           onClose={() => setDetail(null)}
           actions={
-            <button onClick={() => { setDetail(null); applyAction('reset_firewall'); }} className="px-3 py-1.5 rounded-md text-xs bg-status-crit text-white font-bold">Reset Firewall</button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setDetail(null); applyAction('open_firewall_console'); }}
+                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+                title="Launches Windows Firewall with Advanced Security (wf.msc) so you can review and edit rules manually. No state change."
+              >
+                🧰 Open Firewall Rules
+              </button>
+              <button
+                onClick={() => {
+                  const raw = prompt(
+                    'Temporarily disable firewall for how many minutes? (1-240)\n\n' +
+                    'A one-shot scheduled task auto-re-enables it when the timer expires. ' +
+                    'Requires Admin (UAC prompt). Leave blank or press Cancel to abort.',
+                    '30',
+                  );
+                  if (raw === null) return;
+                  const n = parseInt(raw.trim(), 10);
+                  if (isNaN(n) || n < 1 || n > 240) {
+                    alert('Invalid duration. Must be 1-240 minutes.');
+                    return;
+                  }
+                  setDetail(null);
+                  applyAction('disable_firewall_temporarily', { minutes: n });
+                }}
+                className="px-3 py-1.5 rounded-md text-xs bg-status-warn/15 border border-status-warn/40 text-status-warn font-bold hover:bg-status-warn/25"
+                title="Disables firewall on all profiles for a set number of minutes (1-240). Auto-restores via scheduled task. Admin required."
+              >
+                ⏱ Disable Temporarily
+              </button>
+            </div>
           }
         >
           <div className="space-y-1">
@@ -247,7 +277,8 @@ export function Security() {
             {data.firewall.rules_added_7d > 0 && <div>Rules Added Last 7 Days: <strong>{data.firewall.rules_added_7d}</strong></div>}
           </div>
           <div className="mt-3 text-xs text-text-secondary">
-            Reset Firewall removes ALL custom rules and restores Windows defaults. Apps may need to re-request network access on first launch afterward.
+            <strong>Open Firewall Rules</strong> launches the Windows MMC console so you can review and edit rules directly. No state change.<br/>
+            <strong>Disable Temporarily</strong> turns off all three profiles for N minutes and auto-restores via a one-shot scheduled task. Useful for isolating an app that a firewall rule is blocking.
           </div>
         </SecurityDetailModal>
       )}

@@ -79,6 +79,16 @@ Start-Sleep -Seconds 2
 $svc = Get-Service WSearch -ErrorAction SilentlyContinue
 $svcStatus = if ($svc) { "$($svc.Status)" } else { 'Unknown' }
 
+# v2.3.14: write a rebuild marker so Invoke-PCDoctor.ps1 knows the index was
+# reset at time T and can suppress the "corrupted" finding for errors older
+# than T. Without this, Windows Search errors from before the rebuild keep
+# firing the finding until they age out of the 2-day scan window.
+$markerDir = 'C:\ProgramData\PCDoctor\baseline'
+try {
+    if (-not (Test-Path $markerDir)) { New-Item -ItemType Directory -Path $markerDir -Force | Out-Null }
+    Set-Content -Path (Join-Path $markerDir 'search-rebuilt.marker') -Value (Get-Date -Format 's') -Encoding ascii -Force
+} catch { }
+
 $result = @{
     success       = $true
     duration_ms   = $sw.ElapsedMilliseconds

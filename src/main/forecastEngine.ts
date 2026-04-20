@@ -79,7 +79,14 @@ function projectThresholdCrossing(r: RegressionResult, currentValue: number, thr
 
 export function generateForecasts(): ForecastData {
   const projections: ForecastProjection[] = [];
-  const insufficient: Array<{ metric: string; points: number; required: number }> = [];
+  const insufficient: Array<{
+    metric: string;
+    points: number;
+    required: number;
+    days_span: number;
+    days_required: number;
+    reason: 'not_enough_points' | 'not_enough_span';
+  }> = [];
   const nowMs = Date.now();
 
   for (const cfg of CONFIGS) {
@@ -88,12 +95,27 @@ export function generateForecasts(): ForecastData {
     // Pull last 90 days
     const pts = queryMetricTrend(cfg.category, cfg.metric, 90);
     if (pts.length < minPoints) {
-      insufficient.push({ metric: `${cfg.category}.${cfg.metric}`, points: pts.length, required: minPoints });
+      insufficient.push({
+        metric: `${cfg.category}.${cfg.metric}`,
+        points: pts.length, required: minPoints,
+        days_span: 0, days_required: minDays,
+        reason: 'not_enough_points',
+      });
       continue;
     }
-    const windowMs = pts[pts.length - 1].ts - pts[0].ts;
+    const windowMs = pts.length > 0 ? pts[pts.length - 1].ts - pts[0].ts : 0;
+    const daysSpan = Math.round(daysFromMs(windowMs) * 10) / 10;
     if (windowMs < msFromDays(minDays)) {
-      insufficient.push({ metric: `${cfg.category}.${cfg.metric}`, points: pts.length, required: minPoints });
+      // Reviewer-observed bug: previously reported "N / 14 points collected"
+      // even when the blocker was calendar span, not point count. Users saw
+      // "5840 / 14 points collected" and assumed a bug. Now we surface which
+      // gate actually failed + how close we are.
+      insufficient.push({
+        metric: `${cfg.category}.${cfg.metric}`,
+        points: pts.length, required: minPoints,
+        days_span: daysSpan, days_required: minDays,
+        reason: 'not_enough_span',
+      });
       continue;
     }
     const current = pts[pts.length - 1].value;

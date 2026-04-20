@@ -43,12 +43,16 @@ export interface Trend {
 export interface SmartEntry {
   drive: string;              // e.g. 'NVMe C: (1 TB)'
   model?: string;
-  health: 'PASSED' | 'FAILED' | 'UNKNOWN';
-  wear_pct?: number;          // 0..100
-  temp_c?: number;
-  media_errors?: number;
-  power_on_hours?: number;
+  health: 'PASSED' | 'FAILED' | 'UNKNOWN' | 'WARN';
+  wear_pct?: number | null;          // 0..100
+  temp_c?: number | null;
+  media_errors?: number | null;
+  power_on_hours?: number | null;
   status_severity: 'good' | 'warn' | 'crit';
+  /** True when the row came from Get-PhysicalDisk fallback (non-admin);
+   *  wear/temp/media_errors are unavailable and the UI should prompt the
+   *  user to Run SMART Health Check for full data. */
+  needs_admin?: boolean;
 }
 
 export interface ServiceHealth {
@@ -135,6 +139,8 @@ export type ActionName =
   | 'release_renew_ip'
   | 'reset_winsock'
   | 'reset_firewall'
+  | 'open_firewall_console'
+  | 'disable_firewall_temporarily'
   | 'flush_arp_cache'
   | 'reset_network_adapters'
   | 'remap_nas'
@@ -260,7 +266,14 @@ export interface ForecastProjection {
 export interface ForecastData {
   generated_at: number;         // unix seconds
   projections: ForecastProjection[];
-  insufficient_data: Array<{ metric: string; points: number; required: number }>;
+  insufficient_data: Array<{
+    metric: string;
+    points: number;
+    required: number;
+    days_span?: number;
+    days_required?: number;
+    reason?: 'not_enough_points' | 'not_enough_span';
+  }>;
 }
 
 export interface WeeklyReviewActionItem {

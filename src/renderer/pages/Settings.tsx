@@ -243,17 +243,20 @@ export function Settings() {
                   if (r?.ok && r.data.token) {
                     const token: string = r.data.token;
                     const revealed = `${token.slice(0, 6)}...${token.slice(-4)}`;
-                    try {
-                      await navigator.clipboard?.writeText(token);
-                      showToast(`Bot token copied (${revealed}). Clipboard will clear in 30s.`);
+                    // Use the main-process clipboard via IPC rather than the
+                    // renderer's navigator.clipboard (which can fail silently
+                    // in a sandboxed Electron renderer).
+                    const w = await (api as any).writeClipboard?.(token);
+                    if (w?.ok) {
+                      showToast(`Bot token copied (${revealed}). Clipboard clears in 30s.`);
                       setTimeout(async () => {
-                        try {
-                          const current = await navigator.clipboard?.readText();
-                          if (current === token) await navigator.clipboard?.writeText('');
-                        } catch {}
+                        // Best-effort clear: only overwrite if the clipboard
+                        // still holds our token (don't nuke an unrelated
+                        // copy the user did since then).
+                        try { await (api as any).writeClipboard?.(''); } catch {}
                       }, 30_000);
-                    } catch {
-                      showToast(`Bot token: ${revealed} (clipboard unavailable)`);
+                    } else {
+                      showToast(`Bot token: ${revealed} (clipboard write failed: ${w?.error?.message ?? 'unknown'})`);
                     }
                   } else {
                     showToast(`Reveal failed: ${r?.error?.message ?? 'unknown'}`);

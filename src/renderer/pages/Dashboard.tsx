@@ -393,9 +393,11 @@ export function Dashboard() {
                 key={i}
                 finding={f}
                 onApply={async (name, params) => {
-                  // v2.3.0 C1: Startup findings without a specific entry open the
-                  // multi-select picker instead of firing a single-item action.
-                  if (name === 'disable_startup_item' && (!params || !params.item_name)) {
+                  // v2.3.14: ALWAYS open the picker for any disable_startup_item
+                  // click regardless of params. Previous code would auto-fire if
+                  // the recommendation pre-filled item_name (e.g. 'nzbget') -
+                  // violates user-in-the-loop for destructive edits to startup.
+                  if (name === 'disable_startup_item') {
                     setShowStartupPicker(true);
                     return;
                   }

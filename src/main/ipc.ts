@@ -83,6 +83,21 @@ export function registerIpcHandlers() {
     catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
   });
 
+  // Main-process clipboard write. navigator.clipboard.writeText() can be
+  // blocked in sandboxed renderers (observed in v2.3.13 Reveal Token flow:
+  // IPC returned the token but the renderer clipboard API threw). Using
+  // Electron's clipboard module from the main process sidesteps the
+  // renderer sandbox restriction entirely.
+  ipcMain.handle('api:writeClipboard', async (_evt, text: string): Promise<IpcResult<{}>> => {
+    try {
+      const { clipboard } = await import('electron');
+      clipboard.writeText(typeof text === 'string' ? text : '');
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
   // Map of action_name -> most-recent successful-run ts (ms). Used by the
   // recommendations engine so "Last emptied Xd ago" reflects reality instead
   // of always showing "Never".

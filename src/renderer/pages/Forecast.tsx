@@ -55,11 +55,28 @@ export function Forecast() {
         <div className="bg-status-info/10 border border-status-info/40 rounded-lg p-4 text-sm mb-4">
           <div className="font-semibold text-status-info mb-1">Gathering baseline data</div>
           <div className="text-text-secondary text-xs">
-            Forecasts need at least 14 data points across 7 days. Keep the dashboard running; metrics accumulate automatically every 60s.
+            Forecasts need at least 14 data points <strong>and</strong> 7 days of calendar span.
+            Metrics accumulate every 60s while the dashboard runs.
             <ul className="mt-2 space-y-0.5">
-              {data.insufficient_data.map(x => (
-                <li key={x.metric}>• <code>{x.metric}</code> - {x.points} / {x.required} points collected</li>
-              ))}
+              {data.insufficient_data.map((x: any) => {
+                const reason = x.reason ?? 'not_enough_points';
+                if (reason === 'not_enough_span') {
+                  const span = x.days_span ?? 0;
+                  const req = x.days_required ?? 7;
+                  const remaining = Math.max(0, req - span).toFixed(1);
+                  return (
+                    <li key={x.metric}>
+                      • <code>{x.metric}</code> - {x.points} points collected;{' '}
+                      <strong>{span}d / {req}d calendar span</strong> ({remaining}d more needed)
+                    </li>
+                  );
+                }
+                return (
+                  <li key={x.metric}>
+                    • <code>{x.metric}</code> - {x.points} / {x.required} points collected
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>

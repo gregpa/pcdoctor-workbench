@@ -154,6 +154,24 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'network', icon: '🔌',
     tooltip: 'netsh winsock reset. Repairs the Windows networking socket layer. REQUIRES REBOOT. Use only if you have persistent networking issues.',
   },
+  open_firewall_console: {
+    name: 'open_firewall_console', label: 'Open Firewall Rules',
+    ps_script: 'actions/Open-FirewallConsole.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
+    category: 'network', icon: '🧰',
+    tooltip: 'Launches wf.msc (Windows Firewall with Advanced Security MMC) so you can review and edit rules manually. No state change.',
+  },
+  disable_firewall_temporarily: {
+    name: 'disable_firewall_temporarily', label: 'Disable Firewall Temporarily',
+    ps_script: 'actions/Disable-FirewallTemporary.ps1',
+    confirm_level: 'destructive', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
+    category: 'network', icon: '🔥',
+    tooltip: 'Disables Windows Firewall on all profiles for a set number of minutes (1-240). A one-shot scheduled task auto-re-enables it when the timer expires. Admin required.',
+    params_schema: {
+      minutes: { type: 'number', required: true, description: 'Disable duration in minutes (1-240)' },
+    },
+  },
   reset_firewall: {
     name: 'reset_firewall', label: 'Reset Firewall',
     ps_script: 'actions/Reset-Firewall.ps1',

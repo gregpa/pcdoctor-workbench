@@ -18,6 +18,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../src/main/scriptRunner.js', () => ({
   runPowerShellScript: vi.fn(async () => ({ success: true, message: 'ok' })),
   runElevatedPowerShellScript: vi.fn(async () => ({ success: true, message: 'ok' })),
+  // v2.3.14: actionRunner short-circuits needs_admin actions when UAC is
+  // off. Tests assume UAC is on (the happy path); real UAC-off behavior
+  // is covered by a separate isolated test.
+  isUacEnabled: vi.fn(() => true),
   PCDoctorScriptError: class extends Error {
     code: string;
     details?: unknown;

@@ -80,42 +80,44 @@ function collectEventLog(): string[] {
 
 function collectScheduledTasks(): Array<{ name: string; state: string; lastRun: string; lastResult: string; nextRun: string }> {
   const out: Array<{ name: string; state: string; lastRun: string; lastResult: string; nextRun: string }> = [];
-  for (const name of MANAGED_TASKS) {
-    try {
-      // schtasks.exe hangs when invoked directly from Node child_process
-      // (regardless of stdio config). Wrap in powershell.exe so it gets a
-      // proper console attachment.
-      const r = spawnSync('powershell.exe', [
-        '-NoProfile', '-NonInteractive',
-        '-Command', `schtasks /Query /TN "${name}" /FO CSV /V`,
-      ], {
-        encoding: 'utf8', timeout: 5_000, windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      if (r.status !== 0) {
-        // v2.3.0 B3 fix #3: log stderr so permission/missing-task failures are
-        // diagnosable from the exported report instead of showing "-" with no
-        // context.
-        const stderr = (r.stderr ?? '').trim().slice(0, 160);
-        const state = stderr ? `NOT REGISTERED (${stderr})` : 'NOT REGISTERED';
-        out.push({ name, state, lastRun: '-', lastResult: '-', nextRun: '-' });
-        continue;
+  // v2.3.14: delegate to the COM Schedule.Service helper script (same one
+  // Settings uses). Previous code did 20 sequential schtasks.exe queries
+  // via powershell wrapping; on boxes with Defender real-time scan each
+  // PS spawn took ~6s, so the 5s timeout hit on 19 of 20 tasks and the
+  // report claimed they were NOT REGISTERED when they were fine.
+  const scriptPath = path.join(PCDOCTOR_ROOT, 'Get-ScheduledTasksStatus.ps1');
+  try {
+    const r = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', scriptPath, '-JsonOutput',
+    ], { encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (r.status !== 0 || !r.stdout) {
+      for (const name of MANAGED_TASKS) {
+        out.push({ name, state: 'QUERY FAILED', lastRun: '-', lastResult: '-', nextRun: '-' });
       }
-      const lines = (r.stdout || '').split(/\r?\n/).filter(Boolean);
-      if (lines.length < 2) { out.push({ name, state: '?', lastRun: '-', lastResult: '-', nextRun: '-' }); continue; }
-      // CSV headers = line[0], data = line[1]
-      const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, ''));
-      const vals    = lines[1].split(',').map(v => v.replace(/^"|"$/g, ''));
-      const get = (key: string) => { const i = headers.indexOf(key); return i >= 0 ? vals[i] : ''; };
-      out.push({
-        name,
-        state: get('Status') || get('Scheduled Task State'),
-        lastRun: get('Last Run Time'),
-        lastResult: get('Last Result'),
-        nextRun: get('Next Run Time'),
-      });
-    } catch {
-      out.push({ name, state: 'ERROR', lastRun: '-', lastResult: '-', nextRun: '-' });
+      return out;
+    }
+    type TaskRow = { name: string; status?: string; last_run?: string | null; last_result?: string | null; next_run?: string | null };
+    const parsed = JSON.parse(r.stdout.trim()) as { success: boolean; tasks?: TaskRow[] };
+    const byName = new Map<string, TaskRow>();
+    for (const t of parsed.tasks ?? []) byName.set(t.name, t);
+    for (const name of MANAGED_TASKS) {
+      const t = byName.get(name);
+      if (!t || t.status === 'Not registered') {
+        out.push({ name, state: 'NOT REGISTERED', lastRun: '-', lastResult: '-', nextRun: '-' });
+      } else {
+        out.push({
+          name,
+          state: t.status ?? '?',
+          lastRun: t.last_run ?? '-',
+          lastResult: t.last_result ?? '-',
+          nextRun: t.next_run ?? '-',
+        });
+      }
+    }
+  } catch (e: any) {
+    for (const name of MANAGED_TASKS) {
+      out.push({ name, state: `ERROR: ${e?.message?.slice(0, 80) ?? 'unknown'}`, lastRun: '-', lastResult: '-', nextRun: '-' });
     }
   }
   return out;

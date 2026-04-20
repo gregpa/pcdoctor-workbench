@@ -253,12 +253,32 @@ try {
         if ($ws.Status -ne 'Running' -and $ws.StartType -ne 'Disabled') {
             Add-Finding warning 'Search' 'Windows Search service is not running - Explorer will be slow'
         }
-        # Check recent Search errors, but only AFTER the most recent "Full Index Reset"
-        # so a fresh rebuild clears the finding immediately instead of waiting 2 days.
+        # Check recent Search errors, but only AFTER the most recent rebuild.
+        # Three signals, whichever is newest wins:
+        #   1) EventID 1004 "Full Index Reset" (Windows-initiated rebuild)
+        #   2) Our own rebuild marker at baseline\search-rebuilt.marker
+        #      (written by Rebuild-SearchIndex.ps1 on success)
+        #   3) WSearch service start time (any restart wipes the in-memory
+        #      state that would keep throwing the same corruption errors)
+        # Reviewer-observed bug v2.3.14: previous check only used (1), so a
+        # successful rebuild via our script didn't clear the finding unless
+        # Windows happened to log Event 1004 - which it doesn't when the
+        # rebuild is user-initiated via folder-delete + service restart.
+        $cutoffs = @()
         $lastReset = Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Microsoft-Windows-Search'; Id=1004; StartTime=(Get-Date).AddDays(-7)} -MaxEvents 1 -EA SilentlyContinue |
                      Where-Object { $_.Message -match 'Full Index Reset' } |
                      Select-Object -First 1
-        $errWindowStart = if ($lastReset) { $lastReset.TimeCreated.AddMinutes(2) } else { (Get-Date).AddDays(-2) }
+        if ($lastReset) { $cutoffs += $lastReset.TimeCreated }
+        $markerPath = 'C:\ProgramData\PCDoctor\baseline\search-rebuilt.marker'
+        if (Test-Path $markerPath) {
+            try { $cutoffs += (Get-Item $markerPath).LastWriteTime } catch {}
+        }
+        try {
+            $wsearchStart = (Get-Process -Name SearchIndexer -EA SilentlyContinue | Sort-Object StartTime -Descending | Select-Object -First 1).StartTime
+            if ($wsearchStart) { $cutoffs += $wsearchStart }
+        } catch {}
+        $newestCutoff = if ($cutoffs.Count -gt 0) { ($cutoffs | Sort-Object -Descending | Select-Object -First 1) } else { $null }
+        $errWindowStart = if ($newestCutoff) { $newestCutoff.AddMinutes(2) } else { (Get-Date).AddDays(-2) }
         $searchErr = Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Microsoft-Windows-Search'; Level=1,2; StartTime=$errWindowStart} -MaxEvents 10 -EA SilentlyContinue
         if ($searchErr | Where-Object { $_.Message -match 'Recovery phase failed|recreate the index' }) {
             Add-Finding warning 'Search' 'Windows Search index is corrupted and needs rebuild (Settings > Search > Advanced > Rebuild)'
@@ -322,10 +342,34 @@ try {
 $pend = @()
 if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $pend += 'CBS' }
 if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $pend += 'WU' }
-if (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue) { $pend += 'PendingFileRename' }
+
+# PendingFileRenameOperations can be a permanent no-op because Gaming Services
+# (and a few other MS components) register rename-on-reboot for a DLL they
+# re-lock at boot - the rename NEVER completes. Filter known-stuck entries
+# before deciding whether to flag. Only flag if there is at least one
+# actionable entry remaining.
+$pfroBenignPatterns = @(
+    'gamingservicesproxy_e\.dll',       # Microsoft Gaming Services re-registers every boot
+    'gamingservices_e\.dll',
+    'InstallerService'                 # Known to queue stale renames after MSIX upgrades
+)
+$pfro = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue
+if ($pfro) {
+    $rawEntries = @($pfro.PendingFileRenameOperations | Where-Object { $_ -and $_.Length -gt 0 })
+    $actionable = @()
+    foreach ($e in $rawEntries) {
+        $isBenign = $false
+        foreach ($pat in $pfroBenignPatterns) {
+            if ($e -match $pat) { $isBenign = $true; break }
+        }
+        if (-not $isBenign) { $actionable += $e }
+    }
+    if ($actionable.Count -gt 0) { $pend += 'PendingFileRename' }
+    # else: all entries are known-stuck; don't flag.
+}
+
 $report.metrics.pending_reboot = $pend
 if ($pend) {
-    # Estimate age of pending reboot by looking at the last boot timestamp.
     $uptimeH = $report.metrics.uptime_hours
     $sev = if ($uptimeH -gt 168) { 'warning' } else { 'info' }
     Add-Finding $sev 'Reboot' "Pending reboot flags: $($pend -join ', ') (uptime $uptimeH h)" @{ flags = $pend; uptime_hours = $uptimeH }

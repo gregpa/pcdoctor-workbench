@@ -9,6 +9,7 @@ const api = {
   getAppVersion: (): Promise<IpcResult<string>> => ipcRenderer.invoke('api:getAppVersion'),
   setZoom: (delta: number): Promise<IpcResult<number>> => ipcRenderer.invoke('api:setZoom', delta),
   getZoom: (): Promise<IpcResult<number>> => ipcRenderer.invoke('api:getZoom'),
+  writeClipboard: (text: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:writeClipboard', text),
   getLastActionSuccessMap: (): Promise<IpcResult<Record<string, number>>> => ipcRenderer.invoke('api:getLastActionSuccessMap'),
   getStatus: (): Promise<IpcResult<SystemStatus>> => ipcRenderer.invoke('api:getStatus'),
   runAction: (req: RunActionRequest): Promise<IpcResult<ActionResult>> => ipcRenderer.invoke('api:runAction', req),
