@@ -23,6 +23,13 @@ export interface ActionDefinition {
    * HWiNFO delta, etc.) instead of only a success toast.
    */
   informational?: boolean;
+  /**
+   * When true, actionRunner spawns the PS script via Start-Process -Verb RunAs
+   * which triggers a UAC prompt. Use for actions whose PS script checks
+   * IsInRole(Administrator) and bails with E_NOT_ADMIN. The UAC dialog lets the
+   * user approve per-action without keeping the Workbench itself elevated.
+   */
+  needs_admin?: boolean;
 }
 
 export const ACTIONS: Record<ActionName, ActionDefinition> = {
@@ -91,6 +98,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'risky', rollback_tier: 'B',
     snapshot_paths: ['C:\\ProgramData\\Microsoft\\Search\\Data\\Applications\\Windows\\GatherLogs'],
     estimated_duration_s: 45,
+    needs_admin: true,
     category: 'repair', icon: '🔍',
     tooltip: 'Stops WSearch, deletes the index, restarts the service. Rebuilds index over 30-60 min in background.',
   },
@@ -241,6 +249,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'A',
     restore_point_description: 'PCDoctor: Fix Shell Overlays',
     estimated_duration_s: 20,
+    needs_admin: true,
     category: 'perf', icon: '🎨',
     tooltip: 'Renames redundant OneDrive/Dropbox overlay handlers (Windows only uses 15 of 23 registered). Improves File Explorer responsiveness. Reversible via restore point.',
   },
@@ -416,6 +425,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Shrink-ComponentStore.ps1',
     confirm_level: 'destructive', rollback_tier: 'C',
     estimated_duration_s: 1200,
+    needs_admin: true,
     category: 'disk', icon: '📦',
     tooltip: 'Runs DISM /StartComponentCleanup /ResetBase against WinSxS. Reclaims 5-15 GB but becomes irreversible after completion (you cannot uninstall superseded updates). Admin required.',
   },
@@ -425,6 +435,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'B',
     snapshot_paths: [],  // handled via backup-by-takeown inside script where possible; reversible via Windows itself.
     estimated_duration_s: 90,
+    needs_admin: true,
     category: 'disk', icon: '🧹',
     tooltip: 'Deletes C:\\$Windows.~BT, C:\\$Windows.~WS, and C:\\Windows.old if older than 10 days. Typically reclaims 10-30 GB. Admin required.',
   },
@@ -443,6 +454,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Enable-PUAProtection.ps1',
     confirm_level: 'risky', rollback_tier: 'C',
     estimated_duration_s: 5,
+    needs_admin: true,
     category: 'hardening', icon: '🛡',
     tooltip: 'Turns on Defender Potentially Unwanted Application protection (blocks bundled crapware, shady installers). Idempotent. Admin required.',
   },
@@ -451,6 +463,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     ps_script: 'actions/Enable-ControlledFolderAccess.ps1',
     confirm_level: 'risky', rollback_tier: 'C',
     estimated_duration_s: 5,
+    needs_admin: true,
     category: 'hardening', icon: '🔐',
     tooltip: 'Enables Defender anti-ransomware protection on user folders. Watch Windows Security for blocked-app notifications after enabling and allow-list legitimate apps. Admin required.',
   },
@@ -460,6 +473,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     confirm_level: 'destructive', rollback_tier: 'B',
     snapshot_paths: ['C:\\Windows\\System32\\drivers\\etc\\hosts'],
     estimated_duration_s: 45,
+    needs_admin: true,
     category: 'hardening', icon: '🌍',
     tooltip: 'Downloads the StevenBlack unified ads+tracker+malware hosts list and merges it into C:\\Windows\\System32\\drivers\\etc\\hosts. User entries are preserved between sentinel markers. Previous file backed up to PCDoctor\\rollback. Admin required.',
   },
@@ -469,6 +483,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'run_smart_check', label: 'SMART Health Check',
     ps_script: 'actions/Run-SmartCheck.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 30,
+    needs_admin: true,
     category: 'diagnostic', icon: '💾', informational: true,
     tooltip: 'Reads SMART health + StorageReliabilityCounter for every physical disk. Admin required; read-only.',
   },

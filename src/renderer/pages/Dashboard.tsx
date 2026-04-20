@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import { useStatus } from '@renderer/hooks/useStatus.js';
 import { useAction } from '@renderer/hooks/useAction.js';
@@ -84,6 +84,27 @@ export function Dashboard() {
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
   const [expandedTrend, setExpandedTrend] = useState<null | { title: string; unit: string; yDomain?: [number, number] }>(null);
+  const [lastActionSuccess, setLastActionSuccess] = useState<Record<string, number>>({});
+
+  // Pull the action_name -> last-success-ts map so recommendations show
+  // "Last emptied Xd ago" instead of "Never emptied" after a successful run.
+  const refreshLastSuccess = useCallback(async () => {
+    const r = await (api as any).getLastActionSuccessMap?.();
+    if (r?.ok) setLastActionSuccess(r.data);
+  }, []);
+  useEffect(() => { refreshLastSuccess(); }, [refreshLastSuccess]);
+  // Refresh the map whenever an action completes (useAction dispatches
+  // statusRefreshed after its post-action scan finishes).
+  useEffect(() => {
+    const h = () => { refreshLastSuccess(); };
+    window.addEventListener('statusRefreshed', h);
+    return () => window.removeEventListener('statusRefreshed', h);
+  }, [refreshLastSuccess]);
+
+  const getLastRun = useCallback((actionName: ActionName): number | null => {
+    const ms = lastActionSuccess[actionName];
+    return ms ? Math.floor(ms / 1000) : null; // recommendations takes seconds
+  }, [lastActionSuccess]);
 
   async function handleRunScanNow() {
     if (scanning) return;
@@ -240,8 +261,8 @@ export function Dashboard() {
 
       {/* Deep Clean & Harden - v2.1.4 */}
       {(() => {
-        const deepCleanTop = getTopRecommendations(DEEP_CLEAN_ACTIONS, status, security);
-        const hardenTop = getTopRecommendations(HARDEN_ACTIONS, status, security);
+        const deepCleanTop = getTopRecommendations(DEEP_CLEAN_ACTIONS, status, security, getLastRun);
+        const hardenTop = getTopRecommendations(HARDEN_ACTIONS, status, security, getLastRun);
         const hardenOffCount = security?.defender
           ? [
               !security.defender.puaprotection || security.defender.puaprotection === 'Disabled' || security.defender.puaprotection === '0',
@@ -288,7 +309,7 @@ export function Dashboard() {
                     action={ACTIONS[name]}
                     onRun={(params, dryRun) => handleAction(name, params, dryRun)}
                     disabled={running !== null}
-                    recommendation={recommendAction(name, status, security)}
+                    recommendation={recommendAction(name, status, security, getLastRun)}
                   />
                 ))}
               </div>
@@ -330,7 +351,7 @@ export function Dashboard() {
                     action={ACTIONS[name]}
                     onRun={(params, dryRun) => handleAction(name, params, dryRun)}
                     disabled={running !== null}
-                    recommendation={recommendAction(name, status, security)}
+                    recommendation={recommendAction(name, status, security, getLastRun)}
                   />
                 ))}
               </div>
@@ -356,7 +377,7 @@ export function Dashboard() {
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
             {QUICK_ACTIONS.map((name) => (
-              <ActionButton key={name} action={ACTIONS[name]} onRun={(params, dryRun) => handleAction(name, params, dryRun)} disabled={running !== null} recommendation={recommendAction(name, status, security)} />
+              <ActionButton key={name} action={ACTIONS[name]} onRun={(params, dryRun) => handleAction(name, params, dryRun)} disabled={running !== null} recommendation={recommendAction(name, status, security, getLastRun)} />
             ))}
           </div>
         </div>

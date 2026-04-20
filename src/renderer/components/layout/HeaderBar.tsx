@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Severity } from '@shared/types.js';
 import { api } from '@renderer/lib/ipc.js';
+import { PENDING_CONTEXT_KEY } from '@renderer/pages/Claude.js';
 
 interface HeaderBarProps {
   host: string;
@@ -12,6 +14,7 @@ interface HeaderBarProps {
 }
 
 export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }: HeaderBarProps) {
+  const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(0);
@@ -47,7 +50,7 @@ export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }:
   async function handleExport() {
     if (exporting) return;
     setExporting(true);
-    setExportToast('Building report...');
+    setExportToast('Building report + launching Claude...');
     try {
       const r = await api.exportClaudeReport();
       if (!r.ok) {
@@ -55,16 +58,15 @@ export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }:
         setTimeout(() => setExportToast(null), 6000);
         return;
       }
-      // Copy to clipboard
-      try {
-        await navigator.clipboard.writeText(r.data.markdown);
-        const kb = Math.round(r.data.byte_count / 1024);
-        setExportToast(`Copied to clipboard (${kb} KB, ${r.data.line_count} lines). File also saved at: ${r.data.file_path}`);
-      } catch {
-        // Clipboard blocked - fall back to just the file path
-        setExportToast(`Clipboard blocked. Report written to: ${r.data.file_path}`);
-      }
-      setTimeout(() => setExportToast(null), 12000);
+      // Stash the markdown so the Claude page can seed the embedded
+      // terminal with it as pre-loaded context. Also copy to clipboard as a
+      // fallback (user can paste into claude.ai or elsewhere).
+      try { sessionStorage.setItem(PENDING_CONTEXT_KEY, r.data.markdown); } catch {}
+      try { await navigator.clipboard.writeText(r.data.markdown); } catch {}
+      const kb = Math.round(r.data.byte_count / 1024);
+      setExportToast(`Report ready (${kb} KB, ${r.data.line_count} lines) - opening Claude...`);
+      setTimeout(() => setExportToast(null), 5000);
+      navigate('/claude');
     } catch (e: any) {
       setExportToast(`Export error: ${e?.message ?? 'unknown'}`);
       setTimeout(() => setExportToast(null), 6000);

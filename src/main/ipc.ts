@@ -83,6 +83,18 @@ export function registerIpcHandlers() {
     catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
   });
 
+  // Map of action_name -> most-recent successful-run ts (ms). Used by the
+  // recommendations engine so "Last emptied Xd ago" reflects reality instead
+  // of always showing "Never".
+  ipcMain.handle('api:getLastActionSuccessMap', async (): Promise<IpcResult<Record<string, number>>> => {
+    try {
+      const { getLastActionSuccessMap } = await import('./dataStore.js');
+      return { ok: true, data: getLastActionSuccessMap() };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
   ipcMain.handle('api:getStatus', async (): Promise<IpcResult<SystemStatus>> => {
     try {
       const data = await getStatus();

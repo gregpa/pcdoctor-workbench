@@ -226,6 +226,23 @@ export function updateRollbackSnapshotPath(rollbackId: number, snapshotPath: str
   openDb().prepare(`UPDATE rollbacks SET snapshot_path = ? WHERE id = ?`).run(snapshotPath, rollbackId);
 }
 
+/**
+ * Return a map of action_name -> most-recent successful-run ts (ms epoch).
+ * Feeds the recommendations engine so "last emptied X days ago" works from
+ * the real audit log rather than always saying "never".
+ */
+export function getLastActionSuccessMap(): Record<string, number> {
+  const rows = openDb().prepare(
+    `SELECT action_name, MAX(ts) AS last_ts
+     FROM actions_log
+     WHERE status = 'success'
+     GROUP BY action_name`,
+  ).all() as Array<{ action_name: string; last_ts: number }>;
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.action_name] = r.last_ts;
+  return out;
+}
+
 export interface ActionLogRow {
   id: number;
   ts: number;

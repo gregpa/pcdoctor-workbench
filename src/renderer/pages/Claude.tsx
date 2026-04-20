@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import { ClaudeTerminal } from '@renderer/components/claude/ClaudeTerminal.js';
 
+// Shared with HeaderBar "Export for Claude" button — when present, the Claude
+// page auto-starts the embedded terminal seeded with this markdown as the
+// initial context.
+export const PENDING_CONTEXT_KEY = 'pcdoctor.pendingClaudeContext';
+
 export function Claude() {
   const [status, setStatus] = useState<{ installed: boolean; path: string | null } | null>(null);
   const [mode, setMode] = useState<'embedded' | 'external'>('embedded');
@@ -10,6 +15,7 @@ export function Claude() {
   const [busy, setBusy] = useState(false);
   const [embeddedAvailable, setEmbeddedAvailable] = useState<boolean | null>(null);
   const [embeddedError, setEmbeddedError] = useState<string | null>(null);
+  const [pendingContext, setPendingContext] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -25,6 +31,26 @@ export function Claude() {
       setEmbeddedError(r?.error ?? null);
     })();
   }, []);
+
+  // Pick up a pre-loaded report dropped by the "Export for Claude" button.
+  // If present, we auto-start the embedded terminal with that context so the
+  // user doesn't have to click twice.
+  useEffect(() => {
+    try {
+      const ctx = sessionStorage.getItem(PENDING_CONTEXT_KEY);
+      if (ctx) {
+        setPendingContext(ctx);
+        sessionStorage.removeItem(PENDING_CONTEXT_KEY);
+        setMode('embedded');
+      }
+    } catch { /* storage may be blocked */ }
+  }, []);
+
+  useEffect(() => {
+    if (pendingContext && embeddedAvailable && status?.installed && !embeddedStarted) {
+      setEmbeddedStarted(true);
+    }
+  }, [pendingContext, embeddedAvailable, status?.installed, embeddedStarted]);
 
   async function launchExternal() {
     setBusy(true);
@@ -88,7 +114,12 @@ export function Claude() {
           </div>
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 200px)' }}>
-            <ClaudeTerminal onExit={() => setEmbeddedStarted(false)} />
+            {pendingContext && (
+              <div className="px-3 py-1.5 bg-status-info/10 border-b border-status-info/30 text-[10px] text-status-info">
+                📎 Pre-loaded PCDoctor report ({Math.round(pendingContext.length / 1024)} KB) available as context. Ask Claude to read it.
+              </div>
+            )}
+            <ClaudeTerminal onExit={() => setEmbeddedStarted(false)} contextText={pendingContext ?? undefined} />
           </div>
         )
       ) : (

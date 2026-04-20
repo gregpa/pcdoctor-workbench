@@ -1,6 +1,6 @@
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, ActionResult } from '@shared/types.js';
-import { runPowerShellScript, PCDoctorScriptError } from './scriptRunner.js';
+import { runPowerShellScript, runElevatedPowerShellScript, PCDoctorScriptError } from './scriptRunner.js';
 import { startActionLog, finishActionLog, insertToolResult, updateActionLogRollbackId } from './dataStore.js';
 import { prepareRollback } from './rollbackManager.js';
 import { notify } from './notifier.js';
@@ -79,7 +79,11 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
 
   const start = Date.now();
   try {
-    const result = await runPowerShellScript<Record<string, unknown>>(def.ps_script, scriptArgs);
+    // Actions flagged needs_admin are spawned via Start-Process -Verb RunAs
+    // (triggers a UAC prompt per invocation). Keeps the Workbench itself
+    // non-elevated while still allowing privileged actions.
+    const runner = def.needs_admin ? runElevatedPowerShellScript : runPowerShellScript;
+    const result = await runner<Record<string, unknown>>(def.ps_script, scriptArgs);
     const duration = Date.now() - start;
     finishActionLog(logId, { status: 'success', duration_ms: duration, result });
     // Capture tool-import results into tool_results history
