@@ -60,6 +60,45 @@ export interface ServiceHealth {
   detail?: string;
 }
 
+/** v2.3.0 — optional rich system metrics surfaced from Invoke-PCDoctor.ps1 */
+export interface WslConfigMetric {
+  exists: boolean;
+  has_memory_cap: boolean;
+  memory_gb: number | null;
+  vmmem_utilization_pct: number | null;
+}
+
+export interface MemoryPressureMetric {
+  committed_bytes: number | null;
+  commit_limit: number | null;
+  pages_per_sec: number | null;
+  page_faults_per_sec: number | null;
+  compression_mb: number | null;
+  top_processes?: Array<{
+    name: string;
+    pid: number;
+    ws_bytes: number;
+    kind: 'user' | 'service' | 'system';
+  }>;
+}
+
+export interface StartupItemMetric {
+  name: string;
+  location: string;
+  kind: 'Run' | 'StartupFolder' | 'HKLM_Run';
+  is_essential: boolean;
+  disabled_in_registry: boolean;
+  publisher?: string;
+  size_bytes?: number;
+  path?: string;
+}
+
+export interface SystemMetrics {
+  wsl_config?: WslConfigMetric;
+  memory_pressure?: MemoryPressureMetric;
+  startup_items?: StartupItemMetric[];
+}
+
 export interface SystemStatus {
   generated_at: number; // unix seconds
   overall_severity: Severity;
@@ -70,6 +109,7 @@ export interface SystemStatus {
   findings: Finding[];
   services?: ServiceHealth[];
   smart?: SmartEntry[];
+  metrics?: SystemMetrics;
 }
 
 // --- Actions ---
@@ -118,6 +158,23 @@ export type ActionName =
   | 'run_dell_command_update' | 'import_occt_csv'
   | 'unblock_ip'
   | 'analyze_minidump'
+  // v2.1.4 additions
+  | 'clear_browser_caches'
+  | 'shrink_component_store'
+  | 'remove_feature_update_leftovers'
+  | 'empty_recycle_bins'
+  | 'enable_pua_protection'
+  | 'enable_controlled_folder_access'
+  | 'update_hosts_stevenblack'
+  // v2.2.0 - Autopilot tool-runners
+  | 'run_smart_check'
+  | 'run_malwarebytes_cli'
+  | 'run_adwcleaner_scan'
+  | 'run_safety_scanner'
+  | 'run_hwinfo_log'
+  | 'parse_hwinfo_delta'
+  // v2.3.0 - Batch startup disable
+  | 'disable_startup_items_batch'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
@@ -129,6 +186,9 @@ export type ActionCategory =
   | 'perf'
   | 'security'
   | 'update'
+  | 'hardening'
+  | 'disk'
+  | 'diagnostic'
   | 'internal';
 
 export interface ActionResult {

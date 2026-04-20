@@ -4,7 +4,7 @@ import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
 import { getStatus } from './pcdoctorBridge.js';
 import { POLL_INTERVAL_MS } from './constants.js';
-import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMessageText } from './telegramBridge.js';
+import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMessageText, sendTelegramMessage } from './telegramBridge.js';
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
@@ -12,6 +12,8 @@ import { startClaudeBridgeWatcher } from './claudeBridgeWatcher.js';
 import { flushBufferedNotifications, getDigestHour } from './notifier.js';
 import { initAutoUpdater, checkForUpdates } from './autoUpdater.js';
 import { registerPtyIpc, killAllPtySessions } from './ptyBridge.js';
+import { startAutopilotEngine, stopAutopilotEngine, getAutopilotActivity } from './autopilotEngine.js';
+import { suppressAutopilotRule, insertAutopilotActivity } from './dataStore.js';
 
 // Hide dock icon / single-instance check
 const gotLock = app.requestSingleInstanceLock();
@@ -66,12 +68,58 @@ async function backgroundPoll() {
 app.whenReady().then(() => {
   registerIpcHandlers();
 
-  // Auto-register PCDoctor scheduled tasks (best-effort, once per session)
+  // Auto-register PCDoctor scheduled tasks (best-effort, once per session).
+  // v2.3.0 B2: on the first launch of 2.3.0, force-recreate existing tasks so
+  // the user/SYSTEM context split applies. This rewrites /RU for tasks that
+  // used to run as SYSTEM and need to read HKCU.
   (async () => {
     try {
       const { runPowerShellScript } = await import('./scriptRunner.js');
-      await runPowerShellScript('Register-All-Tasks.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      const { getSetting, setSetting } = await import('./dataStore.js');
+      const lastMigration = getSetting('last_task_migration_version');
+      const args = ['-JsonOutput'];
+      if (lastMigration !== '2.3.0') {
+        args.push('-ForceRecreate');
+      }
+      await runPowerShellScript('Register-All-Tasks.ps1', args, { timeoutMs: 60_000 });
+      if (lastMigration !== '2.3.0') {
+        setSetting('last_task_migration_version', '2.3.0');
+      }
     } catch { /* non-fatal */ }
+  })();
+
+  // v2.3.0 first-run self-test: fires once per major version, only if Telegram
+  // is configured. Also bumps the selftest_version marker so 2.3.0 installs
+  // ping the channel to confirm tokens still work after the upgrade.
+  (async () => {
+    try {
+      const { getSetting, setSetting } = await import('./dataStore.js');
+      const lastSelftest = getSetting('last_selftest_version');
+      if (lastSelftest !== '2.3.0') {
+        const rawToken = getSetting('telegram_bot_token');
+        if (rawToken) {
+          const { sendTelegramMessage, makeCallbackData } = await import('./telegramBridge.js');
+          const r = await sendTelegramMessage(
+            '✅ <b>PCDoctor Workbench 2.3.0 installed</b>\n\n' +
+            'New: Autopilot rule editor, batch startup picker, RAM pressure panel.\n' +
+            'Tap a button below to verify this channel still works.',
+            [[
+              { text: '✓ Working — dismiss', callback_data: makeCallbackData('selftest_confirm') },
+              { text: '🔧 Open Dashboard', callback_data: makeCallbackData('selftest_dashboard') },
+            ]],
+          );
+          if (!r.ok) {
+            // Surface dashboard banner via a stored setting — the renderer can poll this
+            setSetting('selftest_banner', `⚠ Telegram self-test failed: ${r.error ?? 'unknown error'}. Re-test from Settings > Notifications.`);
+          }
+          // Mark regardless of success so we don't spam on subsequent launches
+          setSetting('last_selftest_version', '2.3.0');
+        } else {
+          // No Telegram configured — still stamp so we don't check every launch.
+          setSetting('last_selftest_version', '2.3.0');
+        }
+      }
+    } catch { /* non-fatal — never block startup */ }
   })();
 
   createWindow();
@@ -81,6 +129,7 @@ app.whenReady().then(() => {
       (app as any).isQuitting = true;
       if (pollTimer) clearInterval(pollTimer);
       stopTelegramPolling();
+      stopAutopilotEngine();
       killAllPtySessions();
       app.quit();
     },
@@ -100,15 +149,139 @@ app.whenReady().then(() => {
 
   // Start Telegram callback polling
   startClaudeBridgeWatcher(() => mainWindow);
+  startAutopilotEngine();
+
   startTelegramPolling(async (q) => {
     if (!q.data) { await answerCallbackQuery(q.id, 'Invalid request'); return; }
     const parts = q.data.split('|');
     const kind = parts[0];
 
+    if (kind === 'selftest_confirm') {
+      const { setSetting } = await import('./dataStore.js');
+      setSetting('last_selftest_version', '2.3.0');
+      setSetting('selftest_banner', '');  // clear any failure banner
+      await answerCallbackQuery(q.id, '✅ Confirmed');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id,
+          '✅ Confirmed. Autopilot alerts will appear here.');
+      }
+      return;
+    }
+
+    if (kind === 'selftest_dashboard') {
+      await answerCallbackQuery(q.id, '🔧 Open PCDoctor Workbench on your PC to view the Dashboard.');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id,
+          '🔧 Open <b>PCDoctor Workbench</b> on your PC to view the Dashboard.\n\n' +
+          'The app lives in your system tray (bottom-right). Click it to open.');
+      }
+      return;
+    }
+
+    if (kind === 'tgtest_ok') {
+      // Callback for api:sendTelegramTestFull "✓ Received" button
+      const { setSetting } = await import('./dataStore.js');
+      setSetting('telegram_last_good_ts', String(Date.now()));
+      await answerCallbackQuery(q.id, '✅ Telegram verified');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id, '✅ Telegram verified.');
+      }
+      return;
+    }
+
+    if (kind === 'tgtest_fail') {
+      // Callback for api:sendTelegramTestFull "❌ Buttons don't work" button
+      const { startActionLog, finishActionLog } = await import('./dataStore.js');
+      const logId = startActionLog({
+        action_name: 'telegram_test' as any,
+        action_label: 'Telegram full round-trip test',
+        status: 'running',
+        triggered_by: 'user',
+      });
+      finishActionLog(logId, {
+        status: 'error',
+        duration_ms: 0,
+        result: { telegram_callback_failed: true },
+        error_message: 'User reported button callback failure',
+      });
+      await answerCallbackQuery(q.id, '⚠ Recorded — check dashboard');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id,
+          '⚠ Failure recorded. Check Settings > Notifications in PCDoctor Workbench.');
+      }
+      return;
+    }
+
     if (kind === 'dismiss') {
       await answerCallbackQuery(q.id, '✓ Dismissed');
       if (q.message) {
         await editMessageText(q.message.chat.id, q.message.message_id, '✖ <i>Dismissed from Telegram</i>');
+      }
+      return;
+    }
+
+    // ---- Autopilot inline keyboard callbacks (v2.2.0) ----
+
+    if (kind === 'autopilot') {
+      const actionName = parts[1] as ActionName;
+      const ruleId = parts[2] ?? '';
+      const def = ACTIONS[actionName];
+      if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
+      await answerCallbackQuery(q.id, `Running ${def.label}…`);
+      try {
+        const result = await runAction({ name: actionName, triggered_by: 'telegram' });
+        insertAutopilotActivity({
+          rule_id: ruleId || `manual:${actionName}`,
+          tier: 3,
+          action_name: actionName,
+          outcome: result.success ? 'auto_run' : 'error',
+          duration_ms: result.duration_ms,
+          message: result.success ? 'ran from Telegram button' : (result.error?.message ?? 'error'),
+        });
+        const bytes = (result.result as any)?.bytes_freed;
+        const bytesTxt = typeof bytes === 'number' ? ` (${(bytes / 1024 / 1024).toFixed(1)} MB freed)` : '';
+        const msg = result.success
+          ? `✓ <b>${def.label}</b> completed${bytesTxt}`
+          : `✗ <b>${def.label}</b> failed: ${result.error?.message ?? 'unknown'}`;
+        if (q.message) {
+          await editMessageText(q.message.chat.id, q.message.message_id, msg);
+        }
+      } catch (e: any) {
+        if (q.message) {
+          await editMessageText(q.message.chat.id, q.message.message_id, `✗ Error: ${e?.message ?? 'unknown'}`);
+        }
+      }
+      return;
+    }
+
+    if (kind === 'ap_snooze') {
+      const ruleId = parts[1] ?? '';
+      const until = Date.now() + 24 * 60 * 60 * 1000;
+      suppressAutopilotRule(ruleId, until);
+      insertAutopilotActivity({
+        rule_id: ruleId,
+        tier: 3,
+        outcome: 'suppressed',
+        message: 'snoozed 24h from Telegram',
+      });
+      await answerCallbackQuery(q.id, '⏸ Snoozed 24h');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id, '⏸ <i>Snoozed 24h</i>');
+      }
+      return;
+    }
+
+    if (kind === 'ap_dismiss') {
+      const ruleId = parts[1] ?? '';
+      insertAutopilotActivity({
+        rule_id: ruleId,
+        tier: 3,
+        outcome: 'suppressed',
+        message: 'dismissed from Telegram',
+      });
+      await answerCallbackQuery(q.id, '✓ Dismissed');
+      if (q.message) {
+        await editMessageText(q.message.chat.id, q.message.message_id, '✓ <i>Dismissed</i>');
       }
       return;
     }
@@ -152,6 +325,8 @@ app.whenReady().then(() => {
       return;
     }
 
+    // (autopilot handlers continued — act_confirmed below is pre-existing)
+
     if (kind === 'act_confirmed') {
       const actionName = parts[1] as ActionName;
       const def = ACTIONS[actionName];
@@ -171,6 +346,33 @@ app.whenReady().then(() => {
         }
       }
       return;
+    }
+  }, async (m) => {
+    // Text message handler — we only care about /status (and its aliases).
+    if (!m.text) return;
+    const cmd = m.text.trim().toLowerCase();
+    if (cmd === '/status' || cmd === 'status') {
+      try {
+        const s = await getStatus();
+        const activity = getAutopilotActivity(7);
+        const autoRuns = activity.filter(a => a.outcome === 'auto_run').length;
+        const alerts = activity.filter(a => a.outcome === 'alerted').length;
+        const bytesFreed = activity.reduce((sum, a) => sum + (a.bytes_freed ?? 0), 0);
+        const critCount = s.findings.filter(f => f.severity === 'critical').length;
+        const warnCount = s.findings.filter(f => f.severity === 'warning').length;
+        const reply =
+          `<b>PCDoctor status — ${s.host}</b>\n` +
+          `Overall: <b>${s.overall_label}</b> (${s.overall_severity})\n` +
+          `Findings: ${critCount} crit · ${warnCount} warn\n\n` +
+          `<b>Autopilot (7d):</b>\n` +
+          `• Auto-runs: ${autoRuns}\n` +
+          `• Alerts: ${alerts}\n` +
+          `• Freed: ${(bytesFreed / 1024 / 1024).toFixed(1)} MB\n` +
+          `\nGenerated ${new Date(s.generated_at * 1000).toLocaleString()}`;
+        await sendTelegramMessage(reply);
+      } catch (e: any) {
+        await sendTelegramMessage(`⚠ Status unavailable: ${e?.message ?? 'unknown'}`);
+      }
     }
   });
 

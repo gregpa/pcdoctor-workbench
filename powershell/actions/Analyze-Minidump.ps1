@@ -17,15 +17,34 @@ if (-not $Dump_Path -or -not (Test-Path $Dump_Path)) {
     exit 0
 }
 
-# Find cdb.exe (WinDbg console debugger)
+# Find cdb.exe (WinDbg console debugger).
+# Search order: Windows SDK Debuggers, standalone Debugging Tools, MS Store WinDbg
+# (the Store app at C:\Program Files\WindowsApps\Microsoft.WinDbg_*\amd64\cdb.exe
+# is version-suffixed, so we use Get-ChildItem glob), finally PATH.
 $cdbCandidates = @(
     'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe',
     'C:\Program Files\Windows Kits\10\Debuggers\x64\cdb.exe',
     'C:\Program Files\Debugging Tools for Windows (x64)\cdb.exe'
 )
 $cdb = $cdbCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
 if (-not $cdb) {
-    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; dump_path=$Dump_Path; message='cdb.exe not found - install Windows Debugging Tools (or WinDbg)' } | ConvertTo-Json -Compress
+    # MS Store WinDbg install (per-package-version path)
+    $storeHit = Get-ChildItem -Path 'C:\Program Files\WindowsApps\Microsoft.WinDbg_*' -Filter 'cdb.exe' -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.DirectoryName -match '\\amd64$' -or $_.DirectoryName -match '\\x64$' } |
+                Sort-Object { $_.DirectoryName } -Descending |
+                Select-Object -First 1
+    if ($storeHit) { $cdb = $storeHit.FullName }
+}
+
+if (-not $cdb) {
+    # PATH fallback
+    $where = (& where.exe cdb 2>$null | Select-Object -First 1)
+    if ($where -and (Test-Path $where)) { $cdb = $where }
+}
+
+if (-not $cdb) {
+    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; dump_path=$Dump_Path; message='cdb.exe not found. Install the MS Store WinDbg (winget: Microsoft.WinDbg) or Windows SDK Debugging Tools.'; searched=$cdbCandidates + 'C:\Program Files\WindowsApps\Microsoft.WinDbg_*' } | ConvertTo-Json -Compress
     exit 0
 }
 

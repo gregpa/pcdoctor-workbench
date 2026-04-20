@@ -21,15 +21,12 @@ export function Settings() {
   const [tgToken, setTgToken] = useState('');
   const [tgChat, setTgChat] = useState('');
   const [tasks, setTasks] = useState<ScheduledTaskInfo[] | null>(null);
-  const [emailRecipient, setEmailRecipient] = useState(settings.email_digest_recipient ?? '');
-  const [digestHour, setDigestHour] = useState(settings.digest_hour ?? '8');
+  const [emailRecipient, setEmailRecipient] = useState('');
+  const [digestHour, setDigestHour] = useState('8');
+  const [tgTestPending, setTgTestPending] = useState(false);
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
   const [updateStatus, setUpdateStatus] = useState<any>({ state: 'idle' });
-
-  async function refreshUpdateStatus() {
-    const r = await (api as any).getUpdateStatus?.();
-    if (r?.ok) setUpdateStatus(r.data);
-  }
+  const [appVersion, setAppVersion] = useState('…');
 
   async function checkForUpdatesNow() {
     showToast('Checking for updates…');
@@ -47,9 +44,31 @@ export function Settings() {
   }
 
   useEffect(() => {
-    refreshUpdateStatus();
-    const id = setInterval(refreshUpdateStatus, 5000);
-    return () => clearInterval(id);
+    let alive = true;
+    let inFlight = false;
+    const tick = async () => {
+      if (!alive || inFlight) return;
+      inFlight = true;
+      try {
+        const r = await (api as any).getUpdateStatus?.();
+        if (alive && r?.ok) setUpdateStatus(r.data);
+      } finally { inFlight = false; }
+    };
+    tick();
+    // Status only changes on user action or background download progress;
+    // 15s cadence avoids hammering the main process while still catching
+    // progress updates during a download.
+    const id = setInterval(tick, 15000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const r = await (api as any).getAppVersion?.();
+      if (alive && r?.ok) setAppVersion(r.data);
+    })();
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -137,6 +156,36 @@ export function Settings() {
     showToast(r.ok ? '✅ Test sent to Telegram' : `Failed: ${r.error.message}`);
   }
 
+  async function sendTestFull() {
+    setTgTestPending(true);
+    const r = await (api as any).sendTelegramTestFull?.();
+    if (!r?.ok) {
+      showToast(`Test failed: ${r?.error?.message ?? 'unknown'}`);
+      setTgTestPending(false);
+      return;
+    }
+    showToast('🧪 Test sent — tap ✓ Received in Telegram to confirm');
+    // Poll for confirmation for up to 60s
+    const deadline = Date.now() + 60_000;
+    const interval = setInterval(async () => {
+      const fresh = await api.getSettings();
+      if (fresh.ok && fresh.data.telegram_last_good_ts) {
+        const ts = parseInt(fresh.data.telegram_last_good_ts, 10);
+        if (ts > r.data.sent_at) {
+          clearInterval(interval);
+          setTgTestPending(false);
+          const when = new Date(ts).toLocaleTimeString();
+          showToast(`✅ Telegram verified at ${when}`);
+        }
+      }
+      if (Date.now() > deadline) {
+        clearInterval(interval);
+        setTgTestPending(false);
+        showToast('⚠ No confirmation received within 60s — tap ✓ Received in Telegram');
+      }
+    }, 3000);
+  }
+
   async function toggleEvent(event: string, channel: 'toast' | 'telegram', on: boolean) {
     await saveSetting(`event:${event}:${channel}`, on ? '1' : '0');
   }
@@ -166,9 +215,17 @@ export function Settings() {
               <input type="checkbox" checked={tgEnabled} onChange={(e) => toggleTelegramEnabled(e.target.checked)} className="accent-status-good" />
               <span>Telegram notifications enabled</span>
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button onClick={sendTest} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
                 Send test message
+              </button>
+              <button
+                onClick={sendTestFull}
+                disabled={tgTestPending}
+                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-50"
+                title="Sends a message with inline buttons. Tap ✓ Received in Telegram to confirm the round-trip works."
+              >
+                {tgTestPending ? 'Waiting for reply…' : 'Test with Buttons'}
               </button>
               <button
                 onClick={async () => {
@@ -278,7 +335,11 @@ export function Settings() {
             <label className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1">Morning digest hour (0-23)</label>
             <input
               type="number" min={0} max={23} value={digestHour}
-              onChange={(e) => { setDigestHour(e.target.value); saveSetting('digest_hour', e.target.value); }}
+              onChange={(e) => setDigestHour(e.target.value)}
+              onBlur={(e) => {
+                const n = parseInt(e.target.value, 10);
+                if (!isNaN(n) && n >= 0 && n <= 23) saveSetting('digest_hour', String(n));
+              }}
               className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-xs"
             />
           </div>
@@ -286,7 +347,8 @@ export function Settings() {
             <label className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1">Email digest recipient</label>
             <input
               type="email" value={emailRecipient}
-              onChange={(e) => { setEmailRecipient(e.target.value); saveSetting('email_digest_recipient', e.target.value); }}
+              onChange={(e) => setEmailRecipient(e.target.value)}
+              onBlur={(e) => saveSetting('email_digest_recipient', e.target.value)}
               placeholder="you@example.com"
               className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-xs"
             />
@@ -399,8 +461,9 @@ export function Settings() {
       <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
         <h2 className="text-sm font-bold mb-3">🔄 Auto-Update</h2>
         <div className="text-xs text-text-secondary mb-3">
-          Checks <code>\\192.168.50.226\Backups\pcdoctor-updates</code> every 6 hours.
-          New builds dropped there auto-download (with your approval).
+          Auto-update disabled in this build (electron-updater requires http/https feed URLs).
+          To enable, serve the NAS share over HTTP and set <code>publish.url</code> in
+          <code> electron-builder.yml</code>, then rebuild.
         </div>
         <div className="bg-surface-900 border border-surface-700 rounded-md p-3 mb-3">
           <div className="text-[10px] uppercase tracking-wider text-text-secondary mb-1">Status</div>
@@ -437,7 +500,7 @@ export function Settings() {
       <section className="bg-surface-800 border border-surface-600 rounded-lg p-5">
         <h2 className="text-sm font-bold mb-3">About</h2>
         <div className="text-xs text-text-secondary space-y-1">
-          <div>PCDoctor Workbench <strong>v1.0.0</strong></div>
+          <div>PCDoctor Workbench <strong>v{appVersion}</strong></div>
           <div>Built with Electron + React + TypeScript + SQLite</div>
           <div>Spec: <code>docs/superpowers/specs/2026-04-17-pcdoctor-workbench-design.md</code></div>
           <div>Repo: <code>pcdoctor-workbench/</code></div>

@@ -6,6 +6,7 @@ import type {
 } from '@shared/types.js';
 
 const api = {
+  getAppVersion: (): Promise<IpcResult<string>> => ipcRenderer.invoke('api:getAppVersion'),
   getStatus: (): Promise<IpcResult<SystemStatus>> => ipcRenderer.invoke('api:getStatus'),
   runAction: (req: RunActionRequest): Promise<IpcResult<ActionResult>> => ipcRenderer.invoke('api:runAction', req),
   getAuditLog: (limit?: number): Promise<IpcResult<AuditLogEntry[]>> => ipcRenderer.invoke('api:getAuditLog', limit ?? 200),
@@ -25,6 +26,19 @@ const api = {
   launchTool: (toolId: string, modeId: string): Promise<IpcResult<{ pid?: number }>> => ipcRenderer.invoke('api:launchTool', toolId, modeId),
   installTool: (toolId: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installTool', toolId),
   getWindowsUpdateDetail: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getWindowsUpdateDetail'),
+  getDefenderScanStatus: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getDefenderScanStatus'),
+  listAutopilotRules: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listAutopilotRules'),
+  getAutopilotActivity: (daysBack?: number): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getAutopilotActivity', daysBack ?? 30),
+  suppressAutopilotRule: (ruleId: string, hours: number): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:suppressAutopilotRule', ruleId, hours),
+  // v2.3.0 C2: autopilot rule editor
+  setAutopilotRuleEnabled: (ruleId: string, enabled: boolean): Promise<IpcResult<{}>> =>
+    ipcRenderer.invoke('api:setAutopilotRuleEnabled', ruleId, enabled),
+  runAutopilotRuleNow: (ruleId: string): Promise<IpcResult<{ outcome: string; message?: string }>> =>
+    ipcRenderer.invoke('api:runAutopilotRuleNow', ruleId),
+  exportAutopilotRules: (): Promise<IpcResult<{ rules: any[] }>> =>
+    ipcRenderer.invoke('api:exportAutopilotRules'),
+  importAutopilotRules: (payload: { rules: any[] }): Promise<IpcResult<{ imported: number }>> =>
+    ipcRenderer.invoke('api:importAutopilotRules', payload),
   getFeatureUpgradeReadiness: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getFeatureUpgradeReadiness'),
   getNvidiaDriverLatest: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getNvidiaDriverLatest'),
   getClaudeStatus: (): Promise<IpcResult<{ installed: boolean; path: string | null }>> => ipcRenderer.invoke('api:getClaudeStatus'),
@@ -41,10 +55,12 @@ const api = {
   revealTelegramToken: (): Promise<IpcResult<{ token: string }>> => ipcRenderer.invoke('api:revealTelegramToken'),
   testTelegram: (token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => ipcRenderer.invoke('api:testTelegram', token, chatId),
   sendTestNotification: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendTestNotification'),
+  sendTelegramTestFull: (): Promise<IpcResult<{ sent_at: number }>> => ipcRenderer.invoke('api:sendTelegramTestFull'),
   listScheduledTasks: (): Promise<IpcResult<ScheduledTaskInfo[]>> => ipcRenderer.invoke('api:listScheduledTasks'),
   setScheduledTaskEnabled: (name: string, enabled: boolean): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setScheduledTaskEnabled', name, enabled),
   runScheduledTaskNow: (name: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:runScheduledTaskNow', name),
   exportDiagnosticBundle: (): Promise<IpcResult<{ path: string; size_kb: number }>> => ipcRenderer.invoke('api:exportDiagnosticBundle'),
+  exportClaudeReport: (): Promise<IpcResult<{ markdown: string; line_count: number; byte_count: number; file_path: string; generated_at: number }>> => ipcRenderer.invoke('api:exportClaudeReport'),
   flushBufferedNotifications: (): Promise<IpcResult<{ sent: number }>> => ipcRenderer.invoke('api:flushBufferedNotifications'),
   sendWeeklyDigestEmail: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendWeeklyDigestEmail'),
   getRecentAuthEvents: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getRecentAuthEvents'),

@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/tools', label: 'Tools', icon: '🧰' },
   { to: '/memtest86', label: 'MemTest86', icon: '🧠' },
   { to: '/claude', label: 'Claude', icon: '🤖' },
+  { to: '/autopilot', label: 'Autopilot', icon: '🧭' },
   { to: '/weekly-review', label: 'Weekly Review', icon: '📋' },
   { to: '/forecast', label: 'Forecast', icon: '🔮' },
   { to: '/history', label: 'History', icon: '📜' },

@@ -1,4 +1,11 @@
 !macro customInstall
+  ; v2.3.0: seed C:\ProgramData\PCDoctor\ with the bundled powershell/ tree so
+  ; the app works on a fresh install. We copy every script/subdir from the
+  ; installer's resources\powershell into ProgramData, overwriting existing
+  ; files with the new versions.
+  CreateDirectory "$APPDATA\..\..\..\ProgramData\PCDoctor"
+  CopyFiles /SILENT "$INSTDIR\resources\powershell\*.*" "C:\ProgramData\PCDoctor"
+
   ; Register Windows Scheduled Task for autostart at user logon.
   ; Writing an XML task definition avoids the nested-quote parser issue with schtasks /Create /TR.
   FileOpen $0 "$TEMP\PCDoctor-Autostart.xml" w
@@ -15,7 +22,7 @@
 
   ; After first launch the app calls Register-All-Tasks.ps1 which sets up the rest.
   ; As a redundancy + so tasks exist even before app opens, trigger the registration now:
-  ExecWait 'pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Register-All-Tasks.ps1"'
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Register-All-Tasks.ps1" -ForceRecreate'
 !macroend
 
 !macro customUnInstall

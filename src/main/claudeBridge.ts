@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { writeFile, mkdir, readFile } from 'node:fs/promises';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { LATEST_JSON_PATH } from './constants.js';
@@ -18,7 +18,6 @@ export function resolveClaudePath(): string | null {
   const claudeRoot = path.join(process.env.APPDATA ?? '', 'Claude', 'claude-code');
   if (existsSync(claudeRoot)) {
     try {
-      const { readdirSync } = require('node:fs');
       const versions = readdirSync(claudeRoot).sort().reverse();
       if (versions.length > 0) {
         const candidate = path.join(claudeRoot, versions[0], 'claude.exe');

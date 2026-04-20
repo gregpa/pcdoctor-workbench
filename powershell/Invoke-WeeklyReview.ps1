@@ -121,7 +121,7 @@ $md = @"
 "@
 
 if ($critical.Count -gt 0) {
-    $md += "## 🔴 Critical - Act this week`n`n"
+    $md += "## Critical - Act this week`n`n"
     foreach ($f in $critical) {
         $md += "### $($f.area)`n"
         $md += "$($f.message)`n`n"
@@ -133,7 +133,7 @@ if ($critical.Count -gt 0) {
 }
 
 if ($warnings.Count -gt 0) {
-    $md += "## 🟡 Important - Act this month`n`n"
+    $md += "## Important - Act this month`n`n"
     foreach ($f in $warnings) {
         $md += "### $($f.area)`n"
         $md += "$($f.message)`n`n"
@@ -145,14 +145,14 @@ if ($warnings.Count -gt 0) {
 }
 
 if ($infos.Count -gt 0) {
-    $md += "## ℹ Info`n`n"
+    $md += "## Info`n`n"
     foreach ($f in $infos) {
         $md += "- **$($f.area):** $($f.message)`n"
     }
     $md += "`n---`n`n"
 }
 
-$md += "## 📊 Headroom & Trends`n`n"
+$md += "## Headroom and Trends`n`n"
 $md += "- **RAM:** $($headroom.ram)`n"
 $md += "- **CPU load:** $($headroom.cpu_load)`n"
 $md += "- **C: drive free:** $($headroom.disk_c_free)`n"

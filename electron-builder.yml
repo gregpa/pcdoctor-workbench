@@ -2,9 +2,14 @@ appId: com.gregpajak.pcdoctor-workbench
 productName: PCDoctor Workbench
 artifactName: "${productName}-Setup-${version}.${ext}"
 
+# GitHub Releases as the auto-update feed. electron-updater pulls
+# `latest.yml` + the .exe from the repo's Releases page. Public repo so no
+# token is needed inside the app.
 publish:
-  - provider: generic
-    url: file://192.168.50.226/Backups/pcdoctor-updates
+  - provider: github
+    owner: gregpa
+    repo: pcdoctor-workbench
+    releaseType: release
 
 directories:
   output: release
@@ -21,6 +26,10 @@ files:
 extraResources:
   - from: resources/icons
     to: icons
+  # v2.3.0: bundle the PowerShell scripts so a fresh install can seed
+  # C:\ProgramData\PCDoctor\ without requiring a pre-existing install.
+  - from: powershell
+    to: powershell
 
 asar: true
 

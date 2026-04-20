@@ -1,0 +1,82 @@
+﻿{
+    "description":  "Events in this allowlist are suppressed from PCDoctor report findings. Still counted in metrics.event_errors_7d totals so trending detects if suppressed event counts spike abnormally. Add new entries as {provider, event_id, reason, max_7d, max_30d} -- if observed count exceeds the corresponding max, the event will still be raised as a warning (anomaly even though allowlisted).",
+    "allowlist":  [
+                      {
+                          "provider":  "Microsoft-Windows-Security-SPP",
+                          "event_id":  16385,
+                          "reason":  "PPL-protected sppsvc.exe access-denied messages. Harmless. Investigated 2026-04-15 with Procmon.",
+                          "max_7d":  1000,
+                          "max_30d":  100000
+                      },
+                      {
+                          "provider":  "Microsoft-Windows-DistributedCOM",
+                          "event_id":  10010,
+                          "reason":  "DCOM server slow-register timing. Almost always iTunes Helper / Office click-to-run / background app registering late.",
+                          "max_7d":  500,
+                          "max_30d":  800
+                      },
+                      {
+                          "provider":  "Microsoft-Windows-DistributedCOM",
+                          "event_id":  10005,
+                          "reason":  "DCOM server activation failure -- usually benign third-party component.",
+                          "max_7d":  50,
+                          "max_30d":  200
+                      },
+                      {
+                          "provider":  "Service Control Manager",
+                          "event_id":  7000,
+                          "reason":  "Service failed to start -- usually third-party transient (Logitech/NVIDIA/update agents).",
+                          "max_7d":  60,
+                          "max_30d":  200
+                      },
+                      {
+                          "provider":  "Service Control Manager",
+                          "event_id":  7031,
+                          "reason":  "Service terminated unexpectedly -- usually third-party transient.",
+                          "max_7d":  60,
+                          "max_30d":  200
+                      },
+                      {
+                          "provider":  "Microsoft-Windows-FilterManager",
+                          "event_id":  3,
+                          "reason":  "Minifilter attach failure on transient mounts (USB/NAS/OneDrive). Expected on this system.",
+                          "max_7d":  120,
+                          "max_30d":  500
+                      },
+                      {
+                          "provider":  "Microsoft-Windows-WindowsUpdateClient",
+                          "event_id":  20,
+                          "reason":  "Individual update package failed -- Windows Update retries automatically.",
+                          "max_7d":  20,
+                          "max_30d":  80
+                      },
+                      {
+                          "provider":  "Universal Print",
+                          "event_id":  1,
+                          "reason":  "Universal Print per-print-job evaluation event -- normal.",
+                          "max_7d":  100,
+                          "max_30d":  500
+                      },
+                      {
+                          "event_id":  4,
+                          "provider":  "Microsoft-Windows-AppModel-State",
+                          "max_30d":  5000,
+                          "max_7d":  1000,
+                          "reason":  "Known harmless Win11 noise: QueryStateContainerItemInfo ApiSet returning 0x800700A8. Microsoft telemetry churn."
+                      },
+                      {
+                          "event_id":  4321,
+                          "provider":  "NetBT",
+                          "max_30d":  400,
+                          "max_7d":  100,
+                          "reason":  "NetBIOS WORKGROUP name contention (second host on LAN). Harmless; disable NetBT over TCP/IP if desired."
+                      },
+                      {
+                          "event_id":  3503,
+                          "provider":  "Microsoft-Windows-DeviceAssociationService",
+                          "max_30d":  400,
+                          "max_7d":  100,
+                          "reason":  "Endpoint discovery failure for transient Bluetooth/USB devices. Harmless."
+                      }
+                  ]
+}

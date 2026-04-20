@@ -30,6 +30,15 @@ if ($DryRun) {
     exit 0
 }
 
+# Admin check: registry rename of HKLM keys requires elevation
+$currentId = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object System.Security.Principal.WindowsPrincipal($currentId)
+if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $errRecord = @{ code = 'E_NEEDS_ADMIN'; message = 'This action requires Workbench to be launched as Administrator.' } | ConvertTo-Json -Compress
+    Write-Host "PCDOCTOR_ERROR:$errRecord"
+    exit 1
+}
+
 $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers'
 if (-not (Test-Path $key)) { throw "Registry key not found: $key" }
 

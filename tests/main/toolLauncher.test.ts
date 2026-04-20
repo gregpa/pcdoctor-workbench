@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -11,8 +12,9 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { existsSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { getToolStatus } from '../../src/main/toolLauncher.js';
+import { spawnSync, spawn } from 'node:child_process';
+import { getToolStatus, launchTool } from '../../src/main/toolLauncher.js';
+import { TOOLS } from '../../src/shared/tools.js';
 
 describe('getToolStatus', () => {
   beforeEach(() => {
@@ -98,5 +100,95 @@ describe('getToolStatus', () => {
     (spawnSync as any).mockImplementation(() => { throw new Error('ENOENT: winget'); });
     const status = getToolStatus('gpu-z');
     expect(status.installed).toBe(false);
+  });
+
+  it('MSIX path: package family dir exists → installed=true with shell:AppsFolder path', () => {
+    // The WindowsSandbox tool (or any msix tool) uses msix_package_family
+    // We verify the resolved_path format when isMsixInstalled returns true.
+    // Mock existsSync so the MSIX Packages dir returns true for any call.
+    (existsSync as any).mockImplementation((_p: string) => true);
+    // Any tool with msix_app_id defined — use first one found, else skip
+    const msixTool = Object.values(TOOLS).find((t: any) => t.msix_app_id) as any;
+    if (!msixTool) return; // skip if no MSIX tools in catalog
+    const status = getToolStatus(msixTool.id);
+    expect(status.installed).toBe(true);
+    expect(status.resolved_path).toMatch(/shell:AppsFolder\\/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// launchTool
+// ---------------------------------------------------------------------------
+
+function makeFakeChild(pid = 9999) {
+  const child: any = new EventEmitter();
+  child.pid = pid;
+  child.unref = vi.fn();
+  return child;
+}
+
+describe('launchTool', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns ok=false for unknown tool', async () => {
+    const result = await launchTool('does-not-exist', 'default');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/unknown tool/i);
+  });
+
+  it('returns ok=false when tool is not installed', async () => {
+    // All existsSync → false, spawnSync → not installed
+    (existsSync as any).mockReturnValue(false);
+    (spawnSync as any).mockReturnValue({ status: 1, stdout: '', stderr: '' });
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not installed/i);
+  });
+
+  it('spawns executable directly when tool has a resolved path', async () => {
+    // Make existsSync return true for the first occt path only
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    const child = makeFakeChild(1234);
+    (spawn as any).mockReturnValue(child);
+
+    const result = await launchTool('occt', 'default');
+
+    expect(result.ok).toBe(true);
+    expect(result.pid).toBe(1234);
+    const spawnCall = (spawn as any).mock.calls[0];
+    expect(spawnCall[0]).toBe('C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe');
+    expect(child.unref).toHaveBeenCalled();
+  });
+
+  it('spawns via explorer.exe shell:AppsFolder for MSIX tools', async () => {
+    const msixTool = Object.values(TOOLS).find((t: any) => t.msix_app_id) as any;
+    if (!msixTool) return; // skip if catalog has no MSIX tools
+
+    // All FS checks return true so isMsixInstalled fast-paths to installed
+    (existsSync as any).mockReturnValue(true);
+    const child = makeFakeChild(5555);
+    (spawn as any).mockReturnValue(child);
+
+    const result = await launchTool(msixTool.id, msixTool.launch_modes[0].id);
+
+    expect(result.ok).toBe(true);
+    const spawnCall = (spawn as any).mock.calls[0];
+    expect(spawnCall[0]).toBe('explorer.exe');
+    expect(spawnCall[1][0]).toContain('shell:AppsFolder\\');
+  });
+
+  it('returns ok=false and error message when spawn throws', async () => {
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    (spawn as any).mockImplementation(() => { throw new Error('EACCES: permission denied'); });
+
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/EACCES/);
   });
 });

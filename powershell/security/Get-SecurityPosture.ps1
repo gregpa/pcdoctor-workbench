@@ -173,21 +173,34 @@ try {
 } catch {}
 
 # GPU driver (Nvidia)
+# Note: on Win11, Get-CimInstance returns DriverDate already as [DateTime];
+# older paths returned a CIM string. Support both to avoid a silent null.
 $gpuDriver = $null
 try {
     $gpu = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA|GeForce|RTX|GTX' } | Select-Object -First 1
     if ($gpu) {
-        $driverDate = if ($gpu.DriverDate) { [Management.ManagementDateTimeConverter]::ToDateTime($gpu.DriverDate) } else { $null }
-        $ageDays = if ($driverDate) { [math]::Round(([DateTime]::Now - $driverDate).TotalDays, 0) } else { $null }
-        $sev = if ($ageDays -eq $null) { 'good' } elseif ($ageDays -gt 180) { 'warn' } else { 'good' }
+        $driverDate = $null
+        if ($gpu.DriverDate) {
+            if ($gpu.DriverDate -is [DateTime]) {
+                $driverDate = $gpu.DriverDate
+            } else {
+                try { $driverDate = [Management.ManagementDateTimeConverter]::ToDateTime($gpu.DriverDate) } catch { $driverDate = $null }
+            }
+        }
+        $ageDays = if ($driverDate) { [int][math]::Round(([DateTime]::Now - $driverDate).TotalDays, 0) } else { $null }
+        $sev = if ($null -eq $ageDays) { 'good' } elseif ($ageDays -gt 180) { 'warn' } else { 'good' }
         $gpuDriver = @{
             gpu_vendor = 'NVIDIA'
+            gpu_name = "$($gpu.Name)"
             gpu_current_version = "$($gpu.DriverVersion)"
             age_days = $ageDays
             severity = $sev
         }
     }
-} catch {}
+} catch {
+    # Surface the failure instead of silent null so we can debug from logs
+    $gpuDriver = @{ gpu_vendor = 'NVIDIA'; gpu_current_version = 'detection error'; age_days = $null; severity = 'warn'; error = $_.Exception.Message }
+}
 
 # Overall severity
 $severities = @()

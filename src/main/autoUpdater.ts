@@ -81,13 +81,35 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   });
 }
 
+// electron-updater's ClientRequest only accepts http: and https:. A file://
+// or UNC publish URL fails with "ClientRequest only supports http: and https:
+// protocols" on every check. Guard here so misconfigured URLs degrade to an
+// informational 'idle' state instead of spamming error toasts every 6 hours.
+function feedUrlIsUsable(): boolean {
+  try {
+    const feed = autoUpdater.getFeedURL();
+    if (!feed) return false;
+    return /^https?:\/\//i.test(feed);
+  } catch {
+    return false;
+  }
+}
+
 export async function checkForUpdates(): Promise<void> {
+  if (!feedUrlIsUsable()) {
+    setStatus({ state: 'idle', message: 'Auto-update not configured (needs http/https feed URL)' });
+    return;
+  }
   try { await autoUpdater.checkForUpdates(); } catch (e: any) {
     setStatus({ state: 'error', message: e?.message ?? 'Update check failed' });
   }
 }
 
 export async function downloadUpdate(): Promise<void> {
+  if (!feedUrlIsUsable()) {
+    setStatus({ state: 'idle', message: 'Auto-update not configured' });
+    return;
+  }
   try { await autoUpdater.downloadUpdate(); } catch (e: any) {
     setStatus({ state: 'error', message: e?.message ?? 'Download failed' });
   }

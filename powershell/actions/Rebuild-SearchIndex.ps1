@@ -38,7 +38,9 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
     [Security.Principal.WindowsBuiltInRole] 'Administrator'
 )
 if (-not $isAdmin) {
-    throw 'Administrator required. Launch PCDoctor Workbench as Administrator, or run this action via an elevated PowerShell.'
+    $errRecord = @{ code = 'E_NEEDS_ADMIN'; message = 'This action requires Workbench to be launched as Administrator.' } | ConvertTo-Json -Compress
+    Write-Host "PCDOCTOR_ERROR:$errRecord"
+    exit 1
 }
 
 # Stop WSearch service (requires admin)

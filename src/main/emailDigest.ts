@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { getSetting } from './dataStore.js';
+import { getSetting, listAutopilotActivity, queryMetricTrend } from './dataStore.js';
 
 interface DigestPayload {
   subject: string;
@@ -73,6 +73,16 @@ export async function sendWeeklyDigestEmail(): Promise<{ ok: boolean; error?: st
     } catch {}
   }
 
+  // Autopilot activity (last 7 days) for digest enrichment
+  const autopilotRows = listAutopilotActivity(7, 500);
+  const autoRuns = autopilotRows.filter(r => r.outcome === 'auto_run');
+  const alerts = autopilotRows.filter(r => r.outcome === 'alerted');
+  const totalFreed = autoRuns.reduce((sum, r) => sum + (r.bytes_freed ?? 0), 0);
+
+  const cpuPoints = queryMetricTrend('cpu', 'load_pct', 7);
+  const ramPoints = queryMetricTrend('ram', 'used_pct', 7);
+  const diskPoints = queryMetricTrend('disk', 'free_pct', 7);
+
   const subject = `PCDoctor Weekly Digest - ${latestReview?.review_date ?? new Date().toISOString().slice(0, 10)}`;
   const html = `
 <!doctype html>
@@ -102,6 +112,21 @@ ${latestReview ? `
   <ul>${Object.entries(latestReview.headroom ?? {}).map(([k, v]) => `<li><strong>${k.replace(/_/g, ' ')}:</strong> ${escapeHtml(String(v))}</li>`).join('')}</ul>
 </div>
 ` : '<p>No weekly review available yet.</p>'}
+
+<div class="card">
+  <h2>🤖 Autopilot (last 7 days)</h2>
+  <p>Auto-runs: <strong>${autoRuns.length}</strong> · Alerts sent: <strong>${alerts.length}</strong> · Freed: <strong>${(totalFreed / 1024 / 1024).toFixed(1)} MB</strong></p>
+  ${autoRuns.length > 0 ? `<ul>${autoRuns.slice(0, 10).map(r => `<li>✓ ${escapeHtml(r.action_name ?? r.rule_id)}${r.bytes_freed ? ` (${(r.bytes_freed / 1024 / 1024).toFixed(1)} MB)` : ''}</li>`).join('')}</ul>` : '<p style="color:#8b949e">No autopilot runs this week.</p>'}
+</div>
+
+<div class="card">
+  <h2>Trend Sparkles (last 7 days)</h2>
+  <ul>
+    <li><strong>CPU load:</strong> ${sparkline(cpuPoints.map(p => p.value))} (${cpuPoints.length} pts)</li>
+    <li><strong>RAM used:</strong> ${sparkline(ramPoints.map(p => p.value))} (${ramPoints.length} pts)</li>
+    <li><strong>C: free:</strong>  ${sparkline(diskPoints.filter(p => true).map(p => p.value))} (${diskPoints.length} pts)</li>
+  </ul>
+</div>
 <p style="color:#8b949e;font-size:11px;margin-top:24px">Sent by PCDoctor Workbench · Configure or disable in Settings → Email Digest</p>
 </body></html>`;
 
@@ -110,4 +135,20 @@ ${latestReview ? `
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Tiny ASCII sparkline for the email digest. Maps each value to one of
+ * 8 block characters based on its position in the [min,max] range.
+ */
+function sparkline(values: number[]): string {
+  if (values.length === 0) return '—';
+  const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  return values
+    .slice(-32)  // cap at 32 points for readability
+    .map(v => blocks[Math.min(blocks.length - 1, Math.floor(((v - min) / span) * blocks.length))])
+    .join('');
 }

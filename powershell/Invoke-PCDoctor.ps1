@@ -253,8 +253,13 @@ try {
         if ($ws.Status -ne 'Running' -and $ws.StartType -ne 'Disabled') {
             Add-Finding warning 'Search' 'Windows Search service is not running - Explorer will be slow'
         }
-        # Check recent Search errors
-        $searchErr = Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Microsoft-Windows-Search'; Level=1,2; StartTime=(Get-Date).AddDays(-2)} -MaxEvents 10 -EA SilentlyContinue
+        # Check recent Search errors, but only AFTER the most recent "Full Index Reset"
+        # so a fresh rebuild clears the finding immediately instead of waiting 2 days.
+        $lastReset = Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Microsoft-Windows-Search'; Id=1004; StartTime=(Get-Date).AddDays(-7)} -MaxEvents 1 -EA SilentlyContinue |
+                     Where-Object { $_.Message -match 'Full Index Reset' } |
+                     Select-Object -First 1
+        $errWindowStart = if ($lastReset) { $lastReset.TimeCreated.AddMinutes(2) } else { (Get-Date).AddDays(-2) }
+        $searchErr = Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Microsoft-Windows-Search'; Level=1,2; StartTime=$errWindowStart} -MaxEvents 10 -EA SilentlyContinue
         if ($searchErr | Where-Object { $_.Message -match 'Recovery phase failed|recreate the index' }) {
             Add-Finding warning 'Search' 'Windows Search index is corrupted and needs rebuild (Settings > Search > Advanced > Rebuild)'
         }
@@ -290,13 +295,22 @@ try {
 Log "Checking shell overlay handlers..."
 try {
     $overlays = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers' -EA SilentlyContinue
-    $count = ($overlays | Measure-Object).Count
-    $report.metrics.shell_overlay_count = $count
-    if ($count -gt 15) {
-        # (Windows honors only 15 overlay handlers; excess wastes CPU on every folder render)
-        # Identify likely-redundant overlays
-        $byPrefix = $overlays | Group-Object { $_.PSChildName.Trim() -replace '\d+$','' } | Where-Object Count -gt 1
-        Add-Finding warning 'Explorer' "Shell has $count overlay handlers (Windows honors only 15). Excess handlers waste CPU on folder renders." @{
+    $totalCount = ($overlays | Measure-Object).Count
+    # Fix-Shell-Overlays.ps1 renames deprioritized duplicates with a "ZZZZ" prefix
+    # so Windows' alphabetical top-15 cutoff skips them. Count only the effective
+    # (non-tombstoned) handlers for the finding threshold; keep totals visible for debug.
+    $active = $overlays | Where-Object { $_.PSChildName -notmatch '^\s*ZZZZ\s' }
+    $activeCount = ($active | Measure-Object).Count
+    $report.metrics.shell_overlay_count = $activeCount
+    $report.metrics.shell_overlay_total = $totalCount
+    $report.metrics.shell_overlay_tombstoned = $totalCount - $activeCount
+    if ($activeCount -gt 15) {
+        # Identify likely-redundant overlays among the ACTIVE set
+        $byPrefix = $active | Group-Object { $_.PSChildName.Trim() -replace '\d+$','' } | Where-Object Count -gt 1
+        Add-Finding warning 'Explorer' "Shell has $activeCount active overlay handlers (Windows honors only 15). Excess handlers waste CPU on folder renders." @{
+            active_count     = $activeCount
+            total_count      = $totalCount
+            tombstoned_count = ($totalCount - $activeCount)
             redundant_groups = ($byPrefix | ForEach-Object { @{ prefix = $_.Name; count = $_.Count } })
         }
     }
@@ -322,13 +336,135 @@ if ($pend) {
 # =================================================================
 Log "Auditing startup entries..."
 try {
-    $startup = @(Get-CimInstance Win32_StartupCommand -EA SilentlyContinue)
-    $report.metrics.startup_count = $startup.Count
-    if ($startup.Count -gt 30) {
-        Add-Finding warning 'Startup' "$($startup.Count) auto-start entries (healthy: under 20). Boot time and idle RAM suffer." @{
-            count = $startup.Count
-            samples = ($startup | Select-Object -First 5 Name, Location | ForEach-Object { "$($_.Name) [$($_.Location)]" })
+    $rawStartup = @(Get-CimInstance Win32_StartupCommand -EA SilentlyContinue)
+    $report.metrics.startup_count_raw = $rawStartup.Count
+
+    # Win32_StartupCommand enumerates HKU\* for every loaded hive, which includes
+    # well-known service accounts (SYSTEM/LOCAL SERVICE/NETWORK SERVICE). Entries
+    # there don't fire on interactive logon -- they're phantom counts that
+    # triple-count installers like OneDrive/GoogleDriveFS. Filter them out.
+    $serviceSidPatterns = @(
+        'HKU\\S-1-5-18',            # LocalSystem
+        'HKU\\S-1-5-19',            # LocalService
+        'HKU\\S-1-5-20',            # NetworkService
+        'HKU\\S-1-5-21-.*_Classes', # per-user *_Classes hives (not real user accounts)
+        'HKU\\S-1-5-82',            # AppPoolIdentity
+        'HKU\\S-1-5-90',            # WindowManager
+        'HKU\\S-1-5-96',            # FontDriverHost
+        'HKU\\\\.DEFAULT'           # default profile for not-yet-logged-in users
+    )
+    $serviceSidRegex = ($serviceSidPatterns -join '|')
+
+    $startup = $rawStartup | Where-Object { $_.Location -notmatch $serviceSidRegex }
+    $startup = @($startup)
+
+    # Check Windows' StartupApproved registry to exclude user-disabled entries.
+    # Task Manager's Startup tab writes byte[0] = 0x03 (vs 0x02 enabled) here.
+    $approvedPaths = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'
+    )
+    $disabledNames = @{}
+    foreach ($apath in $approvedPaths) {
+        if (Test-Path $apath) {
+            try {
+                $props = Get-ItemProperty -Path $apath -ErrorAction SilentlyContinue
+                foreach ($p in $props.PSObject.Properties) {
+                    if ($p.Name -match '^PS' -or $p.Name -eq '(default)') { continue }
+                    if ($p.Value -is [byte[]] -and $p.Value.Length -ge 1 -and $p.Value[0] -eq 0x03) {
+                        # Store both raw name and without .lnk so matching works for both folders and registry
+                        $disabledNames[$p.Name] = $true
+                        $disabledNames[($p.Name -replace '\.lnk$','')] = $true
+                    }
+                }
+            } catch {}
         }
+    }
+    $startupEnabled = $startup | Where-Object { -not $disabledNames.ContainsKey($_.Name) }
+    $startupEnabled = @($startupEnabled)
+
+    $report.metrics.startup_count = $startupEnabled.Count
+    $report.metrics.startup_count_phantom = $rawStartup.Count - $startup.Count
+    $report.metrics.startup_count_user_disabled = $startup.Count - $startupEnabled.Count
+    $startup = $startupEnabled
+
+    # v2.3.0 C1: emit a full-context list of every enabled startup item so the
+    # renderer's StartupPickerModal can let the user multi-select without
+    # needing another IPC round-trip. Essential apps are marked is_essential=true
+    # and get pre-unchecked by the UI.
+    $essentialRegex = '^(SecurityHealth|Windows Security|OneDrive|Microsoft Teams|MicrosoftEdgeAutoLaunch|GoogleDriveFS|Notifiarr|LGHUB|PrivateVpnAutoLaunch|RtkAudUService|GoldKey|Docker Desktop|Plex)'
+    $report.metrics.startup_items = @(
+        foreach ($e in $startupEnabled) {
+            $loc = "$($e.Location)"
+            $kind = if ($loc -match 'HKCU.*Run') { 'Run' }
+                    elseif ($loc -match 'HKLM.*Run') { 'HKLM_Run' }
+                    elseif ($loc -match 'Startup') { 'StartupFolder' }
+                    else { 'Run' }
+            $path = "$($e.Command)"
+            $sizeBytes = $null
+            # Best-effort size lookup for resolved file paths
+            try {
+                $m = [regex]::Match($path, '"?([A-Z]:\\[^"]+?\.(exe|dll|lnk|cmd|bat|scr))')
+                if ($m.Success) {
+                    $fp = $m.Groups[1].Value
+                    if (Test-Path $fp) {
+                        $sizeBytes = (Get-Item $fp -ErrorAction SilentlyContinue).Length
+                    }
+                }
+            } catch {}
+            @{
+                name = "$($e.Name)"
+                location = $loc
+                kind = $kind
+                is_essential = ("$($e.Name)" -match $essentialRegex)
+                disabled_in_registry = $false
+                publisher = "$($e.User)"
+                path = $path
+                size_bytes = $sizeBytes
+            }
+        }
+    )
+
+    if ($startup.Count -gt 25) {
+        # Pick a top candidate to disable: favor HKCU Run entries (user-writable,
+        # safest to disable) and skip items whose name looks load-bearing.
+        # User-specific keeps (Greg): Notifiarr routes phone alerts, LGHUB drives
+        # keyboard/mouse, PrivateVpn for security, cloud sync apps for work state.
+        $essential = @(
+            'SecurityHealth','Windows Security','OneDrive','Microsoft Teams','MicrosoftEdgeAutoLaunch',
+            'GoogleDriveFS','Notifiarr','LGHUB','PrivateVpnAutoLaunch','RtkAudUService','GoldKey'
+        )
+        $candidate = $startup |
+            Where-Object { $_.Location -match 'HKCU.*Run' -or $_.Location -match 'Startup' } |
+            Where-Object {
+                $n = $_.Name
+                -not ($essential | Where-Object { $n -like "*$_*" })
+            } |
+            Select-Object -First 1
+        if (-not $candidate) { $candidate = $startup | Select-Object -First 1 }
+
+        $itemName = if ($candidate) { $candidate.Name } else { $null }
+        $sampleList = ($startup | Select-Object -First 5 Name, Location | ForEach-Object { "$($_.Name) [$($_.Location)]" })
+
+        $detail = [ordered]@{
+            count             = $startup.Count
+            phantom_filtered  = $rawStartup.Count - $startup.Count
+            raw_count         = $rawStartup.Count
+            samples           = $sampleList
+            item_name         = $itemName
+            suggested_target_location = if ($candidate) { $candidate.Location } else { $null }
+        }
+        $phantomNote = if ($rawStartup.Count -ne $startup.Count) { " (filtered $($rawStartup.Count - $startup.Count) phantom entries from service-account hives)" } else { "" }
+        $msg = if ($itemName) {
+            "$($startup.Count) real auto-start entries$phantomNote (healthy: under 20). Fix button disables '$itemName' as a starting point; use Autoruns for the rest."
+        } else {
+            "$($startup.Count) real auto-start entries$phantomNote (healthy: under 20). Boot time and idle RAM suffer."
+        }
+        Add-Finding warning 'Startup' $msg $detail
     }
 } catch { Log "Startup error: $_" }
 
@@ -340,6 +476,83 @@ try {
               ForEach-Object { @{ name = $_.Name; pid = $_.Id; ram_mb = [math]::Round($_.WorkingSet64 / 1MB, 0) } }
     $report.metrics.top_memory = $topMem
 } catch { Log "Top memory error: $_" }
+
+# =================================================================
+# 8b. WSL CONFIG + MEMORY PRESSURE (v2.3.0 - B4 + C3)
+#     Scanner emits enough to power the RamPressurePanel + the WSL-aware
+#     apply_wsl_cap recommendation. Never fatal if Get-Counter is unavailable.
+# =================================================================
+try {
+    $wslConfig = @{
+        exists = Test-Path "$env:USERPROFILE\.wslconfig"
+        has_memory_cap = $false
+        memory_gb = $null
+        vmmem_utilization_pct = $null
+    }
+    if ($wslConfig.exists) {
+        $content = Get-Content "$env:USERPROFILE\.wslconfig" -Raw -ErrorAction SilentlyContinue
+        if ($content -match 'memory\s*=\s*(\d+)\s*GB') {
+            $wslConfig.has_memory_cap = $true
+            $wslConfig.memory_gb = [int]$Matches[1]
+        }
+    }
+    $vmmem = Get-Process -Name 'vmmemWSL','vmmem' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($vmmem -and $wslConfig.memory_gb) {
+        $wslCapBytes = $wslConfig.memory_gb * 1GB
+        $wslConfig.vmmem_utilization_pct = [math]::Round(($vmmem.WorkingSet64 / $wslCapBytes) * 100, 1)
+    }
+    $report.metrics.wsl_config = $wslConfig
+} catch { Log "WSL config error: $_" }
+
+try {
+    $memPressure = @{
+        committed_bytes = $null
+        commit_limit = $null
+        pages_per_sec = $null
+        page_faults_per_sec = $null
+        compression_mb = $null
+        top_processes = @()
+    }
+    try {
+        $mem = Get-Counter -Counter '\Memory\Committed Bytes','\Memory\Commit Limit','\Memory\Pages/sec','\Memory\Page Faults/sec' -SampleInterval 1 -MaxSamples 1 -ErrorAction SilentlyContinue
+        if ($mem) {
+            foreach ($s in $mem.CounterSamples) {
+                switch -Wildcard ($s.Path) {
+                    '*committed bytes*'      { $memPressure.committed_bytes      = [int64]$s.CookedValue }
+                    '*commit limit*'         { $memPressure.commit_limit         = [int64]$s.CookedValue }
+                    '*pages/sec*'            { $memPressure.pages_per_sec        = [math]::Round($s.CookedValue, 1) }
+                    '*page faults/sec*'      { $memPressure.page_faults_per_sec  = [math]::Round($s.CookedValue, 1) }
+                }
+            }
+        }
+    } catch {}
+    try {
+        $compProc = Get-Process -Name 'MemCompression' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($compProc) {
+            $memPressure.compression_mb = [math]::Round($compProc.WorkingSet64 / 1MB, 0)
+        }
+    } catch {}
+
+    # Top 5 memory consumers with a rough user/service/system classification so
+    # the UI can decide whether to show a Kill or Restart button.
+    $sysProcs = @('System','Registry','MemCompression','Idle','Secure System','csrss','smss','wininit','services','lsass','winlogon','fontdrvhost','dwm')
+    $srvRegex = '^(Svc|svchost|WmiPrv|spool|TrustedInstaller|RuntimeBroker|sihost|ctfmon)$'
+    $top = Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5
+    $memPressure.top_processes = @(
+        foreach ($p in $top) {
+            $kind = if ($sysProcs -contains $p.Name) { 'system' }
+                    elseif ($p.Name -match $srvRegex) { 'service' }
+                    else { 'user' }
+            @{
+                name = $p.Name
+                pid = $p.Id
+                ws_bytes = $p.WorkingSet64
+                kind = $kind
+            }
+        }
+    )
+    $report.metrics.memory_pressure = $memPressure
+} catch { Log "Memory pressure error: $_" }
 
 # =================================================================
 # 9. NAS & SMB HEALTH (new in 2026-04-16 revision)

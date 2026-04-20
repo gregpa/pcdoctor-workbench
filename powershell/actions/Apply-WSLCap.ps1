@@ -30,6 +30,30 @@ if ($DryRun) {
 }
 
 $wslConfigPath = "$env:USERPROFILE\.wslconfig"
+$targetMemory = '8GB'
+
+# No-op guard: check if .wslconfig already has a memory= directive matching target
+$alreadyApplied = $false
+if (Test-Path $wslConfigPath) {
+    $existingContent = Get-Content -Path $wslConfigPath -Raw -ErrorAction SilentlyContinue
+    if ($existingContent -match "(?im)^\s*memory\s*=\s*$([regex]::Escape($targetMemory))\s*$") {
+        $alreadyApplied = $true
+    }
+}
+
+if ($alreadyApplied) {
+    $sw.Stop()
+    $result = @{
+        success     = $true
+        no_op       = $true
+        duration_ms = $sw.ElapsedMilliseconds
+        path        = $wslConfigPath
+        message     = "Already in desired state: .wslconfig already contains memory=$targetMemory"
+    }
+    $result | ConvertTo-Json -Depth 3 -Compress
+    exit 0
+}
+
 $content = @"
 [wsl2]
 memory=8GB
@@ -42,6 +66,7 @@ Set-Content -Path $wslConfigPath -Value $content -Encoding UTF8
 $sw.Stop()
 $result = @{
     success     = $true
+    no_op       = $false
     duration_ms = $sw.ElapsedMilliseconds
     path        = $wslConfigPath
     message     = "WSL memory cap applied (8GB memory + 4GB swap). wsl --shutdown issued."

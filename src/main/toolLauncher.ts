@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
+import https from 'node:https';
+import { URL } from 'node:url';
 import path from 'node:path';
 import type { ToolStatus } from '@shared/types.js';
 import { TOOLS } from '@shared/tools.js';
@@ -31,9 +33,11 @@ function isMsixInstalled(packageFamily: string): boolean {
   if (existsSync(machinePackages)) return true;
   // Fallback: ask PowerShell (slower, ~500ms)
   try {
+    // Avoid single-quote injection: pass the package name as a separate -Command param arg
+    const pkgName = packageFamily.split('_')[0].replace(/'/g, '');
     const r = spawnSync('powershell.exe', [
       '-NoProfile', '-Command',
-      `if (Get-AppxPackage -Name '${packageFamily.split('_')[0]}' -ErrorAction SilentlyContinue) { 'yes' }`,
+      `if (Get-AppxPackage -Name '${pkgName}' -ErrorAction SilentlyContinue) { 'yes' }`,
     ], { encoding: 'utf8', timeout: 5_000, windowsHide: true });
     return (r.stdout ?? '').trim() === 'yes';
   } catch { return false; }
@@ -125,5 +129,101 @@ export async function installToolViaWinget(toolId: string): Promise<{ ok: boolea
       else resolve({ ok: false, error: `winget exited ${code}` });
     });
     child.on('error', (e) => resolve({ ok: false, error: e.message }));
+  });
+}
+
+/**
+ * Download def.download_url to def.detect_paths[0] via https.get.
+ * - If the file already exists and is < maxAgeDays old, skip the download.
+ * - Follows up to 5 redirects.
+ * - Verifies the downloaded file exists and has non-zero size.
+ */
+export async function installToolViaDirectDownload(
+  toolId: string,
+  maxAgeDays = 10,
+): Promise<{ ok: boolean; error?: string; path?: string; bytes?: number; cached?: boolean }> {
+  const def = TOOLS[toolId];
+  if (!def) return { ok: false, error: `Unknown tool: ${toolId}` };
+  if (!def.download_url) return { ok: false, error: 'No download_url configured for this tool' };
+  const destPath = def.detect_paths[0];
+  if (!destPath) return { ok: false, error: 'No detect_paths[0] defined for direct-download target' };
+
+  const resolvedDest = destPath.replace(/%([^%]+)%/g, (_, v) => process.env[v] ?? `%${v}%`);
+
+  // Cache hit: return immediately if file exists and is fresh enough.
+  try {
+    if (existsSync(resolvedDest)) {
+      const st = statSync(resolvedDest);
+      if (st.size > 0) {
+        const ageDays = (Date.now() - st.mtimeMs) / (24 * 60 * 60 * 1000);
+        if (ageDays < maxAgeDays) {
+          return { ok: true, path: resolvedDest, bytes: st.size, cached: true };
+        }
+      }
+    }
+  } catch { /* fall through to re-download */ }
+
+  // Ensure parent dir exists.
+  try {
+    const parent = path.dirname(resolvedDest);
+    if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
+  } catch (e: any) {
+    return { ok: false, error: `Failed to create target directory: ${e?.message ?? e}` };
+  }
+
+  try {
+    await httpsDownload(def.download_url, resolvedDest);
+  } catch (e: any) {
+    // Best-effort cleanup of partial file
+    try { if (existsSync(resolvedDest)) unlinkSync(resolvedDest); } catch {}
+    return { ok: false, error: `Download failed: ${e?.message ?? e}` };
+  }
+
+  try {
+    const st = statSync(resolvedDest);
+    if (st.size === 0) {
+      try { unlinkSync(resolvedDest); } catch {}
+      return { ok: false, error: 'Downloaded file has zero bytes' };
+    }
+    return { ok: true, path: resolvedDest, bytes: st.size, cached: false };
+  } catch (e: any) {
+    return { ok: false, error: `Downloaded file verification failed: ${e?.message ?? e}` };
+  }
+}
+
+function httpsDownload(url: string, destPath: string, redirectsRemaining = 5): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') {
+      reject(new Error(`Refusing to download over non-HTTPS protocol: ${parsed.protocol}`));
+      return;
+    }
+    const req = https.get(url, { timeout: 120_000 }, (res) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if (redirectsRemaining <= 0) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
+        // Resolve relative redirect targets against the current URL
+        const next = new URL(res.headers.location, url).toString();
+        res.resume();
+        httpsDownload(next, destPath, redirectsRemaining - 1).then(resolve, reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode} ${res.statusMessage ?? ''}`));
+        res.resume();
+        return;
+      }
+      const ws = createWriteStream(destPath);
+      res.pipe(ws);
+      ws.on('finish', () => ws.close(() => resolve()));
+      ws.on('error', (e) => reject(e));
+      res.on('error', (e) => reject(e));
+    });
+    req.on('timeout', () => {
+      req.destroy(new Error('Request timeout'));
+    });
+    req.on('error', (e) => reject(e));
   });
 }

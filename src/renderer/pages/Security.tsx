@@ -5,6 +5,7 @@ import type { ActionName } from '@shared/types.js';
 import { useState } from 'react';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 import { SecurityDetailModal } from '@renderer/components/security/SecurityDetailModal.js';
+import { DefenderScanStatus } from '@renderer/components/security/DefenderScanStatus.js';
 import { useNavigate } from 'react-router-dom';
 
 type DetailKind = 'defender' | 'firewall' | 'wu' | 'auth' | 'bitlocker' | 'uac' | 'gpu' | null;
@@ -71,6 +72,8 @@ export function Security() {
         </div>
         <button onClick={refresh} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Re-scan</button>
       </div>
+
+      <DefenderScanStatus />
 
       <div className="grid grid-cols-2 gap-3 mb-3">
         <Panel title="Microsoft Defender" severity={data.defender?.severity} onClick={() => setDetail('defender')}>

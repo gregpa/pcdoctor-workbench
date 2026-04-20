@@ -1,9 +1,26 @@
-import { ipcMain, safeStorage } from 'electron';
+import { ipcMain, safeStorage, app } from 'electron';
 import { readFile, readdir, unlink, copyFile, mkdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+// Windows-quirk: schtasks.exe hangs when invoked directly via spawn/execFile
+// from a Node child_process (it expects an attached console and times out
+// otherwise — observed under both spawnSync and execFile). Wrapping the call
+// in powershell.exe avoids the hang because PowerShell handles the console
+// attachment correctly. Every schtasks call below goes through this helper.
+const pExecFile = promisify(execFile);
+
+async function runSchtasks(args: string[], timeoutMs = 5000): Promise<{ stdout: string; stderr: string }> {
+  const psCmd = ['schtasks', ...args].join(' ');
+  return pExecFile(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+    { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, maxBuffer: 256 * 1024 }
+  );
+}
 import { getStatus, PCDoctorBridgeError, setCachedSmart } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
@@ -17,13 +34,17 @@ import {
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
-import { listAllToolStatuses, launchTool, installToolViaWinget } from './toolLauncher.js';
+import { listAllToolStatuses, launchTool, installToolViaWinget, installToolViaDirectDownload } from './toolLauncher.js';
+import { TOOLS } from '@shared/tools.js';
 import { launchClaudeInTerminal, launchClaudeWithContext, resolveClaudePath } from './claudeBridge.js';
 import { checkForUpdates, downloadUpdate, installNow, getStatus as getUpdaterStatus } from './autoUpdater.js';
 import type { UpdateStatus } from './autoUpdater.js';
 import { testTelegramConnection, sendTelegramMessage } from './telegramBridge.js';
 import { flushBufferedNotifications } from './notifier.js';
 import { sendWeeklyDigestEmail } from './emailDigest.js';
+import { buildClaudeReport, type ClaudeReport } from './claudeReportExporter.js';
+import { getAutopilotActivity, evaluateRule, dispatchDecision } from './autopilotEngine.js';
+import { listAutopilotRules, suppressAutopilotRule, setAutopilotRuleEnabled, getAutopilotRule, insertAutopilotActivity } from './dataStore.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
@@ -33,6 +54,14 @@ import type {
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
 
 export function registerIpcHandlers() {
+  ipcMain.handle('api:getAppVersion', (): IpcResult<string> => {
+    try {
+      return { ok: true, data: app.getVersion() };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to read version' } };
+    }
+  });
+
   ipcMain.handle('api:getStatus', async (): Promise<IpcResult<SystemStatus>> => {
     try {
       const data = await getStatus();
@@ -209,10 +238,14 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:getSecurityPosture', async (): Promise<IpcResult<SecurityPosture>> => {
     try {
-      const posture = await runPowerShellScript<any>('security/Get-SecurityPosture.ps1', ['-JsonOutput'], { timeoutMs: 120_000 });
-      const audit = await runPowerShellScript<any>('security/Audit-Persistence.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ items: [] }));
-      const threats = await runPowerShellScript<any>('security/Get-ThreatIndicators.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ indicators: [] }));
-      const smart = await runPowerShellScript<any>('security/Get-SMART.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ drives: [] }));
+      // Run all four PS scans in parallel; combined worst-case latency drops
+      // from ~300s sequential to ~120s (bounded by the slowest probe).
+      const [posture, audit, threats, smart] = await Promise.all([
+        runPowerShellScript<any>('security/Get-SecurityPosture.ps1', ['-JsonOutput'], { timeoutMs: 120_000 }),
+        runPowerShellScript<any>('security/Audit-Persistence.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ items: [] })),
+        runPowerShellScript<any>('security/Get-ThreatIndicators.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ indicators: [] })),
+        runPowerShellScript<any>('security/Get-SMART.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ drives: [] })),
+      ]);
 
       // Upsert persistence items into baseline and compute is_new flag
       const persistenceItems: PersistenceItem[] = [];
@@ -261,7 +294,10 @@ export function registerIpcHandlers() {
       if (autoBlockEnabled) {
         for (const ti of data.threat_indicators) {
           if (ti.category === 'rdp_bruteforce' && (ti.detail as any)?.auto_block_candidates) {
+            const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
             for (const ip of ((ti.detail as any).auto_block_candidates as string[])) {
+              // Validate IP format before passing to PowerShell
+              if (typeof ip !== 'string' || !ipv4Re.test(ip)) continue;
               try {
                 await runPowerShellScript('actions/Block-IP.ps1', ['-JsonOutput', '-Ip', ip, '-Reason', 'Auto-block: RDP brute-force'], { timeoutMs: 10_000 });
               } catch {}
@@ -318,9 +354,42 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:installTool', async (_evt, toolId: string): Promise<IpcResult<{}>> => {
-    const r = await installToolViaWinget(toolId);
-    if (r.ok) return { ok: true, data: {} };
-    return { ok: false, error: { code: 'E_TOOL_INSTALL', message: r.error ?? 'Install failed' } };
+    const def = TOOLS[toolId];
+    if (!def) {
+      return { ok: false, error: { code: 'E_TOOL_UNKNOWN', message: `Unknown tool: ${toolId}` } };
+    }
+    // Dispatch:
+    //   winget_id present    → winget install
+    //   download_url present → direct HTTPS download to detect_paths[0]
+    //   neither              → error (e.g. MSIX-only tools, native-only tools)
+    if (def.winget_id) {
+      const r = await installToolViaWinget(toolId);
+      return r.ok
+        ? { ok: true, data: {} }
+        : { ok: false, error: { code: 'E_TOOL_INSTALL', message: r.error ?? 'Install failed' } };
+    }
+    if (def.download_url) {
+      const r = await installToolViaDirectDownload(toolId);
+      return r.ok
+        ? { ok: true, data: {} }
+        : { ok: false, error: { code: 'E_TOOL_DOWNLOAD', message: r.error ?? 'Download failed' } };
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'E_TOOL_INSTALL_UNAVAILABLE',
+        message: `No install method configured for '${def.name}' (no winget_id or download_url).`,
+      },
+    };
+  });
+
+  ipcMain.handle('api:getDefenderScanStatus', async (): Promise<IpcResult<any>> => {
+    try {
+      const data = await runPowerShellScript<any>('security/Get-DefenderScanStatus.ps1', ['-JsonOutput'], { timeoutMs: 15_000 });
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to read Defender scan status' } };
+    }
   });
 
   ipcMain.handle('api:getWindowsUpdateDetail', async (): Promise<IpcResult<any>> => {
@@ -378,6 +447,7 @@ export function registerIpcHandlers() {
         'quiet_hours_start', 'quiet_hours_end',
         'email_digest_recipient', 'digest_hour',
         'auto_block_rdp_bruteforce',
+        'telegram_last_good_ts', 'selftest_banner',
       ]);
       const isSafeKey = (k: string) => RENDERER_SAFE_KEYS.has(k) || k.startsWith('event:');
 
@@ -423,6 +493,17 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:setSetting', async (_evt, key: string, value: string): Promise<IpcResult<{}>> => {
+    // Allowlist: only permit keys the renderer is allowed to modify.
+    const WRITABLE_KEYS = new Set<string>([
+      'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
+      'quiet_hours_start', 'quiet_hours_end',
+      'email_digest_recipient', 'digest_hour',
+      'auto_block_rdp_bruteforce',
+    ]);
+    const isWritable = (k: string) => WRITABLE_KEYS.has(k) || k.startsWith('event:');
+    if (!isWritable(key)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Setting '${key}' cannot be modified from the renderer` } };
+    }
     try {
       if (key === 'telegram_bot_token' && value && safeStorage.isEncryptionAvailable()) {
         const encrypted = safeStorage.encryptString(value).toString('base64');
@@ -448,50 +529,235 @@ export function registerIpcHandlers() {
     return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
   });
 
+  ipcMain.handle('api:sendTelegramTestFull', async (): Promise<IpcResult<{ sent_at: number }>> => {
+    // Full round-trip test with inline keyboard. Callback responses are handled in main.ts:
+    //   tgtest_ok  → records settings.telegram_last_good_ts
+    //   tgtest_fail → writes audit log entry with telegram_callback_failed = true
+    const { makeCallbackData } = await import('./telegramBridge.js');
+    const r = await sendTelegramMessage(
+      '🧪 <b>PCDoctor Telegram test</b>\n\n' +
+      'If you see this message and the buttons below work, the channel is healthy.',
+      [[
+        { text: '✓ Received', callback_data: makeCallbackData('tgtest_ok') },
+        { text: '❌ Buttons don\'t work', callback_data: makeCallbackData('tgtest_fail') },
+      ]],
+    );
+    if (r.ok) return { ok: true, data: { sent_at: Date.now() } };
+    return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
+  });
+
+  // v2.3.0 B3 fix #3: include the 11 Autopilot tasks so the Settings page's
+  // scheduled-tasks table shows them and Run-Now works on each.
+  const MANAGED_TASKS = new Set([
+    'PCDoctor-Workbench-Autostart', 'PCDoctor-Daily-Quick', 'PCDoctor-Weekly',
+    'PCDoctor-Weekly-Review', 'PCDoctor-Forecast', 'PCDoctor-Security-Daily',
+    'PCDoctor-Security-Weekly', 'PCDoctor-Prune-Rollbacks', 'PCDoctor-Monthly-Deep',
+    'PCDoctor-Autopilot-SmartCheck',
+    'PCDoctor-Autopilot-DefenderQuickScan',
+    'PCDoctor-Autopilot-UpdateDefenderDefs',
+    'PCDoctor-Autopilot-EmptyRecycleBins',
+    'PCDoctor-Autopilot-ClearBrowserCaches',
+    'PCDoctor-Autopilot-MalwarebytesCli',
+    'PCDoctor-Autopilot-AdwCleanerScan',
+    'PCDoctor-Autopilot-SafetyScanner',
+    'PCDoctor-Autopilot-HwinfoLog',
+    'PCDoctor-Autopilot-UpdateHostsStevenBlack',
+    'PCDoctor-Autopilot-ShrinkComponentStore',
+  ]);
+
   ipcMain.handle('api:listScheduledTasks', async (): Promise<IpcResult<ScheduledTaskInfo[]>> => {
+    // Delegate to a single PowerShell script that wraps schtasks.exe one-task-
+    // at-a-time. Calling schtasks via Node child_process directly hangs (it
+    // expects an attached console). Calling /Query without /TN to enumerate
+    // everything also fails on this machine because of a corrupted Microsoft
+    // task entry under the root.
     try {
-      const tasks = ['PCDoctor-Workbench-Autostart','PCDoctor-Daily-Quick','PCDoctor-Weekly','PCDoctor-Weekly-Review','PCDoctor-Forecast','PCDoctor-Security-Daily','PCDoctor-Security-Weekly','PCDoctor-Prune-Rollbacks','PCDoctor-Monthly-Deep'];
-      const result: ScheduledTaskInfo[] = [];
-      for (const name of tasks) {
-        const r = spawnSync('schtasks.exe', ['/Query', '/TN', name, '/FO', 'CSV', '/V'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-        if (r.status !== 0) { result.push({ name, status: 'Not registered', next_run: null, last_run: null, last_result: null }); continue; }
-        const lines = (r.stdout ?? '').split(/\r?\n/).filter(Boolean);
-        if (lines.length < 2) { result.push({ name, status: 'Unknown', next_run: null, last_run: null, last_result: null }); continue; }
-        const headers = lines[0].replace(/^"|"$/g, '').split('","');
-        const values = lines[1].replace(/^"|"$/g, '').split('","');
-        const map: Record<string, string> = {};
-        for (let i = 0; i < headers.length; i++) map[headers[i]] = values[i] ?? '';
-        result.push({
-          name,
-          status: map['Status'] ?? map['Scheduled Task State'] ?? 'Unknown',
-          next_run: map['Next Run Time'] ?? null,
-          last_run: map['Last Run Time'] ?? null,
-          last_result: map['Last Result'] ?? null,
-        });
-      }
-      return { ok: true, data: result };
+      const r = await runPowerShellScript<{ success: boolean; tasks: ScheduledTaskInfo[] }>(
+        'Get-ScheduledTasksStatus.ps1', ['-JsonOutput'], { timeoutMs: 30_000 }
+      );
+      const data = (r.tasks ?? []).map(t => ({
+        name: t.name,
+        status: t.status || 'Unknown',
+        next_run: (t.next_run && t.next_run !== 'N/A') ? t.next_run : null,
+        last_run: (t.last_run && !t.last_run.startsWith('11/30/1999')) ? t.last_run : null,
+        last_result: t.last_result ?? null,
+      }));
+      return { ok: true, data };
     } catch (e: any) {
-      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to query tasks' } };
     }
   });
 
   ipcMain.handle('api:setScheduledTaskEnabled', async (_evt, name: string, enabled: boolean): Promise<IpcResult<{}>> => {
+    if (!MANAGED_TASKS.has(name)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
+    }
     try {
-      const r = spawnSync('schtasks.exe', ['/Change', '/TN', name, enabled ? '/ENABLE' : '/DISABLE'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-      if (r.status !== 0) return { ok: false, error: { code: 'E_SCHTASKS', message: r.stderr || 'schtasks failed' } };
+      await runSchtasks(['/Change', '/TN', name, enabled ? '/ENABLE' : '/DISABLE']);
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_SCHTASKS', message: e?.stderr || e?.message || 'schtasks failed' } };
+    }
+  });
+
+  ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<{}>> => {
+    if (!MANAGED_TASKS.has(name)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
+    }
+    try {
+      await runSchtasks(['/Run', '/TN', name]);
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_SCHTASKS', message: e?.stderr || e?.message || 'schtasks failed' } };
+    }
+  });
+
+  ipcMain.handle('api:listAutopilotRules', async (): Promise<IpcResult<any[]>> => {
+    try {
+      const rows = listAutopilotRules().map(r => ({
+        id: r.id,
+        tier: r.tier,
+        description: r.description,
+        trigger: r.trigger,
+        cadence: r.cadence,
+        action_name: r.action_name,
+        alert: r.alert_json ? JSON.parse(r.alert_json) : null,
+        enabled: r.enabled === 1,
+        suppressed_until: r.suppressed_until,
+      }));
+      return { ok: true, data: rows };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:getAutopilotActivity', async (_evt, daysBack = 30): Promise<IpcResult<any[]>> => {
+    try {
+      return { ok: true, data: getAutopilotActivity(daysBack) };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:suppressAutopilotRule', async (_evt, ruleId: string, hours: number): Promise<IpcResult<{}>> => {
+    try {
+      const safeHours = Math.max(1, Math.min(24 * 30, hours)); // clamp 1h..30d
+      suppressAutopilotRule(ruleId, Date.now() + safeHours * 60 * 60 * 1000);
       return { ok: true, data: {} };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
   });
 
-  ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<{}>> => {
+  // v2.3.0 C2: Autopilot rule editor IPC
+  ipcMain.handle('api:setAutopilotRuleEnabled', async (_evt, ruleId: string, enabled: boolean): Promise<IpcResult<{}>> => {
     try {
-      const r = spawnSync('schtasks.exe', ['/Run', '/TN', name], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-      if (r.status !== 0) return { ok: false, error: { code: 'E_SCHTASKS', message: r.stderr || 'schtasks failed' } };
+      setAutopilotRuleEnabled(ruleId, enabled);
       return { ok: true, data: {} };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:runAutopilotRuleNow', async (_evt, ruleId: string): Promise<IpcResult<{ outcome: string; message?: string }>> => {
+    try {
+      const rule = getAutopilotRule(ruleId);
+      if (!rule) return { ok: false, error: { code: 'E_NOT_FOUND', message: `Rule '${ruleId}' not found` } };
+      if (rule.trigger === 'threshold') {
+        const status = await getStatus();
+        const history = {
+          isSustainedAbove(category: string, metric: string, threshold: number, days: number): boolean {
+            try {
+              const { queryMetricTrend } = require('./dataStore.js');
+              const points = queryMetricTrend(category, metric, days);
+              if (!Array.isArray(points) || points.length < 3) return false;
+              const above = points.filter((p: any) => p.value > threshold).length;
+              return above / points.length >= 0.8;
+            } catch { return false; }
+          },
+        };
+        const decision = evaluateRule(rule, status, history);
+        if (!decision) {
+          insertAutopilotActivity({
+            rule_id: ruleId,
+            tier: rule.tier as 1 | 2 | 3,
+            outcome: 'skipped',
+            message: 'run-now: rule conditions not met',
+          });
+          return { ok: true, data: { outcome: 'skipped', message: 'Rule conditions not currently met.' } };
+        }
+        // minGapMs=0 so user-triggered runs bypass the 6h rate-limit.
+        await dispatchDecision(decision, 0);
+        return { ok: true, data: { outcome: 'dispatched', message: decision.reason } };
+      }
+      // Schedule rules: trigger the underlying action directly
+      if (!rule.action_name) {
+        return { ok: false, error: { code: 'E_INVALID', message: 'Schedule rule has no action_name' } };
+      }
+      const t0 = Date.now();
+      const r = await runAction({ name: rule.action_name as any, triggered_by: 'user' });
+      insertAutopilotActivity({
+        rule_id: ruleId,
+        tier: rule.tier as 1 | 2 | 3,
+        action_name: rule.action_name as any,
+        outcome: r.success ? 'auto_run' : 'error',
+        duration_ms: Date.now() - t0,
+        message: r.success ? 'run-now from UI' : (r.error?.message ?? 'error'),
+      });
+      return { ok: true, data: { outcome: r.success ? 'auto_run' : 'error', message: r.error?.message } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:exportAutopilotRules', async (): Promise<IpcResult<{ rules: any[] }>> => {
+    try {
+      const rules = listAutopilotRules().map(r => ({
+        id: r.id,
+        tier: r.tier,
+        description: r.description,
+        trigger: r.trigger,
+        cadence: r.cadence,
+        action_name: r.action_name,
+        alert_json: r.alert_json,
+        enabled: r.enabled === 1,
+      }));
+      return { ok: true, data: { rules } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:importAutopilotRules', async (_evt, payload: { rules: any[] }): Promise<IpcResult<{ imported: number }>> => {
+    try {
+      const { upsertAutopilotRule } = await import('./dataStore.js');
+      let imported = 0;
+      for (const r of (payload?.rules ?? [])) {
+        if (!r || !r.id || !r.tier || !r.description || !r.trigger) continue;
+        upsertAutopilotRule({
+          id: String(r.id),
+          tier: Number(r.tier) as 1 | 2 | 3,
+          description: String(r.description),
+          trigger: r.trigger === 'schedule' ? 'schedule' : 'threshold',
+          cadence: r.cadence ?? null,
+          action_name: r.action_name ?? null,
+          alert_json: r.alert_json ?? null,
+          enabled: r.enabled !== false,
+        });
+        imported++;
+      }
+      return { ok: true, data: { imported } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:exportClaudeReport', async (): Promise<IpcResult<ClaudeReport>> => {
+    try {
+      const report = buildClaudeReport();
+      return { ok: true, data: report };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_EXPORT_FAILED', message: e?.message ?? 'export failed' } };
     }
   });
 

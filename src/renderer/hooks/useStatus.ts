@@ -10,26 +10,28 @@ export function useStatus() {
   const [error, setError] = useState<IpcError | null>(null);
   const [loading, setLoading] = useState(true);
 
-  usePoll(async () => {
+  const refetch = async (): Promise<SystemStatus | null> => {
     const r = await api.getStatus();
     if (r.ok) {
       setStatus(r.data);
       setError(null);
-    } else {
-      setError(r.error);
+      return r.data;
     }
+    setError(r.error);
+    return null;
+  };
+
+  usePoll(async () => {
+    await refetch();
     setLoading(false);
   }, POLL_INTERVAL_MS);
 
   useEffect(() => {
     // Refresh on window focus too
-    const onFocus = async () => {
-      const r = await api.getStatus();
-      if (r.ok) setStatus(r.data);
-    };
+    const onFocus = () => { void refetch(); };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
-  return { status, error, loading };
+  return { status, error, loading, refetch };
 }

@@ -9,6 +9,7 @@ import { Tools } from './pages/Tools.js';
 import { Updates } from './pages/Updates.js';
 import { MemTest86 } from './pages/MemTest86.js';
 import { Claude } from './pages/Claude.js';
+import { Autopilot } from './pages/Autopilot.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ClaudeApprovalListener } from './components/layout/ClaudeApprovalListener.js';
 import { ConfirmProvider } from './lib/confirmContext.js';
@@ -32,6 +33,7 @@ export function App() {
               <Route path="/updates" element={<Updates />} />
               <Route path="/memtest86" element={<MemTest86 />} />
               <Route path="/claude" element={<Claude />} />
+              <Route path="/autopilot" element={<Autopilot />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>

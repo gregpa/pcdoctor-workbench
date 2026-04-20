@@ -17,6 +17,12 @@ export interface ActionDefinition {
   icon: string;                   // emoji for tile
   tooltip: string;                // hover explanation
   params_schema?: Record<string, { type: 'string' | 'number'; required: boolean; description: string }>;
+  /**
+   * When true, successful non-no-op results are shown in an ActionResultModal with
+   * a readable breakdown of the script's JSON output (minidump analysis, SMART,
+   * HWiNFO delta, etc.) instead of only a success toast.
+   */
+  informational?: boolean;
 }
 
 export const ACTIONS: Record<ActionName, ActionDefinition> = {
@@ -365,7 +371,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'analyze_minidump', label: 'Analyze Latest Minidump',
     ps_script: 'actions/Analyze-Minidump.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
-    category: 'repair', icon: '💥',
+    category: 'repair', icon: '💥', informational: true,
     tooltip: 'Runs WinDbg cdb !analyze -v on the most recent BSOD minidump. Requires Windows Debugging Tools installed.',
     params_schema: { dump_path: { type: 'string', required: false, description: 'Optional explicit dump path (default: latest C:\\Windows\\Minidump)' } },
   },
@@ -393,6 +399,128 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'repair', icon: '🧪',
     tooltip: 'Parses an OCCT CSV log into per-sensor min/avg/max + error counts.',
     params_schema: { csv_path: { type: 'string', required: true, description: 'Full path to CSV file' } },
+  },
+
+  // ============== v2.1.4 - DEEP CLEAN ==============
+  clear_browser_caches: {
+    name: 'clear_browser_caches', label: 'Clear Browser Caches',
+    ps_script: 'actions/Clear-BrowserCaches.ps1',
+    confirm_level: 'risky', rollback_tier: 'A',
+    restore_point_description: 'PCDoctor: Clear Browser Caches',
+    estimated_duration_s: 20,
+    category: 'cleanup', icon: '🌐',
+    tooltip: 'Clears Chrome, Edge, Brave, and Firefox disk caches. Skips any browser that is currently running (no force-close). Cookies are preserved unless you override.',
+  },
+  shrink_component_store: {
+    name: 'shrink_component_store', label: 'Shrink Component Store',
+    ps_script: 'actions/Shrink-ComponentStore.ps1',
+    confirm_level: 'destructive', rollback_tier: 'C',
+    estimated_duration_s: 1200,
+    category: 'disk', icon: '📦',
+    tooltip: 'Runs DISM /StartComponentCleanup /ResetBase against WinSxS. Reclaims 5-15 GB but becomes irreversible after completion (you cannot uninstall superseded updates). Admin required.',
+  },
+  remove_feature_update_leftovers: {
+    name: 'remove_feature_update_leftovers', label: 'Remove Feature-Update Leftovers',
+    ps_script: 'actions/Remove-FeatureUpdateLeftovers.ps1',
+    confirm_level: 'destructive', rollback_tier: 'B',
+    snapshot_paths: [],  // handled via backup-by-takeown inside script where possible; reversible via Windows itself.
+    estimated_duration_s: 90,
+    category: 'disk', icon: '🧹',
+    tooltip: 'Deletes C:\\$Windows.~BT, C:\\$Windows.~WS, and C:\\Windows.old if older than 10 days. Typically reclaims 10-30 GB. Admin required.',
+  },
+  empty_recycle_bins: {
+    name: 'empty_recycle_bins', label: 'Empty All Recycle Bins',
+    ps_script: 'actions/Empty-RecycleBins.ps1',
+    confirm_level: 'destructive', rollback_tier: 'C',
+    estimated_duration_s: 10,
+    category: 'disk', icon: '🗑',
+    tooltip: 'Empties the Recycle Bin on every fixed drive. Reports freed bytes per drive. Irreversible.',
+  },
+
+  // ============== v2.1.4 - HARDEN ==============
+  enable_pua_protection: {
+    name: 'enable_pua_protection', label: 'Enable PUA Protection',
+    ps_script: 'actions/Enable-PUAProtection.ps1',
+    confirm_level: 'risky', rollback_tier: 'C',
+    estimated_duration_s: 5,
+    category: 'hardening', icon: '🛡',
+    tooltip: 'Turns on Defender Potentially Unwanted Application protection (blocks bundled crapware, shady installers). Idempotent. Admin required.',
+  },
+  enable_controlled_folder_access: {
+    name: 'enable_controlled_folder_access', label: 'Enable Controlled Folder Access',
+    ps_script: 'actions/Enable-ControlledFolderAccess.ps1',
+    confirm_level: 'risky', rollback_tier: 'C',
+    estimated_duration_s: 5,
+    category: 'hardening', icon: '🔐',
+    tooltip: 'Enables Defender anti-ransomware protection on user folders. Watch Windows Security for blocked-app notifications after enabling and allow-list legitimate apps. Admin required.',
+  },
+  update_hosts_stevenblack: {
+    name: 'update_hosts_stevenblack', label: 'Update Hosts (StevenBlack)',
+    ps_script: 'actions/Update-HostsFromStevenBlack.ps1',
+    confirm_level: 'destructive', rollback_tier: 'B',
+    snapshot_paths: ['C:\\Windows\\System32\\drivers\\etc\\hosts'],
+    estimated_duration_s: 45,
+    category: 'hardening', icon: '🌍',
+    tooltip: 'Downloads the StevenBlack unified ads+tracker+malware hosts list and merges it into C:\\Windows\\System32\\drivers\\etc\\hosts. User entries are preserved between sentinel markers. Previous file backed up to PCDoctor\\rollback. Admin required.',
+  },
+
+  // ============== v2.2.0 - AUTOPILOT TOOL-RUNNERS ==============
+  run_smart_check: {
+    name: 'run_smart_check', label: 'SMART Health Check',
+    ps_script: 'actions/Run-SmartCheck.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 30,
+    category: 'diagnostic', icon: '💾', informational: true,
+    tooltip: 'Reads SMART health + StorageReliabilityCounter for every physical disk. Admin required; read-only.',
+  },
+  run_malwarebytes_cli: {
+    name: 'run_malwarebytes_cli', label: 'Malwarebytes CLI Scan',
+    ps_script: 'actions/Run-MalwarebytesCli.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 1800,
+    category: 'security', icon: '🧪', informational: true,
+    tooltip: 'Runs a Malwarebytes quick scan via CLI and parses the log file. Read-only (detection-only).',
+  },
+  run_adwcleaner_scan: {
+    name: 'run_adwcleaner_scan', label: 'AdwCleaner Scan (report-only)',
+    ps_script: 'actions/Run-AdwCleanerScan.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 600,
+    category: 'security', icon: '🧽', informational: true,
+    tooltip: 'Runs AdwCleaner in /scan mode and writes a report. Never auto-removes; review required.',
+  },
+  run_safety_scanner: {
+    name: 'run_safety_scanner', label: 'Microsoft Safety Scanner',
+    ps_script: 'actions/Run-SafetyScanner.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 3600,
+    category: 'security', icon: '🩺', informational: true,
+    tooltip: 'Runs msert.exe /Q /N (quiet, no auto-clean) and returns the exit code + log path.',
+  },
+  run_hwinfo_log: {
+    name: 'run_hwinfo_log', label: 'HWiNFO Sensor Log',
+    ps_script: 'actions/Run-HwinfoLog.ps1',
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 7200,
+    category: 'diagnostic', icon: '🌡',
+    tooltip: 'Starts HWiNFO64 sensor logging for -Duration seconds, then closes it and saves the CSV.',
+    params_schema: { duration: { type: 'number', required: false, description: 'Seconds (default 7200 = 2h)' } },
+  },
+  parse_hwinfo_delta: {
+    name: 'parse_hwinfo_delta', label: 'Compare HWiNFO Sensor Runs',
+    ps_script: 'actions/Parse-HwinfoDelta.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 30,
+    category: 'diagnostic', icon: '📊', informational: true,
+    tooltip: 'Reads the 2 most recent HWiNFO CSVs and reports per-component ΔT. Flags regressions >5°C.',
+  },
+
+  // ============== v2.3.0 — Batch startup disable (C1) ==============
+  disable_startup_items_batch: {
+    name: 'disable_startup_items_batch', label: 'Disable Startup Items (batch)',
+    ps_script: 'actions/Disable-StartupItemsBatch.ps1',
+    confirm_level: 'destructive', rollback_tier: 'B',
+    snapshot_paths: [],  // Registry key export handled inside the script for HKCU StartupApproved
+    estimated_duration_s: 10,
+    category: 'perf', icon: '🚫',
+    tooltip: 'Disable multiple startup entries in one shot by marking them disabled in the StartupApproved registry key. Reversible via the rollback snapshot.',
+    params_schema: {
+      items_json: { type: 'string', required: true, description: 'JSON array of {kind,name} entries' },
+    },
   },
 
   // ============== INTERNAL ==============

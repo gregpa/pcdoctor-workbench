@@ -81,9 +81,18 @@ interface CallbackQuery {
   data?: string;
 }
 
+export interface TgMessage {
+  message_id: number;
+  from?: { id: number; username?: string };
+  chat: { id: number };
+  text?: string;
+  date?: number;
+}
+
 interface TgUpdate {
   update_id: number;
   callback_query?: CallbackQuery;
+  message?: TgMessage;
 }
 
 /** Makes a compact callback_data token - Telegram limits it to 64 bytes. */
@@ -101,9 +110,14 @@ export function makeCallbackData(action: string, ...parts: string[]): string {
 let pollingInterval: NodeJS.Timeout | null = null;
 let lastUpdateId = 0;
 let handlerFn: ((q: CallbackQuery) => Promise<void>) | null = null;
+let messageHandlerFn: ((m: TgMessage) => Promise<void>) | null = null;
 
-export function startTelegramPolling(handler: (q: CallbackQuery) => Promise<void>): void {
+export function startTelegramPolling(
+  handler: (q: CallbackQuery) => Promise<void>,
+  messageHandler?: (m: TgMessage) => Promise<void>,
+): void {
   handlerFn = handler;
+  messageHandlerFn = messageHandler ?? null;
   if (pollingInterval) return;
   pollingInterval = setInterval(pollOnce, 30_000);
   // Fire once immediately in 2s so startup doesn't wait 30s
@@ -119,16 +133,20 @@ async function pollOnce(): Promise<void> {
   const chatIdRaw = getSetting('telegram_chat_id');
   const chatId = chatIdRaw?.trim() ?? '';
   if (!token || !chatId || getSetting('telegram_enabled') !== '1') return;
+  const allowedUpdates = messageHandlerFn ? ['callback_query', 'message'] : ['callback_query'];
   const r = await tgRequest<TgUpdate[]>(token, 'getUpdates', {
     offset: lastUpdateId + 1,
     timeout: 0,
-    allowed_updates: ['callback_query'],
+    allowed_updates: allowedUpdates,
   });
   if (!r.ok || !r.result) return;
   for (const upd of r.result) {
     if (upd.update_id > lastUpdateId) lastUpdateId = upd.update_id;
     if (upd.callback_query && upd.callback_query.from.id.toString() === chatId && handlerFn) {
       try { await handlerFn(upd.callback_query); } catch {}
+    }
+    if (upd.message && upd.message.from?.id.toString() === chatId && messageHandlerFn) {
+      try { await messageHandlerFn(upd.message); } catch {}
     }
   }
 }

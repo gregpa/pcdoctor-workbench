@@ -124,6 +124,35 @@ CREATE TABLE IF NOT EXISTS tool_results (
   summary TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tool_results_ts ON tool_results(ts);
+
+-- ============== AUTOPILOT (v2.2.0) ==============
+CREATE TABLE IF NOT EXISTS autopilot_rules (
+  id TEXT PRIMARY KEY,              -- stable rule id (e.g. 'empty_recycle_bins_weekly')
+  tier INTEGER NOT NULL,            -- 1 | 2 | 3
+  description TEXT NOT NULL,
+  trigger TEXT NOT NULL,            -- 'schedule' | 'threshold'
+  cadence TEXT,                     -- 'weekly:sun:03:00' or NULL for threshold
+  action_name TEXT,                 -- ActionName for tier 1/2
+  alert_json TEXT,                  -- JSON for tier 3 alert metadata
+  enabled INTEGER NOT NULL DEFAULT 1,
+  suppressed_until INTEGER,         -- when non-null, rule sleeps until this ts
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS autopilot_activity (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  rule_id TEXT NOT NULL,
+  tier INTEGER NOT NULL,
+  action_name TEXT,
+  outcome TEXT NOT NULL,            -- 'auto_run' | 'alerted' | 'suppressed' | 'skipped' | 'error'
+  bytes_freed INTEGER,
+  duration_ms INTEGER,
+  message TEXT,
+  details_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_autopilot_activity_ts ON autopilot_activity(ts);
+CREATE INDEX IF NOT EXISTS idx_autopilot_activity_rule ON autopilot_activity(rule_id, ts);
 `;
 
 let db: Database.Database | null = null;
@@ -509,4 +538,144 @@ export function listToolResults(toolId?: string, limit = 20): ToolResultRow[] {
     : `SELECT * FROM tool_results ORDER BY ts DESC LIMIT ?`;
   const params = toolId ? [toolId, limit] : [limit];
   return openDb().prepare(sql).all(...params) as ToolResultRow[];
+}
+
+// ============== AUTOPILOT RULES + ACTIVITY (v2.2.0) ==============
+
+export interface AutopilotRuleRow {
+  id: string;
+  tier: 1 | 2 | 3;
+  description: string;
+  trigger: 'schedule' | 'threshold';
+  cadence: string | null;
+  action_name: string | null;
+  alert_json: string | null;
+  enabled: number;
+  suppressed_until: number | null;
+  updated_at: number;
+}
+
+export function upsertAutopilotRule(rule: {
+  id: string;
+  tier: 1 | 2 | 3;
+  description: string;
+  trigger: 'schedule' | 'threshold';
+  cadence?: string | null;
+  action_name?: string | null;
+  alert_json?: string | null;
+  enabled?: boolean;
+}): void {
+  openDb().prepare(
+    `INSERT INTO autopilot_rules (id, tier, description, trigger, cadence, action_name, alert_json, enabled, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       tier = excluded.tier,
+       description = excluded.description,
+       trigger = excluded.trigger,
+       cadence = excluded.cadence,
+       action_name = excluded.action_name,
+       alert_json = excluded.alert_json,
+       updated_at = excluded.updated_at`
+  ).run(
+    rule.id,
+    rule.tier,
+    rule.description,
+    rule.trigger,
+    rule.cadence ?? null,
+    rule.action_name ?? null,
+    rule.alert_json ?? null,
+    rule.enabled === false ? 0 : 1,
+    Date.now(),
+  );
+}
+
+export function listAutopilotRules(): AutopilotRuleRow[] {
+  return openDb().prepare(
+    `SELECT * FROM autopilot_rules ORDER BY tier ASC, id ASC`
+  ).all() as AutopilotRuleRow[];
+}
+
+export function suppressAutopilotRule(ruleId: string, untilTs: number): void {
+  openDb().prepare(
+    `UPDATE autopilot_rules SET suppressed_until = ?, updated_at = ? WHERE id = ?`
+  ).run(untilTs, Date.now(), ruleId);
+}
+
+/**
+ * v2.3.0 C2: persist an enabled/disabled toggle from the Autopilot Rules tab.
+ * autopilotEngine.evaluateAutopilot() already filters by enabled=1.
+ */
+export function setAutopilotRuleEnabled(ruleId: string, enabled: boolean): void {
+  openDb().prepare(
+    `UPDATE autopilot_rules SET enabled = ?, updated_at = ? WHERE id = ?`
+  ).run(enabled ? 1 : 0, Date.now(), ruleId);
+}
+
+export function getAutopilotRule(ruleId: string): AutopilotRuleRow | null {
+  const row = openDb().prepare(`SELECT * FROM autopilot_rules WHERE id = ?`).get(ruleId) as AutopilotRuleRow | undefined;
+  return row ?? null;
+}
+
+export interface AutopilotActivityRow {
+  id: number;
+  ts: number;
+  rule_id: string;
+  tier: number;
+  action_name: string | null;
+  outcome: string;
+  bytes_freed: number | null;
+  duration_ms: number | null;
+  message: string | null;
+  details_json: string | null;
+}
+
+export function insertAutopilotActivity(row: {
+  rule_id: string;
+  tier: 1 | 2 | 3;
+  action_name?: string | null;
+  outcome: 'auto_run' | 'alerted' | 'suppressed' | 'skipped' | 'error';
+  bytes_freed?: number;
+  duration_ms?: number;
+  message?: string;
+  details?: unknown;
+}): number {
+  const info = openDb().prepare(
+    `INSERT INTO autopilot_activity (ts, rule_id, tier, action_name, outcome, bytes_freed, duration_ms, message, details_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    Date.now(),
+    row.rule_id,
+    row.tier,
+    row.action_name ?? null,
+    row.outcome,
+    row.bytes_freed ?? null,
+    row.duration_ms ?? null,
+    row.message ?? null,
+    row.details ? JSON.stringify(row.details) : null,
+  );
+  return Number(info.lastInsertRowid);
+}
+
+export function listAutopilotActivity(daysBack = 30, limit = 500): AutopilotActivityRow[] {
+  const since = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+  return openDb().prepare(
+    `SELECT * FROM autopilot_activity WHERE ts >= ? ORDER BY ts DESC LIMIT ?`
+  ).all(since, limit) as AutopilotActivityRow[];
+}
+
+/** Most recent auto_run or alerted entry for a rule. Used to rate-limit scheduled evaluations. */
+export function getLastAutopilotActivity(ruleId: string): AutopilotActivityRow | null {
+  const row = openDb().prepare(
+    `SELECT * FROM autopilot_activity WHERE rule_id = ? ORDER BY ts DESC LIMIT 1`
+  ).get(ruleId) as AutopilotActivityRow | undefined;
+  return row ?? null;
+}
+
+/** Count how many times a rule's action failed in the last N days. */
+export function countAutopilotFailures(ruleId: string, daysBack = 7): number {
+  const since = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+  const row = openDb().prepare(
+    `SELECT COUNT(*) as c FROM autopilot_activity WHERE rule_id = ? AND outcome = 'error' AND ts >= ?`
+  ).get(ruleId, since) as { c: number };
+  return row?.c ?? 0;
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { api } from '@renderer/lib/ipc.js';
 import { useStatus } from '@renderer/hooks/useStatus.js';
 import { useAction } from '@renderer/hooks/useAction.js';
 import { useTrend } from '@renderer/hooks/useTrends.js';
@@ -17,7 +18,13 @@ import { AuthEventsWidget } from '@renderer/components/dashboard/AuthEventsWidge
 import { BsodPanel } from '@renderer/components/dashboard/BsodPanel.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
 import { CleanMyPC } from '@renderer/components/dashboard/CleanMyPC.js';
+import { TodaysActionsWidget } from '@renderer/components/dashboard/TodaysActionsWidget.js';
+import { ActionResultModal } from '@renderer/components/dashboard/ActionResultModal.js';
+import { StartupPickerModal } from '@renderer/components/dashboard/StartupPickerModal.js';
+import { RamPressurePanel } from '@renderer/components/dashboard/RamPressurePanel.js';
 import { ACTIONS } from '@shared/actions.js';
+import type { ActionDefinition } from '@shared/actions.js';
+import { recommendAction, getTopRecommendations } from '@shared/recommendations.js';
 import type { ActionName, ServiceHealth } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
@@ -28,6 +35,20 @@ const QUICK_ACTIONS: ActionName[] = [
   'compact_docker', 'trim_ssd',
   'apply_wsl_cap', 'restart_explorer',
   'flush_arp_cache', 'kill_process',
+];
+
+const DEEP_CLEAN_ACTIONS: ActionName[] = [
+  'clear_browser_caches',
+  'shrink_component_store',
+  'remove_feature_update_leftovers',
+  'empty_recycle_bins',
+];
+
+const HARDEN_ACTIONS: ActionName[] = [
+  'enable_pua_protection',
+  'enable_controlled_folder_access',
+  'update_hosts_stevenblack',
+  'defender_full_scan',
 ];
 
 function SecRow({ label, tone, right }: { label: string; tone?: 'good' | 'warn' | 'crit' | 'info'; right: string }) {
@@ -45,15 +66,55 @@ function SecRow({ label, tone, right }: { label: string; tone?: 'good' | 'warn' 
 }
 
 export function Dashboard() {
-  const { status, error, loading } = useStatus();
-  const { run, running } = useAction();
+  const { status, error, loading, refetch } = useStatus();
+  const { run, running } = useAction({
+    autoRefresh: true,
+    onRefresh: () => { void refetch(); },
+  });
   const { trend: cpuTrend } = useTrend('cpu', 'load_pct', 7);
   const { trend: eventsTrend } = useTrend('events', 'system_count', 7);
   const { data: security } = useSecurityPosture();
   const { review: weeklyReview } = useWeeklyReview();
   const navigate = useNavigate();
   const [toast, setToast] = useState<string | null>(null);
+  const [toastVariant, setToastVariant] = useState<'default' | 'noop' | 'error' | 'admin'>('default');
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
+  const [showStartupPicker, setShowStartupPicker] = useState(false);
+
+  async function handleRunScanNow() {
+    if (scanning) return;
+    setScanning(true);
+    const beforeTs = status?.generated_at ?? 0;
+    const r = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
+    if (!r.ok) {
+      setToast(`Scan failed to start: ${r.error?.message ?? 'unknown'}`);
+      setTimeout(() => setToast(null), 5000);
+      setScanning(false);
+      return;
+    }
+    setToast('Scan running in background - refreshing when done...');
+    // Poll every 3s up to 5 min waiting for latest.json timestamp to advance
+    const deadline = Date.now() + 5 * 60 * 1000;
+    const tick = async () => {
+      if (Date.now() > deadline) {
+        setToast('Scan did not finish within 5 min - will refresh when it does');
+        setScanning(false);
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      const fresh = await refetch();
+      if (fresh && fresh.generated_at > beforeTs) {
+        setScanning(false);
+        setToast(`Scan complete · ${fresh.findings.length} findings`);
+        setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      setTimeout(tick, 3000);
+    };
+    setTimeout(tick, 3000);
+  }
 
   if (loading) return (
     <div className="p-6 flex items-center gap-3 text-text-secondary">
@@ -72,8 +133,31 @@ export function Dashboard() {
   }
 
   async function handleAction(name: ActionName, params?: Record<string, string>, dryRun?: boolean) {
-    await run({ name, params, dry_run: dryRun });
-    setToast(`${ACTIONS[name].label}${dryRun ? ' (dry run)' : ''} completed`);
+    const err = await run({ name, params, dry_run: dryRun });
+    if (err) {
+      if (err.code === 'E_NEEDS_ADMIN') {
+        setToastVariant('admin');
+        setToast(`${ACTIONS[name].label} requires Admin — relaunch Workbench as Administrator.`);
+      } else {
+        setToastVariant('error');
+        setToast(`${ACTIONS[name].label} failed: ${err.message}`);
+      }
+    } else {
+      // Check if last result was a no-op
+      const result = (window as any).__lastActionResult as { no_op?: boolean; message?: string } | undefined;
+      if (result?.no_op) {
+        setToastVariant('noop');
+        setToast(`Already in desired state — no change needed${result.message ? `: ${result.message}` : ''}`);
+      } else {
+        setToastVariant('default');
+        setToast(`${ACTIONS[name].label}${dryRun ? ' (dry run)' : ''} completed`);
+        // v2.3.0 B1: open the result modal for informational actions so the user
+        // sees the rich breakdown instead of just a success toast.
+        if (ACTIONS[name].informational && !dryRun && result && !result.no_op) {
+          setResultModal({ action: ACTIONS[name], result: result as Record<string, unknown> });
+        }
+      }
+    }
     setTimeout(() => setToast(null), 4000);
   }
 
@@ -86,8 +170,8 @@ export function Dashboard() {
         severity={status.overall_severity}
         label={status.overall_label}
         subtitle={subtitle}
-        onScan={() => {}}
-        scanning={false}
+        onScan={handleRunScanNow}
+        scanning={scanning}
       />
 
       {weeklyReview?.has_pending_flag && (
@@ -111,23 +195,141 @@ export function Dashboard() {
         {status.kpis.slice(0, 6).map((k) => (<KpiCard key={k.label} kpi={k} />))}
       </div>
 
-      {/* Gauges + 7-day trend */}
-      <div className="grid grid-cols-4 gap-2.5 mb-3">
-        {status.gauges.slice(0, 3).map((g) => (
-          <div key={g.label} className="bg-surface-800 border border-surface-600 rounded-lg p-3">
-            <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
+      {/* Gauges + 7-day trend
+         v2.3.0 C3: when RAM > 75% we swap the simple RAM gauge for the deeper
+         RamPressurePanel. Under 75%, keep the existing compact gauge layout. */}
+      {(() => {
+        const ramKpi = status.kpis.find(k => k.label?.toLowerCase().includes('ram') && k.unit === '%');
+        const ramPct = typeof ramKpi?.value === 'number' ? ramKpi.value : 0;
+        const showPanel = ramPct > 75;
+        const gaugesToShow = showPanel
+          ? status.gauges.filter(g => !g.label.toLowerCase().includes('ram')).slice(0, 2)
+          : status.gauges.slice(0, 3);
+        return (
+          <div className="grid grid-cols-4 gap-2.5 mb-3">
+            {gaugesToShow.map((g) => (
+              <div key={g.label} className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+                <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
+              </div>
+            ))}
+            {showPanel && (
+              <RamPressurePanel status={status} onKillProcess={(name) => handleAction('kill_process', { target: name })} />
+            )}
+            {cpuTrend ? (
+              <TrendLine title="CPU Load - 7 Day Trend" trend={cpuTrend} severity="info" yDomain={[0, 100]} />
+            ) : (
+              <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering trend data…</div>
+            )}
           </div>
-        ))}
-        {cpuTrend ? (
-          <TrendLine title="CPU Load - 7 Day Trend" trend={cpuTrend} severity="info" yDomain={[0, 100]} />
-        ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering trend data…</div>
-        )}
-      </div>
+        );
+      })()}
+
+      <TodaysActionsWidget status={status} />
 
       <div className="mb-3">
         <CleanMyPC status={status} />
       </div>
+
+      {/* Deep Clean & Harden - v2.1.4 */}
+      {(() => {
+        const deepCleanTop = getTopRecommendations(DEEP_CLEAN_ACTIONS, status, security);
+        const hardenTop = getTopRecommendations(HARDEN_ACTIONS, status, security);
+        const hardenOffCount = security?.defender
+          ? [
+              !security.defender.puaprotection || security.defender.puaprotection === 'Disabled' || security.defender.puaprotection === '0',
+              !security.defender.controlled_folder_access || security.defender.controlled_folder_access === 'Disabled' || security.defender.controlled_folder_access === '0',
+              !security.defender.network_protection || security.defender.network_protection === 'Disabled' || security.defender.network_protection === '0',
+            ].filter(Boolean).length
+          : 0;
+
+        return (
+          <div className="grid grid-cols-2 gap-2.5 mb-3">
+            {/* Deep Clean panel */}
+            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+              <div className="mb-2">
+                <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
+                  <span>🧽</span><span>Deep Clean</span>
+                </div>
+                <div className="text-[9px] text-text-secondary mt-0.5">
+                  {deepCleanTop.length > 0
+                    ? `${deepCleanTop.length} recommended now`
+                    : 'All clean — nothing urgent'}
+                </div>
+              </div>
+              {/* Suggested now strip */}
+              {deepCleanTop.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {deepCleanTop.map(({ action: name, rec }) => (
+                    <button
+                      key={name}
+                      onClick={() => handleAction(name)}
+                      disabled={running !== null}
+                      className="w-full flex items-center gap-1.5 px-2 py-1 bg-status-good/10 border border-status-good/30 rounded text-[10px] text-status-good hover:bg-status-good/20 transition disabled:opacity-50"
+                    >
+                      <span>💡</span>
+                      <span className="font-semibold">{ACTIONS[name].label}</span>
+                      <span className="text-text-secondary truncate">— {rec.reason}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-1.5">
+                {DEEP_CLEAN_ACTIONS.map((name) => (
+                  <ActionButton
+                    key={name}
+                    action={ACTIONS[name]}
+                    onRun={(params, dryRun) => handleAction(name, params, dryRun)}
+                    disabled={running !== null}
+                    recommendation={recommendAction(name, status, security)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Harden panel */}
+            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+              <div className="mb-2">
+                <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
+                  <span>🛡</span><span>Harden</span>
+                </div>
+                <div className="text-[9px] text-text-secondary mt-0.5">
+                  {hardenOffCount > 0
+                    ? `${hardenOffCount} protection${hardenOffCount === 1 ? '' : 's'} off`
+                    : 'All protections enabled'}
+                </div>
+              </div>
+              {/* Suggested now strip */}
+              {hardenTop.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {hardenTop.map(({ action: name, rec }) => (
+                    <button
+                      key={name}
+                      onClick={() => handleAction(name)}
+                      disabled={running !== null}
+                      className="w-full flex items-center gap-1.5 px-2 py-1 bg-status-good/10 border border-status-good/30 rounded text-[10px] text-status-good hover:bg-status-good/20 transition disabled:opacity-50"
+                    >
+                      <span>💡</span>
+                      <span className="font-semibold">{ACTIONS[name].label}</span>
+                      <span className="text-text-secondary truncate">— {rec.reason}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-1.5">
+                {HARDEN_ACTIONS.map((name) => (
+                  <ActionButton
+                    key={name}
+                    action={ACTIONS[name]}
+                    onRun={(params, dryRun) => handleAction(name, params, dryRun)}
+                    disabled={running !== null}
+                    recommendation={recommendAction(name, status, security)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Services + Actions + Alerts row */}
       <div className="grid grid-cols-3 gap-2.5 mb-3">
@@ -146,18 +348,32 @@ export function Dashboard() {
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
             {QUICK_ACTIONS.map((name) => (
-              <ActionButton key={name} action={ACTIONS[name]} onRun={(params, dryRun) => handleAction(name, params, dryRun)} disabled={running !== null} />
+              <ActionButton key={name} action={ACTIONS[name]} onRun={(params, dryRun) => handleAction(name, params, dryRun)} disabled={running !== null} recommendation={recommendAction(name, status, security)} />
             ))}
           </div>
         </div>
 
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+        <div id="active-alerts" className="bg-surface-800 border border-surface-600 rounded-lg p-3 transition-all duration-500 scroll-mt-4">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">
             Active Alerts {status.findings.length > 0 ? `(${status.findings.length})` : ''}
           </div>
           <div className="space-y-2">
             {status.findings.length === 0 && <div className="text-xs text-text-secondary">No active findings. System healthy.</div>}
-            {status.findings.map((f, i) => (<AlertCard key={i} finding={f} onApply={handleAction} />))}
+            {status.findings.map((f, i) => (
+              <AlertCard
+                key={i}
+                finding={f}
+                onApply={async (name, params) => {
+                  // v2.3.0 C1: Startup findings without a specific entry open the
+                  // multi-select picker instead of firing a single-item action.
+                  if (name === 'disable_startup_item' && (!params || !params.item_name)) {
+                    setShowStartupPicker(true);
+                    return;
+                  }
+                  await handleAction(name, params);
+                }}
+              />
+            ))}
           </div>
         </div>
       </div>
@@ -233,8 +449,45 @@ export function Dashboard() {
         </div>
       )}
 
+      {resultModal && (
+        <ActionResultModal
+          action={resultModal.action}
+          result={resultModal.result}
+          onClose={() => setResultModal(null)}
+        />
+      )}
+
+      {showStartupPicker && (
+        <StartupPickerModal
+          items={status.metrics?.startup_items ?? []}
+          onClose={() => setShowStartupPicker(false)}
+          onDisable={async (picks) => {
+            setShowStartupPicker(false);
+            await handleAction('disable_startup_items_batch', { items_json: JSON.stringify(picks) });
+          }}
+        />
+      )}
+
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className={`fixed bottom-4 right-4 rounded-lg px-4 py-3 text-sm shadow-xl flex items-center gap-3 ${
+          toastVariant === 'noop' ? 'bg-status-info/10 border border-status-info/40 text-status-info' :
+          toastVariant === 'error' ? 'bg-status-crit/10 border border-status-crit/40 text-status-crit' :
+          toastVariant === 'admin' ? 'bg-status-warn/10 border border-status-warn/40 text-status-warn' :
+          'bg-surface-700 border border-surface-600'
+        }`}>
+          <span>{toast}</span>
+          {toastVariant === 'admin' && (
+            <button
+              onClick={async () => {
+                setToast(null);
+                await (window as any).api.relaunchAsAdmin();
+              }}
+              className="ml-2 px-2 py-1 rounded text-[11px] font-semibold bg-status-warn text-black shrink-0"
+            >
+              Relaunch as Admin
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

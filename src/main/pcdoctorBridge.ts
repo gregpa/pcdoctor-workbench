@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { LATEST_JSON_PATH } from './constants.js';
 import { recordStatusSnapshot, getMetricWeekDelta } from './dataStore.js';
 import { emitNewFindingNotifications } from './notifier.js';
-import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
+import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName, ServiceHealth, SmartEntry, SystemMetrics, WslConfigMetric, MemoryPressureMetric, StartupItemMetric } from '@shared/types.js';
 
 let cachedSmart: SmartEntry[] = [];
 export function setCachedSmart(entries: SmartEntry[]) {
@@ -223,7 +223,11 @@ function mapToSystemStatus(r: any): SystemStatus {
     const start = typeof val?.start === 'string' ? val.start : undefined;
     // Severity: running = good, Manual-start + Stopped = good (normal), other Stopped = warn, error = crit
     let sev: 'good' | 'warn' | 'crit';
-    const knownManualStopped = new Set(['BITS', 'wuauserv', 'cryptsvc', 'EFS', 'WSearch']);
+    // Services that are expected to be stopped/manual and should not show as warn
+    // DockerDesktopGUI: user-mode process, may not be running yet at login
+    // com.docker.service: Docker Desktop backend; may be Manual after install, OK when not in use
+    // WSLService/LxssManager: managed by Docker/WSL2 on demand
+    const knownManualStopped = new Set(['BITS', 'wuauserv', 'cryptsvc', 'EFS', 'WSearch', 'DockerDesktopGUI', 'com.docker.service', 'WSLService', 'LxssManager']);
     if (/run/i.test(statusStr)) sev = 'good';
     else if (/error/i.test(statusStr)) sev = 'crit';
     else if (statusStr === 'Stopped' && (start === 'Manual' || start === 'Disabled' || knownManualStopped.has(key))) sev = 'good';
@@ -251,6 +255,48 @@ function mapToSystemStatus(r: any): SystemStatus {
     status_severity: s.health === 'PASSED' ? 'good' : s.health === 'FAILED' ? 'crit' : 'warn',
   })) : cachedSmart;
 
+  // v2.3.0 B4/C1/C3: pass through the rich scanner metrics that power the new
+  // WSL recommendation logic, the startup picker, and the RAM pressure panel.
+  const rawM = r.metrics ?? {};
+  const systemMetrics: SystemMetrics = {};
+  if (rawM.wsl_config && typeof rawM.wsl_config === 'object') {
+    systemMetrics.wsl_config = {
+      exists: !!rawM.wsl_config.exists,
+      has_memory_cap: !!rawM.wsl_config.has_memory_cap,
+      memory_gb: rawM.wsl_config.memory_gb ?? null,
+      vmmem_utilization_pct: rawM.wsl_config.vmmem_utilization_pct ?? null,
+    } as WslConfigMetric;
+  }
+  if (rawM.memory_pressure && typeof rawM.memory_pressure === 'object') {
+    systemMetrics.memory_pressure = {
+      committed_bytes: rawM.memory_pressure.committed_bytes ?? null,
+      commit_limit: rawM.memory_pressure.commit_limit ?? null,
+      pages_per_sec: rawM.memory_pressure.pages_per_sec ?? null,
+      page_faults_per_sec: rawM.memory_pressure.page_faults_per_sec ?? null,
+      compression_mb: rawM.memory_pressure.compression_mb ?? null,
+      top_processes: Array.isArray(rawM.memory_pressure.top_processes)
+        ? rawM.memory_pressure.top_processes.map((p: any) => ({
+            name: String(p.name ?? ''),
+            pid: Number(p.pid ?? 0),
+            ws_bytes: Number(p.ws_bytes ?? 0),
+            kind: (p.kind === 'system' || p.kind === 'service') ? p.kind : 'user',
+          }))
+        : [],
+    } as MemoryPressureMetric;
+  }
+  if (Array.isArray(rawM.startup_items)) {
+    systemMetrics.startup_items = rawM.startup_items.map((it: any) => ({
+      name: String(it.name ?? ''),
+      location: String(it.location ?? ''),
+      kind: it.kind === 'HKLM_Run' || it.kind === 'StartupFolder' ? it.kind : 'Run',
+      is_essential: !!it.is_essential,
+      disabled_in_registry: !!it.disabled_in_registry,
+      publisher: typeof it.publisher === 'string' ? it.publisher : undefined,
+      size_bytes: typeof it.size_bytes === 'number' ? it.size_bytes : undefined,
+      path: typeof it.path === 'string' ? it.path : undefined,
+    })) as StartupItemMetric[];
+  }
+
   return {
     generated_at: Number.isFinite(generated_at) ? generated_at : 0,
     overall_severity: overallSev,
@@ -261,6 +307,7 @@ function mapToSystemStatus(r: any): SystemStatus {
     findings,
     services: serviceList,
     smart,
+    metrics: systemMetrics,
   };
 }
 
