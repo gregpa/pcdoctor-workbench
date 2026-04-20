@@ -256,11 +256,15 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   disable_startup_item: {
     name: 'disable_startup_item', label: 'Disable Startup Item…',
     ps_script: 'actions/Disable-Startup-Item.ps1',
-    confirm_level: 'destructive', rollback_tier: 'B',
-    snapshot_paths: [],  // Registry key export handled in script
+    confirm_level: 'destructive', rollback_tier: 'C',
+    // Reviewer P0: previous Tier B claim was fabricated - the PS script
+    // does not actually export the registry key before deletion. Until we
+    // add a real reg export to Disable-Startup-Item.ps1 and teach
+    // revertRollback to re-import it, this is Tier C (user must re-pin
+    // shortcuts or re-add Run-key entries manually).
     estimated_duration_s: 5,
     category: 'perf', icon: '🚫',
-    tooltip: 'Removes a startup Run-key entry. Exports the registry key to a snapshot so you can restore it via Revert.',
+    tooltip: 'Removes a startup Run-key entry or Start-menu shortcut. IRREVERSIBLE - use Autoruns for a non-destructive toggle instead.',
     params_schema: {
       item_name: { type: 'string', required: true, description: 'Startup entry name (e.g., GoogleDriveFS)' },
     },
@@ -364,14 +368,19 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'block_ip', label: 'Block IP Address',
     ps_script: 'actions/Block-IP.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
     category: 'network', icon: '🚫',
     tooltip: 'Creates inbound+outbound firewall rules blocking all traffic to/from the specified IP. Revert via Settings → Blocked IPs.',
-    params_schema: { ip: { type: 'string', required: true, description: 'IPv4 address to block' } },
+    params_schema: {
+      ip:     { type: 'string', required: true,  description: 'IPv4 address to block' },
+      reason: { type: 'string', required: false, description: 'Audit-log label (e.g., "Auto-block: RDP brute-force")' },
+    },
   },
   unblock_ip: {
     name: 'unblock_ip', label: 'Unblock IP',
     ps_script: 'actions/Unblock-IP.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
     category: 'network', icon: '✅',
     tooltip: 'Removes PCDoctor-created firewall block rules for a specific IP.',
     params_schema: { ip: { type: 'string', required: true, description: 'IP to unblock' } },
@@ -528,11 +537,11 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   disable_startup_items_batch: {
     name: 'disable_startup_items_batch', label: 'Disable Startup Items (batch)',
     ps_script: 'actions/Disable-StartupItemsBatch.ps1',
-    confirm_level: 'destructive', rollback_tier: 'B',
-    snapshot_paths: [],  // Registry key export handled inside the script for HKCU StartupApproved
+    confirm_level: 'destructive', rollback_tier: 'C',
+    // Reviewer P0: see disable_startup_item note. Same missing-export issue.
     estimated_duration_s: 10,
     category: 'perf', icon: '🚫',
-    tooltip: 'Disable multiple startup entries in one shot by marking them disabled in the StartupApproved registry key. Reversible via the rollback snapshot.',
+    tooltip: 'Disable multiple startup entries in one shot. IRREVERSIBLE at this build - use Autoruns for non-destructive toggling.',
     params_schema: {
       items_json: { type: 'string', required: true, description: 'JSON array of {kind,name} entries' },
     },

@@ -25,7 +25,7 @@ import { getStatus, PCDoctorBridgeError, setCachedSmart } from './pcdoctorBridge
 import { runAction } from './actionRunner.js';
 import { revertRollback } from './rollbackManager.js';
 import {
-  listActionLog, markActionReverted, queryMetricTrend, loadForecasts,
+  listActionLog, getActionLogById, markActionReverted, queryMetricTrend, loadForecasts,
   upsertPersistence, setPersistenceApproval, countNewPersistence,
   setSetting, getAllSettings, getSetting,
   setReviewItemState, getReviewItemStates,
@@ -134,9 +134,9 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:revertAction', async (_evt, auditId: number): Promise<IpcResult<RevertResult>> => {
     try {
-      const log = listActionLog(500).find((r) => r.id === auditId);
-      if (!log) return { ok: false, error: { code: 'E_INTERNAL', message: 'Action not found' } };
-      if (!log.rollback_id) return { ok: false, error: { code: 'E_INTERNAL', message: 'This action has no rollback record' } };
+      const log = getActionLogById(auditId);
+      if (!log) return { ok: false, error: { code: 'E_NOT_FOUND', message: 'Action not found' } };
+      if (!log.rollback_id) return { ok: false, error: { code: 'E_NOT_FOUND', message: 'This action has no rollback record' } };
 
       const outcome = await revertRollback(log.rollback_id);
       if (outcome.method !== 'none') markActionReverted(auditId);
@@ -249,7 +249,13 @@ export function registerIpcHandlers() {
     try {
       const sourceMd = path.join(weeklyDir, `${reviewDate}.md`);
       if (!existsSync(sourceMd)) return { ok: false, error: { code: 'E_NOT_FOUND', message: 'Review markdown not found' } };
-      const obsidianDir = path.join('C:', 'Users', 'greg_', 'Documents', 'Claude Cowork', 'Obsidian Vault', 'PC Doctor', 'Weekly Reviews');
+      // Reviewer P2: path was hardcoded to greg_'s dev box. Read from a
+      // setting so fresh installs on other machines don't try to write
+      // into a non-existent directory.
+      const configured = getSetting('obsidian_archive_dir') ?? '';
+      const obsidianDir = configured.trim()
+        ? configured
+        : path.join(app.getPath('documents'), 'PCDoctor', 'Weekly Reviews');
       await mkdir(obsidianDir, { recursive: true });
       const destPath = path.join(obsidianDir, `${reviewDate}.md`);
       await copyFile(sourceMd, destPath);
@@ -322,17 +328,24 @@ export function registerIpcHandlers() {
       };
       setCachedSmart(data.smart);
 
-      // Auto-block RDP brute-force source IPs if setting enabled
+      // Auto-block RDP brute-force source IPs if setting enabled.
+      // Reviewer P1: previously this called runPowerShellScript directly,
+      // bypassing actionRunner's audit log / rollback / admin routing /
+      // notifier pipeline. Route through runAction() so auto-blocks show up
+      // in History like any user-initiated action.
       const autoBlockEnabled = getSetting('auto_block_rdp_bruteforce') === '1';
       if (autoBlockEnabled) {
         for (const ti of data.threat_indicators) {
           if (ti.category === 'rdp_bruteforce' && (ti.detail as any)?.auto_block_candidates) {
             const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
             for (const ip of ((ti.detail as any).auto_block_candidates as string[])) {
-              // Validate IP format before passing to PowerShell
               if (typeof ip !== 'string' || !ipv4Re.test(ip)) continue;
               try {
-                await runPowerShellScript('actions/Block-IP.ps1', ['-JsonOutput', '-Ip', ip, '-Reason', 'Auto-block: RDP brute-force'], { timeoutMs: 10_000 });
+                await runAction({
+                  name: 'block_ip',
+                  params: { ip, reason: 'Auto-block: RDP brute-force' },
+                  triggered_by: 'alert',
+                });
               } catch {}
             }
           }
@@ -481,6 +494,7 @@ export function registerIpcHandlers() {
         'email_digest_recipient', 'digest_hour',
         'auto_block_rdp_bruteforce',
         'telegram_last_good_ts', 'selftest_banner',
+        'obsidian_archive_dir',
       ]);
       const isSafeKey = (k: string) => RENDERER_SAFE_KEYS.has(k) || k.startsWith('event:');
 
@@ -532,6 +546,7 @@ export function registerIpcHandlers() {
       'quiet_hours_start', 'quiet_hours_end',
       'email_digest_recipient', 'digest_hour',
       'auto_block_rdp_bruteforce',
+      'obsidian_archive_dir',
     ]);
     const isWritable = (k: string) => WRITABLE_KEYS.has(k) || k.startsWith('event:');
     if (!isWritable(key)) {

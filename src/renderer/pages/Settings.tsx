@@ -229,11 +229,32 @@ export function Settings() {
               </button>
               <button
                 onClick={async () => {
+                  // Reviewer P1: explicit confirm before exposing the DPAPI-
+                  // decrypted token. Clipboard is auto-cleared after 30s to
+                  // reduce exposure window. Renderer never stores the token.
+                  const ok = confirm(
+                    'Reveal the Telegram bot token?\n\n' +
+                    'This copies the plaintext token to your clipboard. The clipboard ' +
+                    'will be auto-cleared after 30 seconds. Do not reveal the token ' +
+                    'while screen-sharing or in an environment you do not trust.',
+                  );
+                  if (!ok) return;
                   const r = await (api as any).revealTelegramToken();
                   if (r?.ok && r.data.token) {
-                    const revealed = `${r.data.token.slice(0, 6)}...${r.data.token.slice(-4)}`;
-                    showToast(`Bot token: ${revealed} (copied to clipboard)`);
-                    try { await navigator.clipboard?.writeText(r.data.token); } catch {}
+                    const token: string = r.data.token;
+                    const revealed = `${token.slice(0, 6)}...${token.slice(-4)}`;
+                    try {
+                      await navigator.clipboard?.writeText(token);
+                      showToast(`Bot token copied (${revealed}). Clipboard will clear in 30s.`);
+                      setTimeout(async () => {
+                        try {
+                          const current = await navigator.clipboard?.readText();
+                          if (current === token) await navigator.clipboard?.writeText('');
+                        } catch {}
+                      }, 30_000);
+                    } catch {
+                      showToast(`Bot token: ${revealed} (clipboard unavailable)`);
+                    }
                   } else {
                     showToast(`Reveal failed: ${r?.error?.message ?? 'unknown'}`);
                   }

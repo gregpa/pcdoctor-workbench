@@ -2,21 +2,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * v2.3.2: `autoUpdater.ts` now gates checkForUpdates / downloadUpdate on
- * feedUrlIsUsable(). feedUrlIsUsable returns true only when
- * autoUpdater.getFeedURL() returns a string matching /^https?:\/\//i,
- * and false if it throws, returns null/empty, or returns a non-http
- * scheme (file://, unc paths, etc.). When unusable, checkForUpdates
- * short-circuits to `{ state: 'idle', message: '...needs http/https
- * feed URL' }` without ever calling autoUpdater.checkForUpdates().
+ * v2.3.6+: autoUpdater.ts dropped the pre-check feedUrlIsUsable() gate. It
+ * now always calls into electron-updater, catches the exception, and
+ * classifies benign error messages (app-update.yml missing, ENOENT, "unable
+ * to find latest version", ClientRequest http/https protocol) as
+ * state:'idle' "Auto-update not configured". Genuine errors surface as
+ * state:'error'. This test verifies that dispatch.
  */
 
-// vi.mock factories are hoisted above top-level `let`/`const`, so we stash
-// the mutable pieces on a hoisted object via vi.hoisted(). Tests rewrite
-// hoisted.feedUrlBehavior per-case.
 const hoisted = vi.hoisted(() => {
   return {
-    feedUrlBehavior: (() => null) as () => string | null | undefined,
     checkSpy: null as any,
     downloadSpy: null as any,
   };
@@ -32,7 +27,6 @@ vi.mock('electron-updater', async () => {
         autoDownload: false,
         autoInstallOnAppQuit: true,
         allowDowngrade: false,
-        getFeedURL: () => hoisted.feedUrlBehavior(),
         checkForUpdates: hoisted.checkSpy,
         downloadUpdate: hoisted.downloadSpy,
         quitAndInstall: viLocal.fn(),
@@ -43,7 +37,7 @@ vi.mock('electron-updater', async () => {
 });
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '2.3.2' },
+  app: { getVersion: () => '2.3.13' },
   BrowserWindow: class {},
   dialog: { showMessageBox: vi.fn(async () => ({ response: 1 })) },
   Notification: class {
@@ -53,77 +47,61 @@ vi.mock('electron', () => ({
   },
 }));
 
-// Import the module under test AFTER the mocks are registered.
 import { checkForUpdates, downloadUpdate, getStatus } from '../../src/main/autoUpdater.js';
 
-describe('autoUpdater.feedUrlIsUsable gating (via public API)', () => {
+describe('autoUpdater error classification', () => {
   beforeEach(() => {
-    hoisted.checkSpy.mockClear();
-    hoisted.downloadSpy.mockClear();
+    hoisted.checkSpy.mockReset().mockResolvedValue(undefined);
+    hoisted.downloadSpy.mockReset().mockResolvedValue(undefined);
   });
 
-  it('checkForUpdates short-circuits to idle when getFeedURL() returns undefined', async () => {
-    hoisted.feedUrlBehavior = () => undefined;
-    await checkForUpdates();
-    const s = getStatus();
-    expect(s.state).toBe('idle');
-    expect(s.message).toMatch(/needs http\/https feed URL/i);
-    expect(hoisted.checkSpy).not.toHaveBeenCalled();
-  });
-
-  it('checkForUpdates short-circuits to idle when getFeedURL() returns an empty string', async () => {
-    hoisted.feedUrlBehavior = () => '';
+  it('"app-update.yml" missing errors classify as idle/not_configured', async () => {
+    hoisted.checkSpy.mockRejectedValueOnce(new Error('Cannot find app-update.yml in resources'));
     await checkForUpdates();
     expect(getStatus().state).toBe('idle');
-    expect(hoisted.checkSpy).not.toHaveBeenCalled();
+    expect(getStatus().message).toMatch(/not configured/i);
   });
 
-  it('checkForUpdates short-circuits when getFeedURL() returns a file:// URL', async () => {
-    hoisted.feedUrlBehavior = () => 'file://\\\\nas\\share\\releases\\latest.yml';
+  it('ENOENT errors classify as idle', async () => {
+    hoisted.checkSpy.mockRejectedValueOnce(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
     await checkForUpdates();
-    expect(getStatus().state).toBe('idle');
-    expect(getStatus().message).toMatch(/needs http\/https feed URL/i);
-    expect(hoisted.checkSpy).not.toHaveBeenCalled();
-  });
-
-  it('checkForUpdates short-circuits when getFeedURL() throws', async () => {
-    hoisted.feedUrlBehavior = () => { throw new Error('feed URL not configured'); };
-    await checkForUpdates();
-    expect(getStatus().state).toBe('idle');
-    expect(hoisted.checkSpy).not.toHaveBeenCalled();
-  });
-
-  it('checkForUpdates invokes the real checker when getFeedURL() returns an https URL', async () => {
-    hoisted.feedUrlBehavior = () => 'https://releases.example.com/latest.yml';
-    await checkForUpdates();
-    expect(hoisted.checkSpy).toHaveBeenCalledOnce();
-  });
-
-  it('checkForUpdates invokes the real checker when getFeedURL() returns an http URL (case-insensitive)', async () => {
-    hoisted.feedUrlBehavior = () => 'HTTP://releases.example.com/latest.yml';
-    await checkForUpdates();
-    expect(hoisted.checkSpy).toHaveBeenCalledOnce();
-  });
-
-  it('downloadUpdate short-circuits when feed URL is unusable', async () => {
-    hoisted.feedUrlBehavior = () => 'file://nope';
-    await downloadUpdate();
-    expect(hoisted.downloadSpy).not.toHaveBeenCalled();
     expect(getStatus().state).toBe('idle');
   });
 
-  it('downloadUpdate invokes electron-updater when feed URL is https', async () => {
-    hoisted.feedUrlBehavior = () => 'https://releases.example.com/latest.yml';
-    await downloadUpdate();
-    expect(hoisted.downloadSpy).toHaveBeenCalledOnce();
+  it('"ClientRequest only supports http: and https:" classifies as idle (stale file:// feed)', async () => {
+    hoisted.checkSpy.mockRejectedValueOnce(new Error('ClientRequest only supports http: and https: protocols'));
+    await checkForUpdates();
+    expect(getStatus().state).toBe('idle');
   });
 
-  it('sets state=error (not idle) when electron-updater throws during an otherwise-valid check', async () => {
-    hoisted.feedUrlBehavior = () => 'https://releases.example.com/latest.yml';
+  it('"Unable to find latest version" classifies as idle', async () => {
+    hoisted.checkSpy.mockRejectedValueOnce(new Error('Unable to find latest version on GitHub'));
+    await checkForUpdates();
+    expect(getStatus().state).toBe('idle');
+  });
+
+  it('other errors surface as state:error', async () => {
     hoisted.checkSpy.mockRejectedValueOnce(new Error('boom'));
     await checkForUpdates();
-    const s = getStatus();
-    expect(s.state).toBe('error');
-    expect(s.message).toBe('boom');
+    expect(getStatus().state).toBe('error');
+    expect(getStatus().message).toBe('boom');
+  });
+
+  it('no error -> electron-updater was actually called', async () => {
+    await checkForUpdates();
+    expect(hoisted.checkSpy).toHaveBeenCalled();
+  });
+
+  it('downloadUpdate applies the same classification on benign errors', async () => {
+    hoisted.downloadSpy.mockRejectedValueOnce(new Error('Cannot find app-update.yml'));
+    await downloadUpdate();
+    expect(getStatus().state).toBe('idle');
+  });
+
+  it('downloadUpdate surfaces real failures as state:error', async () => {
+    hoisted.downloadSpy.mockRejectedValueOnce(new Error('Disk full'));
+    await downloadUpdate();
+    expect(getStatus().state).toBe('error');
+    expect(getStatus().message).toBe('Disk full');
   });
 });

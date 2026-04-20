@@ -52,6 +52,14 @@ export function startClaudeBridgeWatcher(getWindow: () => BrowserWindow | null):
             console.warn('claude-bridge: rejected command with missing id/action');
             continue;
           }
+          // Reviewer P1: cmd.id is used as part of the IPC channel
+          // 'claude-approval-response-${id}'. Constrain it to a safe charset
+          // so a malicious bridge file can't craft a channel colliding with
+          // another app IPC route.
+          if (!/^[a-zA-Z0-9_-]{1,64}$/.test(cmd.id)) {
+            console.warn(`claude-bridge: rejected command with invalid id shape '${cmd.id}'`);
+            continue;
+          }
           if (!(cmd.action in ACTIONS)) {
             console.warn(`claude-bridge: rejected unknown action '${cmd.action}'`);
             appendFileSync(RESPONSES_FILE, JSON.stringify({ id: cmd.id, status: 'rejected', reason: 'Unknown action' }) + '\n');
@@ -82,19 +90,30 @@ async function handleClaudeCommand(cmd: ClaudeCommand, win: BrowserWindow | null
     return;
   }
 
-  // Ask the renderer to show an approval modal
+  // Ask the renderer to show an approval modal.
+  // Reviewer P2: guard against the race where the user clicks Approve just
+  // as the 90s timer fires (previously the decision could be dropped).
   const approved = await new Promise<boolean>((resolve) => {
     const channel = `claude-approval-response-${cmd.id}`;
     const { ipcMain } = require('electron');
-    const handler = (_evt: any, decision: boolean) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | null = null;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
       ipcMain.removeListener(channel, handler);
+    };
+    const handler = (_evt: any, decision: boolean) => {
+      if (settled) return;
+      cleanup();
       resolve(decision);
     };
     ipcMain.once(channel, handler);
     win.webContents.send('claude-approval-request', { id: cmd.id, action: cmd.action, params: cmd.params, context: cmd.context });
-    // Timeout after 90s
-    setTimeout(() => {
-      ipcMain.removeListener(channel, handler);
+    timer = setTimeout(() => {
+      if (settled) return;
+      cleanup();
       resolve(false);
     }, 90_000);
   });

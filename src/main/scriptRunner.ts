@@ -121,8 +121,14 @@ export async function runPowerShellScript<T = unknown>(
 /**
  * Run a PowerShell script under C:\ProgramData\PCDoctor\ **elevated** via
  * Start-Process -Verb RunAs. The elevated child can't inherit pipes from our
- * non-elevated parent, so we redirect its stdout to a temp file and read it
- * back after the child exits. Triggers a single UAC prompt per invocation.
+ * non-elevated parent, so we redirect its streams to temp files and read
+ * them back after the child exits. Triggers a single UAC prompt per call.
+ *
+ * Reviewers P1:
+ *   - Use randomBytes(16) + O_EXCL to create the tmp files (not Math.random()
+ *     Date.now() + predictable suffix, which was TOCTOU-racy on symlinks).
+ *   - Keep stdout, stderr, and exit code on separate files so warnings /
+ *     Write-Host noise in one stream doesn't poison the JSON parser.
  */
 export async function runElevatedPowerShellScript<T = unknown>(
   relativeScriptPath: string,
@@ -133,25 +139,46 @@ export async function runElevatedPowerShellScript<T = unknown>(
   const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
 
-  const uniq = `pcdoctor-elevated-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // CSPRNG + per-call unique base. 16 bytes = 128 bits of entropy.
+  const { randomBytes } = await import('node:crypto');
+  const uniq = `pcdoctor-elevated-${randomBytes(16).toString('hex')}`;
   const outPath = path.join(os.tmpdir(), `${uniq}.out`);
+  const errPath = path.join(os.tmpdir(), `${uniq}.err`);
   const exitPath = path.join(os.tmpdir(), `${uniq}.exit`);
 
-  // Build the inner command the elevated PS will execute. Redirect *both*
-  // streams to outPath (*> merges stdout+stderr), then write the exit code
-  // to exitPath. Use try/finally so we always write the exit marker even on
-  // exception.
+  // Pre-create each temp file with O_EXCL so an attacker can't pre-create a
+  // symlink at this path that would redirect the elevated child's writes.
+  const { openSync, closeSync, constants: fsC } = await import('node:fs');
+  for (const p of [outPath, errPath, exitPath]) {
+    try {
+      closeSync(openSync(p, fsC.O_CREAT | fsC.O_EXCL | fsC.O_WRONLY, 0o600));
+    } catch (e: any) {
+      throw new PCDoctorScriptError('E_ELEVATED_TEMP_EXISTS', `Elevated tmp file collision: ${p} (${e?.code ?? 'unknown'})`);
+    }
+  }
+
   const safeScript = scriptPath.replace(/'/g, "''");
   const safeOut = outPath.replace(/'/g, "''");
+  const safeErr = errPath.replace(/'/g, "''");
   const safeExit = exitPath.replace(/'/g, "''");
   const argsStr = args.map(a => `'${a.replace(/'/g, "''")}'`).join(',');
-  const innerCmd =
-    `try { & '${safeScript}' ${argsStr ? `@(${argsStr})` : ''} *>'${safeOut}'; ` +
-    `$LASTEXITCODE | Out-File -Encoding ASCII '${safeExit}' } ` +
-    `catch { $_ | Out-String | Out-File -Append '${safeOut}'; 1 | Out-File -Encoding ASCII '${safeExit}' }`;
 
-  // Outer command: use Start-Process -Verb RunAs -Wait which triggers UAC.
-  // The outer process itself is non-elevated and just waits for the child.
+  // Streams are kept separate:
+  //   1>  stdout        -> outPath     (expected to contain JSON)
+  //   2>  error stream  -> errPath     (PS errors, Write-Error)
+  //   $LASTEXITCODE     -> exitPath    (the actual exit code)
+  // Write-Warning / Write-Verbose / Write-Information stream to their
+  // respective channels and are dropped so they can't poison JSON.
+  const innerCmd =
+    `try { ` +
+    `  & '${safeScript}' ${argsStr ? `@(${argsStr})` : ''} 1>'${safeOut}' 2>'${safeErr}'; ` +
+    `  $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }; ` +
+    `  Set-Content -Path '${safeExit}' -Value $code -Encoding ascii ` +
+    `} catch { ` +
+    `  $_ | Out-String | Add-Content -Path '${safeErr}'; ` +
+    `  Set-Content -Path '${safeExit}' -Value 1 -Encoding ascii ` +
+    `}`;
+
   const outerCmd =
     `$p = Start-Process -FilePath '${pwsh.replace(/'/g, "''")}' -Verb RunAs -Wait -PassThru ` +
     `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NonInteractive','-Command','${innerCmd.replace(/'/g, "''")}'); ` +
@@ -162,46 +189,54 @@ export async function runElevatedPowerShellScript<T = unknown>(
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    let stderr = '';
-    child.stderr?.on('data', (c: Buffer) => { stderr += c.toString('utf8'); });
+    let wrapStderr = '';
+    child.stderr?.on('data', (c: Buffer) => { wrapStderr += c.toString('utf8'); });
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch {}
       reject(new PCDoctorScriptError('E_TIMEOUT_KILLED', `Elevated script exceeded ${timeoutMs}ms`));
     }, timeoutMs);
     child.on('exit', (code) => {
       clearTimeout(timer);
-      // Exit code 1223 = UAC cancelled by user.
       if (code === 1223) { reject(new PCDoctorScriptError('E_UAC_CANCELLED', 'UAC prompt was cancelled by user')); return; }
+      // Wrapper failed *and* no output captured - treat as a hard elevation error.
       if (code !== 0 && !existsSync(outPath)) {
-        reject(new PCDoctorScriptError('E_ELEVATION_FAILED', `Elevation wrapper exit ${code}: ${stderr.slice(0, 200)}`));
+        reject(new PCDoctorScriptError('E_ELEVATION_FAILED', `Elevation wrapper exit ${code}: ${wrapStderr.slice(0, 200)}`));
         return;
       }
       resolve();
     });
   });
 
-  // Read captured output.
-  let stdout = '';
-  try { stdout = readFileSync(outPath, 'utf8'); } catch {}
-  try { unlinkSync(outPath); } catch {}
-  try { unlinkSync(exitPath); } catch {}
+  // Read captured streams + exit code.
+  let stdout = ''; try { stdout = readFileSync(outPath, 'utf8'); } catch {}
+  let stderr = ''; try { stderr = readFileSync(errPath, 'utf8'); } catch {}
+  let exitStr = ''; try { exitStr = readFileSync(exitPath, 'utf8').trim(); } catch {}
+  for (const p of [outPath, errPath, exitPath]) { try { unlinkSync(p); } catch {} }
 
-  // Check for PCDOCTOR_ERROR sentinel
-  const sentinelMatch = stdout.match(/PCDOCTOR_ERROR:(.+)$/m);
+  const childExit = parseInt(exitStr, 10);
+
+  // Sentinel can appear on stdout (trap wrote there) OR stderr (PS error). Check both.
+  const combined = stdout + '\n' + stderr;
+  const sentinelMatch = combined.match(/PCDOCTOR_ERROR:(.+)$/m);
   if (sentinelMatch) {
     try {
       const parsed = JSON.parse(sentinelMatch[1]);
       throw new PCDoctorScriptError(parsed.code ?? 'E_PS_UNHANDLED', parsed.message ?? 'Elevated script reported an error', parsed);
     } catch (e) {
       if (e instanceof PCDoctorScriptError) throw e;
-      throw new PCDoctorScriptError('E_PS_UNHANDLED', 'Elevated script reported an error (unparseable)', { stdout });
+      throw new PCDoctorScriptError('E_PS_UNHANDLED', 'Elevated script reported an error (unparseable)', { stdout, stderr });
     }
+  }
+
+  // Non-zero child exit without a sentinel - surface it clearly.
+  if (!isNaN(childExit) && childExit !== 0) {
+    throw new PCDoctorScriptError('E_PS_NONZERO_EXIT', `Elevated script exited with code ${childExit}`, { exitCode: childExit, stdout: stdout.slice(0, 1000), stderr: stderr.slice(0, 1000) });
   }
 
   const trimmed = stdout.trim();
   try {
     return JSON.parse(trimmed) as T;
   } catch {
-    throw new PCDoctorScriptError('E_PS_INVALID_JSON', 'Elevated script did not return valid JSON', { stdout: trimmed.slice(0, 1000) });
+    throw new PCDoctorScriptError('E_PS_INVALID_JSON', 'Elevated script did not return valid JSON on stdout', { stdout: trimmed.slice(0, 1000), stderr: stderr.slice(0, 1000) });
   }
 }

@@ -13,6 +13,28 @@ export const ERROR_CODES = {
   // Action
   ACTION_UNKNOWN: 'E_ACTION_UNKNOWN',
   ACTION_FAILED: 'E_ACTION_FAILED',
+  UNKNOWN_PARAM: 'E_UNKNOWN_PARAM',
+  INVALID_PARAM: 'E_INVALID_PARAM',
+  INVALID_PARAM_NAME: 'E_INVALID_PARAM_NAME',
+  MISSING_PARAM: 'E_MISSING_PARAM',
+  NEEDS_ADMIN: 'E_NEEDS_ADMIN',
+  UAC_CANCELLED: 'E_UAC_CANCELLED',
+  ELEVATION_FAILED: 'E_ELEVATION_FAILED',
+  ELEVATED_TEMP_EXISTS: 'E_ELEVATED_TEMP_EXISTS',
+
+  // Scheduled tasks / IPC
+  SCHTASKS: 'E_SCHTASKS',
+  FORBIDDEN: 'E_FORBIDDEN',
+  NOT_FOUND: 'E_NOT_FOUND',
+  INVALID: 'E_INVALID',
+
+  // Claude bridge
+  CLAUDE_LAUNCH: 'E_CLAUDE_LAUNCH',
+
+  // Telegram
+  TG_SEND: 'E_TG_SEND',
+  TG_TEST: 'E_TG_TEST',
+  NO_TOKEN: 'E_NO_TOKEN',
 
   // Generic
   INTERNAL: 'E_INTERNAL',
@@ -31,5 +53,21 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   E_BRIDGE_FILE_MISSING: 'No diagnostic report found. Run a PC scan first.',
   E_ACTION_UNKNOWN: 'Unknown action.',
   E_ACTION_FAILED: 'Action failed.',
+  E_UNKNOWN_PARAM: 'Unknown parameter for this action.',
+  E_INVALID_PARAM: 'Invalid parameter value.',
+  E_INVALID_PARAM_NAME: 'Invalid parameter name.',
+  E_MISSING_PARAM: 'Missing required parameter.',
+  E_NEEDS_ADMIN: 'This action requires administrator privileges.',
+  E_UAC_CANCELLED: 'UAC prompt was cancelled.',
+  E_ELEVATION_FAILED: 'Could not elevate to administrator.',
+  E_ELEVATED_TEMP_EXISTS: 'Temp file collision during elevated action.',
+  E_SCHTASKS: 'Scheduled task operation failed.',
+  E_FORBIDDEN: 'Operation not permitted.',
+  E_NOT_FOUND: 'Not found.',
+  E_INVALID: 'Invalid input.',
+  E_CLAUDE_LAUNCH: 'Claude Code launch failed.',
+  E_TG_SEND: 'Telegram send failed.',
+  E_TG_TEST: 'Telegram test failed.',
+  E_NO_TOKEN: 'No Telegram token stored.',
   E_INTERNAL: 'An internal error occurred.',
 };

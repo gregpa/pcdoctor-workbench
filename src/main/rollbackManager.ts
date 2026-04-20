@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { statfs } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { runPowerShellScript } from './scriptRunner.js';
@@ -8,12 +10,56 @@ import type { ActionDefinition } from '@shared/actions.js';
 
 const SNAPSHOTS_DIR = path.join(PCDOCTOR_ROOT, 'snapshots');
 const DEFAULT_RETENTION_DAYS = 30;
+const MIN_SNAPSHOT_FREE_BYTES = 1 * 1024 * 1024 * 1024; // 1 GB safety floor
 
 interface SnapshotManifest {
   rollback_id: number;
   created_at: number;
   action_name: string;
-  paths: { source: string; snapshot: string }[];
+  paths: { source: string; snapshot: string; sha256?: string }[];
+}
+
+/**
+ * Hash a file (Tier B integrity check on revert) or a directory (manifest
+ * of relative path + sha256 of each file, hashed again).
+ */
+function hashPath(p: string): string | null {
+  try {
+    const st = statSync(p);
+    if (st.isFile()) {
+      return createHash('sha256').update(readFileSync(p)).digest('hex');
+    }
+    if (st.isDirectory()) {
+      const { readdirSync } = require('node:fs');
+      const entries: string[] = [];
+      const walk = (dir: string, rel: string) => {
+        const list = readdirSync(dir, { withFileTypes: true });
+        for (const e of list) {
+          const full = path.join(dir, e.name);
+          const r = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) walk(full, r);
+          else if (e.isFile()) {
+            const h = createHash('sha256').update(readFileSync(full)).digest('hex');
+            entries.push(`${r}\t${h}`);
+          }
+        }
+      };
+      walk(p, '');
+      entries.sort();
+      return createHash('sha256').update(entries.join('\n')).digest('hex');
+    }
+  } catch {}
+  return null;
+}
+
+/** Encode a source path into a collision-free snapshot dirname. */
+function encodeSnapshotName(srcPath: string): string {
+  // Hash the full path so two sources with the same basename don't collide
+  // (reviewer P1 - previous basename-only code was an architectural landmine).
+  // Short hash is fine; collision space is one action's paths.
+  const short = createHash('sha256').update(srcPath).digest('hex').slice(0, 12);
+  const safeBase = path.basename(srcPath).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${safeBase}-${short}`;
 }
 
 /**
@@ -31,24 +77,31 @@ export async function prepareRollback(
   const expiresAt = Date.now() + DEFAULT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
   if (action.rollback_tier === 'A') {
+    // Reviewer P0: previous code inserted a rollback row even when RP
+    // creation failed. The UI then displayed a Revert button that, when
+    // clicked, found no windows_rp_seq + no snapshot_path and returned
+    // method:'none'. That's a fabricated capability. Now: if the restore
+    // point can't be created (VSS disabled, SystemRestorePointCreationFrequency
+    // throttle, non-admin run), return null so actionRunner records no
+    // rollback_id and the UI hides the Revert button. Action still runs.
     const description = action.restore_point_description ?? `PCDoctor: ${action.label}`;
-    let seq: number | null = null;
     try {
       const result = await runPowerShellScript<{ sequence_number?: number }>(
         'actions/Create-RestorePoint.ps1',
         ['-Description', description],
       );
-      seq = typeof result.sequence_number === 'number' ? result.sequence_number : null;
-    } catch {
-      // If restore point creation fails (common without admin), still record the rollback
-      // with only a label - the Revert button will inform the user it's unavailable.
+      const seq = typeof result.sequence_number === 'number' ? result.sequence_number : null;
+      if (seq === null) return null;
+      return createRollbackRow({
+        label: `Pre: ${action.label}`,
+        windows_rp_seq: seq,
+        action_id: actionId,
+        expires_at: expiresAt,
+      });
+    } catch (e) {
+      console.warn(`prepareRollback: restore point failed for ${action.name}:`, e);
+      return null;
     }
-    return createRollbackRow({
-      label: `Pre: ${action.label}`,
-      windows_rp_seq: seq ?? undefined,
-      action_id: actionId,
-      expires_at: expiresAt,
-    });
   }
 
   // Tier B - file snapshot
@@ -68,15 +121,34 @@ export async function prepareRollback(
     paths: [],
   };
 
+  // Disk-space preflight: refuse to even start a Tier B snapshot if the
+  // snapshots volume has < 1 GB free. A partial snapshot + destructive
+  // action = unrecoverable state.
+  try {
+    mkdirSync(SNAPSHOTS_DIR, { recursive: true });
+    const fs = await statfs(SNAPSHOTS_DIR);
+    const free = Number(fs.bsize) * Number(fs.bavail);
+    if (free < MIN_SNAPSHOT_FREE_BYTES) {
+      console.warn(`prepareRollback: insufficient snapshot disk space (${free} bytes). Skipping Tier B snapshot for ${action.name}.`);
+      // Return null: no rollback row. The Tier B action still runs but is
+      // marked non-revertable in the audit log. Wrong > fabricated.
+      return null;
+    }
+  } catch { /* non-fatal; statfs unsupported on some filesystems */ }
+
   const paths = action.snapshot_paths ?? [];
   for (const srcPath of paths) {
     if (!existsSync(srcPath)) continue;
-    const base = path.basename(srcPath);
-    const destPath = path.join(snapshotDir, 'files', base);
+    // Hash-based dest name: source C:\A\foo.txt and C:\B\foo.txt no longer
+    // collide, and the sha256 stored in manifest lets revert verify that the
+    // snapshot wasn't swapped out-of-band (reviewer P1 - Tier B integrity).
+    const destName = encodeSnapshotName(srcPath);
+    const destPath = path.join(snapshotDir, 'files', destName);
     mkdirSync(path.dirname(destPath), { recursive: true });
     try {
       cpSync(srcPath, destPath, { recursive: true });
-      manifest.paths.push({ source: srcPath, snapshot: destPath });
+      const hash = hashPath(destPath) ?? undefined;
+      manifest.paths.push({ source: srcPath, snapshot: destPath, sha256: hash });
     } catch {
       // Skip unreadable paths rather than fail the rollback setup
     }
@@ -160,6 +232,17 @@ export async function revertRollback(rollbackId: number): Promise<RevertOutcome>
         rejected++;
         continue;
       }
+      // Tier B integrity check (reviewer 2.7): if the manifest recorded a
+      // sha256 at snapshot time, verify the snapshot payload hasn't been
+      // swapped between action-time and revert-time.
+      if (p.sha256) {
+        const actual = hashPath(p.snapshot);
+        if (actual !== p.sha256) {
+          console.warn(`revertRollback: snapshot hash mismatch for ${p.source}; skipping restore`);
+          rejected++;
+          continue;
+        }
+      }
       try {
         cpSync(p.snapshot, p.source, { recursive: true, force: true });
         restored++;
@@ -167,9 +250,12 @@ export async function revertRollback(rollbackId: number): Promise<RevertOutcome>
         // Continue with others
       }
     }
-    if (rejected > 0 && restored === 0) {
-      markRollbackReverted(rollbackId);
-      return { method: 'none', reboot_required: false, reason: `Manifest rejected: ${rejected} path(s) not in action allow-list` };
+    // Reviewer P1: previously we always markRollbackReverted even when
+    // nothing was actually restored. Now we only mark reverted if at least
+    // one file came back. If everything was rejected/failed, leave the row
+    // unreverted so the user can see an accurate state.
+    if (restored === 0) {
+      return { method: 'none', reboot_required: false, reason: rejected > 0 ? `Manifest rejected: ${rejected} path(s) not in action allow-list or hash mismatch` : 'No files restored' };
     }
     markRollbackReverted(rollbackId);
     return { method: 'file-snapshot', reboot_required: false, files_restored: restored };

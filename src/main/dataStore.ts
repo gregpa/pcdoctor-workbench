@@ -162,10 +162,47 @@ function openDb(): Database.Database {
   const dir = path.dirname(WORKBENCH_DB_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   db = new Database(WORKBENCH_DB_PATH);
+  // Reviewer P1: added busy_timeout + foreign_keys. WAL + NORMAL were
+  // already correct for this single-process, single-writer pattern.
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
+  db.pragma('busy_timeout = 5000');    // 5s lock wait before SQLITE_BUSY
+  db.pragma('foreign_keys = ON');      // catch orphan rollback_id etc
   db.exec(SCHEMA);
+  runMigrations(db);
   return db;
+}
+
+// ============== SCHEMA MIGRATIONS (S20) ==============
+
+/**
+ * Lightweight migration framework based on SQLite's user_version pragma.
+ * Each migration is numbered and idempotent; they run in-order whenever the
+ * stored user_version is behind the latest. Wrap multi-statement migrations
+ * in a transaction so a partial apply rolls back.
+ */
+interface Migration { version: number; name: string; up: (db: Database.Database) => void; }
+const MIGRATIONS: Migration[] = [
+  // Future migrations go here, e.g.:
+  // { version: 1, name: 'add_col_foo_to_bar', up: (db) => db.exec(`ALTER TABLE bar ADD COLUMN foo TEXT`) },
+];
+
+function runMigrations(db: Database.Database) {
+  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  for (const m of MIGRATIONS) {
+    if (m.version <= current) continue;
+    const tx = db.transaction(() => {
+      m.up(db);
+      db.pragma(`user_version = ${m.version}`);
+    });
+    try {
+      tx();
+      console.log(`dataStore: applied migration ${m.version} (${m.name})`);
+    } catch (e: any) {
+      console.error(`dataStore: migration ${m.version} (${m.name}) failed:`, e?.message);
+      throw e;
+    }
+  }
 }
 
 // ============== ACTIONS LOG ==============
@@ -264,6 +301,13 @@ export function listActionLog(limit = 200): ActionLogRow[] {
   ).all(limit) as ActionLogRow[];
 }
 
+/** O(1) lookup by primary key, replaces listActionLog(500).find(). */
+export function getActionLogById(id: number): ActionLogRow | null {
+  return (openDb().prepare(
+    `SELECT * FROM actions_log WHERE id = ?`,
+  ).get(id) as ActionLogRow | undefined) ?? null;
+}
+
 // ============== ROLLBACKS ==============
 
 export interface RollbackInsert {
@@ -330,19 +374,25 @@ export function recordStatusSnapshot(s: {
   event_errors_system?: number;
   event_errors_application?: number;
 }): void {
+  const db = openDb();
   const ts = Date.now();
-  const stmt = openDb().prepare(
+  const stmt = db.prepare(
     `INSERT INTO metrics (ts, category, metric, value, label) VALUES (?, ?, ?, ?, ?)`
   );
-  if (typeof s.cpu_load_pct === 'number') stmt.run(ts, 'cpu', 'load_pct', s.cpu_load_pct, null);
-  if (typeof s.ram_used_pct === 'number') stmt.run(ts, 'ram', 'used_pct', s.ram_used_pct, null);
-  if (Array.isArray(s.disks)) {
-    for (const d of s.disks) {
-      if (typeof d.free_pct === 'number') stmt.run(ts, 'disk', 'free_pct', d.free_pct, d.drive);
+  // Reviewer P2: wrap the 6+ inserts in a single transaction. Cuts fsync
+  // volume ~6x per snapshot; each row was its own implicit txn before.
+  const tx = db.transaction(() => {
+    if (typeof s.cpu_load_pct === 'number') stmt.run(ts, 'cpu', 'load_pct', s.cpu_load_pct, null);
+    if (typeof s.ram_used_pct === 'number') stmt.run(ts, 'ram', 'used_pct', s.ram_used_pct, null);
+    if (Array.isArray(s.disks)) {
+      for (const d of s.disks) {
+        if (typeof d.free_pct === 'number') stmt.run(ts, 'disk', 'free_pct', d.free_pct, d.drive);
+      }
     }
-  }
-  if (typeof s.event_errors_system === 'number') stmt.run(ts, 'events', 'system_count', s.event_errors_system, null);
-  if (typeof s.event_errors_application === 'number') stmt.run(ts, 'events', 'application_count', s.event_errors_application, null);
+    if (typeof s.event_errors_system === 'number') stmt.run(ts, 'events', 'system_count', s.event_errors_system, null);
+    if (typeof s.event_errors_application === 'number') stmt.run(ts, 'events', 'application_count', s.event_errors_application, null);
+  });
+  tx();
 }
 
 // ============== FORECASTS ==============

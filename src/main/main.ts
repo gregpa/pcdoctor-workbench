@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
@@ -53,6 +53,38 @@ function createWindow() {
       e.preventDefault();
       mainWindow?.hide();
     }
+  });
+
+  // Reviewer P1: hard nav-guards. Any target="_blank" link opens in the
+  // user's default browser rather than inside the Electron window. Any
+  // in-window navigation to a non-self origin is blocked and redirected to
+  // the external browser. Defense-in-depth beyond CSP (belt + suspenders).
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const parsed = new URL(url);
+      const devUrl = process.env.VITE_DEV_SERVER_URL;
+      const allowedOrigin = devUrl ? new URL(devUrl).origin : null;
+      const isSelfOrigin = allowedOrigin && parsed.origin === allowedOrigin;
+      const isFile = url.startsWith('file://');
+      if (!isSelfOrigin && !isFile) {
+        event.preventDefault();
+        shell.openExternal(url).catch(() => {});
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
+  mainWindow.webContents.on('will-redirect', (event, url) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.origin !== 'file://' && !url.startsWith('file://') && !process.env.VITE_DEV_SERVER_URL) {
+        event.preventDefault();
+      }
+    } catch { event.preventDefault(); }
   });
 
   // Browser-style zoom via Ctrl+=/Ctrl+-/Ctrl+0. Also supports Ctrl+scroll.

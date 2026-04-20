@@ -51,24 +51,60 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
   if (input.dry_run) {
     scriptArgs.push('-DryRun');
   }
-  if (input.params) {
+  {
+    // Param handling: reviewer P0 - previous code type-checked values
+    // declared in params_schema but silently forwarded ANY other param to
+    // PowerShell. A caller could smuggle undeclared flags (e.g. the renderer
+    // calling update_hosts_stevenblack with -SourceUrl, which has no
+    // params_schema but whose script accepts -SourceUrl, redirecting the
+    // hosts merge to an attacker-controlled URL). Now:
+    //   - unknown key -> E_UNKNOWN_PARAM
+    //   - missing required -> E_MISSING_PARAM
+    //   - key charset enforced to [a-z_][a-z0-9_]* (defense-in-depth
+    //     against concatenation into the elevated -Command string)
+    //   - value type-checked per schema
     const schema = def.params_schema ?? {};
-    for (const [k, v] of Object.entries(input.params)) {
-      // Validate each value against the declared params_schema type. Reject with E_INVALID_PARAM
-      // so a scheduler, alert handler, or bridge caller can't pass unexpected values through
-      // to the PowerShell arg binder.
-      const def_k = schema[k];
-      const str = String(v);
-      if (def_k) {
-        if (def_k.type === 'number' && !/^-?\d+(\.\d+)?$/.test(str)) {
-          finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: `Invalid param '${k}': expected number, got '${str}'` });
-          return {
-            action: input.name, success: false, duration_ms: 0,
-            error: { code: 'E_INVALID_PARAM', message: `Invalid param '${k}': expected number` },
-          };
-        }
+    const input_params = input.params ?? {};
+
+    // 1) Unknown-key rejection. This is the bypass fix.
+    for (const k of Object.keys(input_params)) {
+      if (!(k in schema)) {
+        finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: `Unknown parameter '${k}' for action '${input.name}'` });
+        return {
+          action: input.name, success: false, duration_ms: 0,
+          error: { code: 'E_UNKNOWN_PARAM', message: `Unknown parameter '${k}' for action '${input.name}'` },
+        };
       }
-      scriptArgs.push(`-${k.charAt(0).toUpperCase() + k.slice(1)}`, str);
+      if (!/^[a-z_][a-z0-9_]*$/i.test(k)) {
+        finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: `Invalid parameter name '${k}'` });
+        return {
+          action: input.name, success: false, duration_ms: 0,
+          error: { code: 'E_INVALID_PARAM_NAME', message: `Bad param name: ${k}` },
+        };
+      }
+    }
+
+    // 2) Required-param enforcement + value validation.
+    for (const [name, spec] of Object.entries(schema)) {
+      const value = input_params[name];
+      const missing = value === undefined || value === null || value === '';
+      if (spec.required && missing) {
+        finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: `Missing required parameter '${name}'` });
+        return {
+          action: input.name, success: false, duration_ms: 0,
+          error: { code: 'E_MISSING_PARAM', message: `Missing required parameter '${name}'` },
+        };
+      }
+      if (missing) continue;
+      const str = String(value);
+      if (spec.type === 'number' && !/^-?\d+(\.\d+)?$/.test(str)) {
+        finishActionLog(logId, { status: 'error', duration_ms: 0, error_message: `Invalid param '${name}': expected number, got '${str}'` });
+        return {
+          action: input.name, success: false, duration_ms: 0,
+          error: { code: 'E_INVALID_PARAM', message: `Invalid param '${name}': expected number` },
+        };
+      }
+      scriptArgs.push(`-${name.charAt(0).toUpperCase() + name.slice(1)}`, str);
     }
   }
 

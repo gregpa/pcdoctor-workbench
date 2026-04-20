@@ -6,6 +6,38 @@
   CreateDirectory "$APPDATA\..\..\..\ProgramData\PCDoctor"
   CopyFiles /SILENT "$INSTDIR\resources\powershell\*.*" "C:\ProgramData\PCDoctor"
 
+  ; v2.3.13 security: Lock down ACLs on C:\ProgramData\PCDoctor so
+  ; non-admin users cannot overwrite PS scripts that later run elevated.
+  ; Default ProgramData inheritance grants BUILTIN\Users:(I)(M) which is a
+  ; "bring your own elevator" pathway - malware running as the user can
+  ; swap Block-IP.ps1 etc. and have the next UAC prompt run the replacement
+  ; as Administrator.
+  ;
+  ; Two-tier ACL:
+  ;   - Root + scripts (read-only for Users): SYSTEM:F, Admins:F, Users:RX
+  ;   - Data subdirs (writable for Users):    + Users:M on data paths
+  ; SIDs are locale-safe (SYSTEM=S-1-5-18, Admins=S-1-5-32-544, Users=S-1-5-32-545).
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" /grant:r "*S-1-5-32-544:(OI)(CI)F" /grant:r "*S-1-5-32-545:(OI)(CI)RX" /T /C /Q'
+  CreateDirectory "C:\ProgramData\PCDoctor\logs"
+  CreateDirectory "C:\ProgramData\PCDoctor\reports"
+  CreateDirectory "C:\ProgramData\PCDoctor\snapshots"
+  CreateDirectory "C:\ProgramData\PCDoctor\exports"
+  CreateDirectory "C:\ProgramData\PCDoctor\claude-bridge"
+  CreateDirectory "C:\ProgramData\PCDoctor\history"
+  CreateDirectory "C:\ProgramData\PCDoctor\baseline"
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\logs" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\reports" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\snapshots" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\exports" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\claude-bridge" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\history" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\baseline" /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q'
+  ; workbench.db lives at the root but must be writable by the user.
+  ; Grant Modify on the specific files (won't propagate to other root files).
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db" /grant "*S-1-5-32-545:M" /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-wal" /grant "*S-1-5-32-545:M" /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-shm" /grant "*S-1-5-32-545:M" /C /Q'
+
   ; Register Windows Scheduled Task for autostart at user logon.
   ; Writing an XML task definition avoids the nested-quote parser issue with schtasks /Create /TR.
   FileOpen $0 "$TEMP\PCDoctor-Autostart.xml" w

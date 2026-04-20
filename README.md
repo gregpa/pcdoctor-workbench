@@ -1,127 +1,123 @@
 # PCDoctor Workbench
 
-Electron desktop app providing a comprehensive PC maintenance dashboard on top of the existing `C:\ProgramData\PCDoctor\` PowerShell diagnostic stack. Windows-only, local-only, system-tray resident.
+Electron + React + PowerShell desktop app for Windows PC maintenance. Tray-resident dashboard on top of a PowerShell diagnostic stack at `C:\ProgramData\PCDoctor\`.
 
-## Features (v2.0.0)
+---
+
+## ⚠ Read This First — This Is A Personal Tool
+
+**PCDoctor Workbench is built for my personal PC** (Alienware Aurora R11, Win 11 Pro, specific NAS layout). It is NOT a supported product. The public repo exists for transparency, code review, and reuse of ideas — not drop-in installation.
+
+Specifically, today:
+
+- **No code-signing cert.** Windows SmartScreen will warn. The auto-updater has no cryptographic signature verification — whoever controls this GitHub account can push binaries that run with your Admin consent. If you install from my releases, you are trusting my account's integrity.
+- **Hardcoded personal assumptions.** NAS IP `192.168.50.226`, specific drive-letter mappings (M/Z/W/V/B/U), Alienware AWCC tool, MemTest86 USB disk enumeration — all tuned to my machine. Fresh clones will hit these as no-ops or errors.
+- **No setup wizard.** First-run expects you to have HWiNFO, OCCT, Malwarebytes, AdwCleaner, Microsoft Safety Scanner, and Claude Code CLI pre-installed or at least reachable via `winget`.
+- **Windows 11 only.** Some scanners parse English-language `schtasks.exe` output and Win 11 event-log schemas.
+
+If you want to **fork and reconfigure**, see [`docs/PUBLIC_READINESS.md`](docs/PUBLIC_READINESS.md) for the work required to make this a genuinely portable tool.
+
+If you want to **read the code** for ideas (IPC allow-lists, rollback semantics, PS-sentinel pattern, UAC-per-action elevation, scheduled-task COM API, embedded Claude terminal via node-pty), skim `src/main/` and `powershell/actions/`. The architecture is reusable.
+
+---
+
+## What It Does
 
 ### 📊 Dashboard
-- Live KPI cards (CPU load, RAM, disks, NAS, services, uptime) with week-over-week delta indicators
-- 270° SVG gauges + 7-day trend line charts (CPU load) + event-log bar chart
-- SMART disk health table (per-drive wear, temp, errors)
-- Services & Processes pill panel (9 key services with status dots, click to restart)
-- Active Alerts with inline Fix + 🤖 Investigate buttons (live spinner + elapsed time)
-- Security posture compact card (Defender, Firewall, WU, Failed Logins, BitLocker, UAC, GPU driver)
-- **Clean My PC** threshold-gated suite runner with per-step progress
+- Live KPI cards (CPU load, RAM, disks, NAS, services, uptime) with week-over-week deltas
+- 270° SVG gauges + 7-day trend charts (click to expand with full hover tooltips + Min/Max/Avg/P95)
+- SMART disk health table; Services & Processes health pills
+- Active Alerts with inline Fix + 🤖 Investigate buttons
+- **Clean My PC** threshold-gated cleanup suite
 
 ### 🛡 Security
-- Clickable panels open detail modals with inline Fix actions
-- Microsoft Defender status + Quick/Full/Offline scans + definition updates
-- Windows Firewall profiles + rule count + reset
-- Windows Update (pending, security-only, reboot state, stuck-update detection)
-- Failed logon events with top source IPs + one-click Block IP
-- BitLocker status + Enable action + Create Shadow Copy
-- UAC status with explicit re-enable instructions
-- GPU driver age with Nvidia latest-version check
-- Persistence diff (startup, tasks, services) with Approve/Remove per item + 🤖 Investigate
-- Threat indicators (cryptominer heuristics with expanded whitelist, suspicious PS, LOLBAS abuse, unusual parent-child, RDP brute-force)
-- Shell handler signature audit
-- Signature spot-check on processes from Temp/Downloads/AppData
-- Hosts file integrity check
-
-### 🪟 Windows Updates
-- Per-KB pending list with security flagging + install buttons
-- Stuck-update detection with one-click Repair
-- Feature-upgrade readiness check (disk, reboot, BSODs, driver age)
-- Dell Command Update integration
-- Nvidia driver age via latest-version feed check
-- Install-All, Security-Only, Install-KB, Hide-KB, Repair actions
+- Windows Defender status + Quick/Full/Offline scans
+- Firewall profiles + rule count + reset
+- Windows Update (pending, security-only, stuck-update detection)
+- Failed logon audit with top source IPs + one-click Block (routed through audit log + rollback)
+- BitLocker, UAC, GPU driver age, Persistence diff, Threat indicators, Shell handler signature audit, Hosts file integrity
 
 ### 🧰 Tools Launcher
-- 20-tile grid across 6 categories (Hardware, Security, Forensics, Disk, Diagnostic, Native)
-- Auto-detect via file paths + winget list fallback
-- One-click install via winget (with post-install polling)
-- **Install All Missing** bulk installer
-- Per-tool launch presets (multi-mode dropdown)
-- HWiNFO CSV + OCCT CSV import & parse (min/avg/max per sensor)
-
-### 🧠 MemTest86 Guided Wizard
-- 4-step flow: Download → Rufus → Reboot → Record outcome
+- 20-tile grid, auto-detect via filesystem probe + winget fallback
+- Per-tool launch presets + HWiNFO/OCCT CSV import
 
 ### 📋 Weekly Review
-- Structured Monday-morning briefing (Sun 10 PM PS task)
-- Priority-grouped action items (critical/important/info) with inline Fix
-- Per-item state: pending / applied / dismissed / snoozed / auto_resolved
-- Historical navigation (← Prev / Next →) through all past reviews
-- Progress bar showing how many items acted on
-- Archive to Obsidian Vault + Print button
+- Sun 10 PM automated briefing with priority-grouped action items
+- Historical navigation + Archive to Obsidian Vault
 
 ### 🔮 Forecast Engine
 - Linear regression + EWMA over 90 days of metrics
-- Projected threshold-crossing dates with confidence scoring (HIGH/MEDIUM/LOW)
-- Preventive action buttons inline
-- Trigger-based notifications when <7 days to critical
+- Projected threshold-crossing dates with confidence scores
 
-### 📜 Action History
-- Grouped by day with per-row status icons
-- Click any row → full detail modal with params + result + error
-- Revert for Tier A/B actions + 🤖 Investigate for failures
+### 🤖 Autopilot
+- 25 default rules (Tier 1/2/3) with schedule + threshold triggers
+- Export/import rule sets; per-rule enable/disable/suppress
+- Tier 3 rules alert via Telegram before acting
 
 ### 🔔 Notifications
-- Windows toast + Telegram bot
-- Two-step Telegram confirmation for destructive actions
-- Per-event × per-channel notification matrix in Settings
-- DPAPI-encrypted Telegram bot token (Windows safeStorage)
-- Quiet hours
+- Windows toast + Telegram bot (DPAPI-encrypted token, two-step confirmation for destructive actions)
+- Quiet hours + email digest buffering + morning flush
 
-### 🤖 Claude Code Integration
-- "Open Claude Terminal" launches in Windows Terminal with system context pre-loaded
-- "Investigate with Claude" buttons on alerts, persistence items, failed actions
-- Claude bridge: Claude can request actions via `commands.jsonl` → user approval modal → execution → result in `responses.jsonl`
-
-### ⚙ Settings
-- Telegram setup wizard with test message
-- Notification matrix (events × channels)
-- Quiet hours
-- **Scheduled task editor** - enable/disable/run-now for all 9 PCDoctor scheduled tasks
-- **Diagnostic bundle export** - zips logs, settings (redacted), reports, and audit log for support
+### 🧠 Claude Code Integration
+- Embedded xterm.js terminal (via node-pty) with system context pre-loaded
+- External Window fallback via Windows Terminal
+- "Investigate with Claude" buttons on alerts/persistence/failed actions
+- Bridge file (`commands.jsonl` / `responses.jsonl`) for Claude-initiated actions with approval modal
 
 ### 🧱 Infrastructure
-- 40+ one-click actions across 8 categories with Tier A/B/C rollback
-- Action parameter UI with Dry Run checkbox
-- Rollback system: Windows System Restore (Tier A) + File snapshots (Tier B)
-- SQLite persistence: metrics, actions_log, rollbacks, forecasts, weekly_review_states, persistence_baseline, security_scans, notification_log, seen_findings, workbench_settings
-- Auto-registered scheduled tasks on first launch
-- NSIS installer with XML-based autostart task registration
+- ~60 one-click actions across 8 categories with Tier A/B/C rollback semantics
+- **Tier A**: Windows System Restore Point (refuses to record rollback row if RP creation fails)
+- **Tier B**: File-level snapshot with SHA-256 integrity verification on revert + disk-space preflight
+- **Tier C**: No automatic rollback (action is destructive-but-acceptable, documented in tooltip)
+- SQLite with WAL + busy_timeout + foreign_keys; user_version-based migration framework
+- Auto-updater: GitHub Releases provider; benign errors classified as idle "not configured" state
+- NSIS installer with ACL lockdown on `C:\ProgramData\PCDoctor\` (Users:RX on scripts, Users:M on data subdirs)
+
+---
 
 ## Develop
 
 ```bash
+git clone https://github.com/gregpa/pcdoctor-workbench
+cd pcdoctor-workbench
 npm install
-npm run dev
+npm run dev              # renderer + main hot-reload
 ```
 
-## Run tests
+### Tests + typecheck
 
 ```bash
-npm test            # once
-npm run test:watch  # watch
 npm run typecheck
+npm test                 # once
+npm run test:watch       # watch
 ```
 
-## Build installer
+### Build installer
 
 ```bash
+npm rebuild better-sqlite3                  # for your Node (test env)
 npm run build
-npm run package
+npx @electron/rebuild -f -o better-sqlite3  # for Electron ABI
+npm run package                             # writes release/PCDoctor-Workbench-Setup-X.Y.Z.exe
 ```
 
-Installer produced in `release/PCDoctor Workbench-Setup-<version>.exe`.
+**Note on the repo path:** `node-pty` native dependency requires a path without spaces (Python `node-gyp` chokes otherwise). Keep the checkout under something like `C:\dev\pcdoctor-workbench`.
+
+---
 
 ## Troubleshooting
 
-- **better-sqlite3 ABI mismatch:** `npx electron-rebuild -f -w better-sqlite3`
-- **"No diagnostic report" banner:** run `Invoke-PCDoctor.ps1 -Mode Report` to seed `latest.json`
-- **SMART tiles empty:** install smartmontools - `winget install smartmontools.smartmontools`
-- **PSWindowsUpdate not needed:** we use native `Microsoft.Update.Session` COM API
-- **Telegram bot not triggering actions:** ensure polling enabled and chat ID matches configured value
-- **Tray icon missing color:** verify `resources/icons/tray-*.ico` present in install dir
+- **better-sqlite3 ABI mismatch** → `npx @electron/rebuild -f -o better-sqlite3` (for the packaged Electron) or `npm rebuild better-sqlite3` (for vitest under Node).
+- **"No diagnostic report" banner** → `powershell -File C:\ProgramData\PCDoctor\Invoke-PCDoctor.ps1 -Mode Report`
+- **SMART tiles empty** → `winget install smartmontools.smartmontools`
+- **Scheduled tasks all "Not registered"** (v2.3.3 and earlier) → upgrade; the COM-API query shipped in v2.3.4 fixes this.
+- **Embedded Claude terminal unavailable** → repo checkout path contains a space. Move to a space-free location, delete `node_modules`, reinstall.
+- **Auto-update "Error: not signed by publisher"** → this was a transient v2.3.7 issue. Upgrade manually to v2.3.8+ which removed the `publisherName` field; auto-updates resume.
+
+---
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+Third-party tools launched by the app (HWiNFO, OCCT, Malwarebytes, AdwCleaner, Microsoft Safety Scanner, Sysinternals Autoruns, Dell Command Update, AWCC, etc.) are NOT redistributed — the app detects them via filesystem/winget and launches the user-installed copy. Each has its own license.

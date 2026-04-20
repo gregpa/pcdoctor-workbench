@@ -114,12 +114,14 @@ try {
         $geo = @{ country = $null; city = $null; isp = $null; org = $null }
         if ($ip -notmatch '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.0\.0\.1)') {
             try {
-                $resp = Invoke-RestMethod -Uri "http://ip-api.com/json/$ip?fields=status,country,city,isp,org" -TimeoutSec 3 -ErrorAction Stop
-                if ($resp.status -eq 'success') {
-                    $geo.country = "$($resp.country)"
+                # Reviewer P1: previous provider (ip-api.com) only serves HTTP on the
+                # free tier. Switched to ipapi.co which supports HTTPS without a key.
+                $resp = Invoke-RestMethod -Uri "https://ipapi.co/$ip/json/" -TimeoutSec 3 -ErrorAction Stop
+                if ($resp -and -not $resp.error) {
+                    $geo.country = "$($resp.country_name)"
                     $geo.city = "$($resp.city)"
-                    $geo.isp = "$($resp.isp)"
-                    $geo.org = "$($resp.org)"
+                    $geo.isp = "$($resp.org)"
+                    $geo.org = "$($resp.asn)"
                 }
             } catch {}
         } else {

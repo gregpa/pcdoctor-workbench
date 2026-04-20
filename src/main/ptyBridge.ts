@@ -36,6 +36,17 @@ interface ActiveSession {
 
 const sessions = new Map<string, ActiveSession>();
 
+// Reviewer P1: validate channel-bearing ids from the renderer. If the
+// renderer is compromised (e.g. via a future malicious dep), a crafted id
+// could collide with other app IPC channels. 1-64 chars of safe charset.
+const CHANNEL_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+function assertValidChannelId(id: unknown): string {
+  if (typeof id !== 'string' || !CHANNEL_ID_RE.test(id)) {
+    throw new Error(`Invalid channel id; expected /^[a-zA-Z0-9_-]{1,64}$/`);
+  }
+  return id;
+}
+
 async function buildContextFile(contextText?: string): Promise<string> {
   const sessionDir = path.join(os.tmpdir(), `pcdoctor-claude-pty-${Date.now()}`);
   await mkdir(sessionDir, { recursive: true });
@@ -69,7 +80,9 @@ export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle('api:claudePty:spawn', async (_evt, opts: { id: string; contextText?: string; cols?: number; rows?: number }): Promise<{ ok: boolean; error?: string }> => {
-    const { id, contextText, cols, rows } = opts;
+    let id: string;
+    try { id = assertValidChannelId(opts?.id); } catch (e: any) { return { ok: false, error: e?.message ?? 'Invalid id' }; }
+    const { contextText, cols, rows } = opts;
     if (sessions.has(id)) return { ok: false, error: 'Session already exists' };
 
     const ok = await ensurePtyLoaded();
