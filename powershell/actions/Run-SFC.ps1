@@ -40,9 +40,21 @@ if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Adm
     exit 1
 }
 
-# sfc.exe writes progress to the console with CR-only line endings; PowerShell
-# captures those as separate lines. We parse the final outcome from the output.
-$output = & sfc /scannow 2>&1 | Out-String
+# sfc.exe writes to the console in UTF-16 LE; PowerShell's default output
+# encoding is UTF-8, so piping raw to Out-String preserves the UTF-16 bytes
+# and downstream tools see \u0000V\u0000e\u0000r... instead of "Ver...".
+# Force the output encoding to Unicode (UTF-16 LE) for this child, then
+# convert back to UTF-8 for JSON serialization.
+$prevOutputEncoding = [Console]::OutputEncoding
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+    $output = & sfc /scannow 2>&1 | Out-String
+} finally {
+    [Console]::OutputEncoding = $prevOutputEncoding
+}
+# Strip any stray nulls that still bleed through, then collapse the scattered
+# progress lines (sfc emits "Verification X% complete." repeatedly).
+$output = $output -replace '\x00', ''
 $exit = $LASTEXITCODE
 
 # Verify SFC actually ran a scan. If stdout has neither the start banner nor

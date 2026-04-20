@@ -1,6 +1,7 @@
 import { useHistory } from '@renderer/hooks/useHistory.js';
 import { useConfirm } from '@renderer/lib/confirmContext.js';
 import { formatDurationMs } from '@renderer/lib/formatters.js';
+import { api } from '@renderer/lib/ipc.js';
 import { useState } from 'react';
 import type { AuditLogEntry } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
@@ -135,6 +136,58 @@ export function History() {
             )}
 
             <div className="flex justify-end gap-2">
+              <button
+                onClick={async () => {
+                  // Build a plain-text payload that's useful for pasting into
+                  // a ticket, Claude, or a notes app.
+                  const payload = [
+                    `# ${detailItem.action_label}`,
+                    `Ran: ${new Date(detailItem.ts).toLocaleString()}`,
+                    `Duration: ${detailItem.duration_ms != null ? detailItem.duration_ms + 'ms' : '-'}`,
+                    `Triggered by: ${detailItem.triggered_by}`,
+                    `Status: ${detailItem.status}`,
+                    detailItem.rollback_id ? `Rollback ID: ${detailItem.rollback_id}` : '',
+                    detailItem.reverted_at ? `Reverted at: ${new Date(detailItem.reverted_at).toISOString()}` : '',
+                    detailItem.params ? '\n## Parameters\n' + JSON.stringify(detailItem.params, null, 2) : '',
+                    detailItem.error_message ? '\n## Error\n' + detailItem.error_message : '',
+                    detailItem.result ? '\n## Result\n' + JSON.stringify(detailItem.result, null, 2) : '',
+                  ].filter(Boolean).join('\n');
+                  const r = await (api as any).writeClipboard?.(payload);
+                  setToast(r?.ok ? 'Copied to clipboard' : `Copy failed: ${r?.error?.message ?? 'unknown'}`);
+                  setTimeout(() => setToast(null), 3000);
+                }}
+                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+                title="Copy this result as a plain-text report to the clipboard"
+              >
+                📋 Copy
+              </button>
+              <button
+                onClick={async () => {
+                  const payload = [
+                    `# ${detailItem.action_label}`,
+                    `Ran: ${new Date(detailItem.ts).toLocaleString()}`,
+                    `Duration: ${detailItem.duration_ms != null ? detailItem.duration_ms + 'ms' : '-'}`,
+                    `Triggered by: ${detailItem.triggered_by}`,
+                    `Status: ${detailItem.status}`,
+                    detailItem.rollback_id ? `Rollback ID: ${detailItem.rollback_id}` : '',
+                    detailItem.reverted_at ? `Reverted at: ${new Date(detailItem.reverted_at).toISOString()}` : '',
+                    detailItem.params ? '\n## Parameters\n' + JSON.stringify(detailItem.params, null, 2) : '',
+                    detailItem.error_message ? '\n## Error\n' + detailItem.error_message : '',
+                    detailItem.result ? '\n## Result\n' + JSON.stringify(detailItem.result, null, 2) : '',
+                  ].filter(Boolean).join('\n');
+                  const r = await (api as any).saveActionResult?.(detailItem.action_name, detailItem.ts, payload);
+                  if (r?.ok) {
+                    setToast(`Saved to ${r.data.path}`);
+                  } else {
+                    setToast(`Save failed: ${r?.error?.message ?? 'unknown'}`);
+                  }
+                  setTimeout(() => setToast(null), 5000);
+                }}
+                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+                title="Save this result to C:\\ProgramData\\PCDoctor\\exports\\"
+              >
+                💾 Save to File
+              </button>
               <button onClick={() => setDetailItem(null)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Close</button>
             </div>
           </div>

@@ -10,6 +10,7 @@ const api = {
   setZoom: (delta: number): Promise<IpcResult<number>> => ipcRenderer.invoke('api:setZoom', delta),
   getZoom: (): Promise<IpcResult<number>> => ipcRenderer.invoke('api:getZoom'),
   writeClipboard: (text: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:writeClipboard', text),
+  saveActionResult: (actionName: string, ts: number, body: string): Promise<IpcResult<{ path: string }>> => ipcRenderer.invoke('api:saveActionResult', actionName, ts, body),
   getToolUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getToolUpdates'),
   refreshToolUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:refreshToolUpdates'),
   upgradeTool: (wingetId: string): Promise<IpcResult<any>> => ipcRenderer.invoke('api:upgradeTool', wingetId),

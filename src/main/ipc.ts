@@ -88,6 +88,24 @@ export function registerIpcHandlers() {
   // IPC returned the token but the renderer clipboard API threw). Using
   // Electron's clipboard module from the main process sidesteps the
   // renderer sandbox restriction entirely.
+  // v2.4.2: save any action result to the exports folder as a .md file.
+  // Sanitizes action_name + timestamp so the filename is deterministic and
+  // safe. Path goes into a toast so the user can find the file.
+  ipcMain.handle('api:saveActionResult', async (_evt, actionName: string, ts: number, body: string): Promise<IpcResult<{ path: string }>> => {
+    try {
+      const safeName = String(actionName ?? 'result').replace(/[^a-z0-9_-]/gi, '_').slice(0, 64);
+      const stamp = new Date(ts ?? Date.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const exportsDir = path.join(PCDOCTOR_ROOT, 'exports');
+      await mkdir(exportsDir, { recursive: true });
+      const filePath = path.join(exportsDir, `${safeName}_${stamp}.md`);
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(filePath, typeof body === 'string' ? body : String(body), 'utf8');
+      return { ok: true, data: { path: filePath } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
   ipcMain.handle('api:writeClipboard', async (_evt, text: string): Promise<IpcResult<{}>> => {
     try {
       const { clipboard } = await import('electron');
