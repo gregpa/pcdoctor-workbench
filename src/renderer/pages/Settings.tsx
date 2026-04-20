@@ -461,9 +461,8 @@ export function Settings() {
       <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
         <h2 className="text-sm font-bold mb-3">🔄 Auto-Update</h2>
         <div className="text-xs text-text-secondary mb-3">
-          Auto-update disabled in this build (electron-updater requires http/https feed URLs).
-          To enable, serve the NAS share over HTTP and set <code>publish.url</code> in
-          <code> electron-builder.yml</code>, then rebuild.
+          Checks <a href="https://github.com/gregpa/pcdoctor-workbench/releases" target="_blank" rel="noreferrer" className="text-status-info underline">GitHub Releases</a> every 6 hours.
+          New builds pushed to the repo auto-download (with your approval).
         </div>
         <div className="bg-surface-900 border border-surface-700 rounded-md p-3 mb-3">
           <div className="text-[10px] uppercase tracking-wider text-text-secondary mb-1">Status</div>

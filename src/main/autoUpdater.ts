@@ -81,37 +81,44 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   });
 }
 
-// electron-updater's ClientRequest only accepts http: and https:. A file://
-// or UNC publish URL fails with "ClientRequest only supports http: and https:
-// protocols" on every check. Guard here so misconfigured URLs degrade to an
-// informational 'idle' state instead of spamming error toasts every 6 hours.
-function feedUrlIsUsable(): boolean {
-  try {
-    const feed = autoUpdater.getFeedURL();
-    if (!feed) return false;
-    return /^https?:\/\//i.test(feed);
-  } catch {
-    return false;
-  }
+// Translate the two expected "benign" error classes into an informational
+// idle status rather than a red error banner:
+//   - No publish config at build time -> app-update.yml missing -> "unable to
+//     find latest version" or "ENOENT". Means auto-update isn't configured.
+//   - Non-http feed URL (e.g. a stray file://) -> "ClientRequest only
+//     supports http: and https: protocols".
+function classifyUpdateError(msg: string): 'not_configured' | 'other' {
+  const m = (msg || '').toLowerCase();
+  if (m.includes('app-update.yml')) return 'not_configured';
+  if (m.includes('enoent')) return 'not_configured';
+  if (m.includes('unable to find latest version')) return 'not_configured';
+  if (m.includes('clientrequest only supports')) return 'not_configured';
+  return 'other';
 }
 
 export async function checkForUpdates(): Promise<void> {
-  if (!feedUrlIsUsable()) {
-    setStatus({ state: 'idle', message: 'Auto-update not configured (needs http/https feed URL)' });
-    return;
-  }
-  try { await autoUpdater.checkForUpdates(); } catch (e: any) {
-    setStatus({ state: 'error', message: e?.message ?? 'Update check failed' });
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (e: any) {
+    const msg = e?.message ?? 'Update check failed';
+    if (classifyUpdateError(msg) === 'not_configured') {
+      setStatus({ state: 'idle', message: 'Auto-update not configured' });
+    } else {
+      setStatus({ state: 'error', message: msg });
+    }
   }
 }
 
 export async function downloadUpdate(): Promise<void> {
-  if (!feedUrlIsUsable()) {
-    setStatus({ state: 'idle', message: 'Auto-update not configured' });
-    return;
-  }
-  try { await autoUpdater.downloadUpdate(); } catch (e: any) {
-    setStatus({ state: 'error', message: e?.message ?? 'Download failed' });
+  try {
+    await autoUpdater.downloadUpdate();
+  } catch (e: any) {
+    const msg = e?.message ?? 'Download failed';
+    if (classifyUpdateError(msg) === 'not_configured') {
+      setStatus({ state: 'idle', message: 'Auto-update not configured' });
+    } else {
+      setStatus({ state: 'error', message: msg });
+    }
   }
 }
 

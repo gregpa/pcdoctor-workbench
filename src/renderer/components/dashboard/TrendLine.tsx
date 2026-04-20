@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from 'react';
 import type { Trend, Severity } from '@shared/types.js';
 import { severityStrokeHex } from '@renderer/lib/thresholds.js';
 
@@ -7,9 +8,10 @@ interface TrendLineProps {
   severity?: Severity;
   height?: number;
   yDomain?: [number, number];
+  onExpand?: () => void;
 }
 
-export function TrendLine({ title, trend, severity = 'info', height = 120, yDomain }: TrendLineProps) {
+export function TrendLine({ title, trend, severity = 'info', height = 120, yDomain, onExpand }: TrendLineProps) {
   const { points } = trend;
   const W = 400;
   const H = height;
@@ -46,9 +48,26 @@ export function TrendLine({ title, trend, severity = 'info', height = 120, yDoma
   // Y-axis ticks at min, mid, max
   const ticks = [min, (min + max) / 2, max];
 
+  const interactive = !!onExpand;
+  const wrapperProps = interactive
+    ? {
+        className: 'bg-surface-800 border border-surface-600 rounded-lg p-3 cursor-pointer hover:border-surface-500 transition-colors group',
+        onClick: onExpand,
+        role: 'button' as const,
+        tabIndex: 0,
+        title: 'Click to expand',
+        onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand?.(); } },
+      }
+    : { className: 'bg-surface-800 border border-surface-600 rounded-lg p-3' };
+
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
-      <div className="text-[9.5px] uppercase tracking-wider text-text-secondary mb-1">{title}</div>
+    <div {...wrapperProps}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-[9.5px] uppercase tracking-wider text-text-secondary">{title}</div>
+        {interactive && (
+          <div className="text-[9px] text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity">Click to expand</div>
+        )}
+      </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         {ticks.map((t, i) => (
           <g key={i}>

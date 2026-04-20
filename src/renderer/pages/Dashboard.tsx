@@ -12,6 +12,7 @@ import { Gauge } from '@renderer/components/dashboard/Gauge.js';
 import { ActionButton } from '@renderer/components/dashboard/ActionButton.js';
 import { AlertCard } from '@renderer/components/dashboard/AlertCard.js';
 import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
+import { TrendLineModal } from '@renderer/components/dashboard/TrendLineModal.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
 import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
 import { AuthEventsWidget } from '@renderer/components/dashboard/AuthEventsWidget.js';
@@ -82,6 +83,7 @@ export function Dashboard() {
   const [scanning, setScanning] = useState(false);
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
+  const [expandedTrend, setExpandedTrend] = useState<null | { title: string; unit: string; yDomain?: [number, number] }>(null);
 
   async function handleRunScanNow() {
     if (scanning) return;
@@ -216,7 +218,13 @@ export function Dashboard() {
               <RamPressurePanel status={status} onKillProcess={(name) => handleAction('kill_process', { target: name })} />
             )}
             {cpuTrend ? (
-              <TrendLine title="CPU Load - 7 Day Trend" trend={cpuTrend} severity="info" yDomain={[0, 100]} />
+              <TrendLine
+                title="CPU Load - 7 Day Trend"
+                trend={cpuTrend}
+                severity="info"
+                yDomain={[0, 100]}
+                onExpand={() => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', unit: '%', yDomain: [0, 100] })}
+              />
             ) : (
               <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering trend data…</div>
             )}
@@ -465,6 +473,17 @@ export function Dashboard() {
             setShowStartupPicker(false);
             await handleAction('disable_startup_items_batch', { items_json: JSON.stringify(picks) });
           }}
+        />
+      )}
+
+      {expandedTrend && cpuTrend && (
+        <TrendLineModal
+          title={expandedTrend.title}
+          trend={cpuTrend}
+          severity="info"
+          unit={expandedTrend.unit}
+          yDomain={expandedTrend.yDomain}
+          onClose={() => setExpandedTrend(null)}
         />
       )}
 
