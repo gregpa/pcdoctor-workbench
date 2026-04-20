@@ -205,9 +205,16 @@ export async function runElevatedPowerShellScript<T = unknown>(
     `  Set-Content -Path '${safeExit}' -Value 1 -Encoding ascii ` +
     `}`;
 
+  // v2.4.1: -WindowStyle Hidden + -WindowStyle Hidden on both the outer
+  // Start-Process AND the child pwsh args so the elevated console never
+  // flashes visible. Previously users saw an empty black PS window for the
+  // full duration of long actions (SFC, DISM, Defender scans) because
+  // output was redirected to temp files and nothing rendered on screen.
+  // Workbench tile spinner already shows progress; the hidden window keeps
+  // focus on the app.
   const outerCmd =
-    `$p = Start-Process -FilePath '${pwsh.replace(/'/g, "''")}' -Verb RunAs -Wait -PassThru ` +
-    `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NonInteractive','-Command','${innerCmd.replace(/'/g, "''")}'); ` +
+    `$p = Start-Process -FilePath '${pwsh.replace(/'/g, "''")}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden ` +
+    `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NonInteractive','-WindowStyle','Hidden','-Command','${innerCmd.replace(/'/g, "''")}'); ` +
     `exit $p.ExitCode`;
 
   await new Promise<void>((resolve, reject) => {
