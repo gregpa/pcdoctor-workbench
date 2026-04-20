@@ -54,6 +54,41 @@ function createWindow() {
       mainWindow?.hide();
     }
   });
+
+  // Browser-style zoom via Ctrl+=/Ctrl+-/Ctrl+0. Also supports Ctrl+scroll.
+  // Persisted to the settings table so zoom survives restarts.
+  const wc = mainWindow.webContents;
+  const clamp = (n: number) => Math.max(-3, Math.min(5, n));
+
+  wc.on('did-finish-load', async () => {
+    try {
+      const { getSetting } = await import('./dataStore.js');
+      const saved = parseFloat(getSetting('ui_zoom_level') ?? '0');
+      if (!isNaN(saved)) wc.setZoomLevel(clamp(saved));
+    } catch { /* non-fatal */ }
+  });
+
+  const saveZoom = async (level: number) => {
+    try {
+      const { setSetting } = await import('./dataStore.js');
+      setSetting('ui_zoom_level', String(level));
+    } catch { /* non-fatal */ }
+  };
+
+  wc.on('before-input-event', (_e, input) => {
+    if (input.type !== 'keyDown' || !input.control) return;
+    if (input.key === '=' || input.key === '+') {
+      const lvl = clamp(wc.getZoomLevel() + 0.5);
+      wc.setZoomLevel(lvl); saveZoom(lvl);
+    } else if (input.key === '-') {
+      const lvl = clamp(wc.getZoomLevel() - 0.5);
+      wc.setZoomLevel(lvl); saveZoom(lvl);
+    } else if (input.key === '0') {
+      wc.setZoomLevel(0); saveZoom(0);
+    }
+  });
+
+  wc.setVisualZoomLevelLimits(1, 1); // disable pinch-zoom; Ctrl+wheel still works
 }
 
 async function backgroundPoll() {

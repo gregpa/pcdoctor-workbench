@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Severity } from '@shared/types.js';
 import { api } from '@renderer/lib/ipc.js';
 
@@ -14,6 +14,30 @@ interface HeaderBarProps {
 export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }: HeaderBarProps) {
   const [exporting, setExporting] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(0);
+
+  // Sync zoom widget with the actual window zoom on mount + any time it
+  // changes (Ctrl+= / Ctrl+- keyboard shortcuts are handled in main).
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      const r = await (api as any).getZoom?.();
+      if (alive && r?.ok && r.data !== zoomLevel) setZoomLevel(r.data);
+    };
+    poll();
+    const id = setInterval(poll, 1000);
+    return () => { alive = false; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function doZoom(delta: number) {
+    const r = await (api as any).setZoom?.(delta);
+    if (r?.ok) setZoomLevel(r.data);
+  }
+
+  // zoomLevel of 0 == 100%. Each step is ~25%; the formula matches the way
+  // Chromium maps SetZoomLevel to a visible percentage.
+  const zoomPct = Math.round(Math.pow(1.2, zoomLevel) * 100);
 
   const badgeClass =
     severity === 'crit' ? 'bg-status-crit/10 text-status-crit border-status-crit/40' :
@@ -57,6 +81,26 @@ export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }:
           <div className="text-[10px] text-text-secondary mt-1">{subtitle}</div>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5 bg-surface-900 border border-surface-600 rounded-md" title="Zoom (Ctrl+= / Ctrl+- / Ctrl+0)">
+            <button
+              onClick={() => doZoom(-0.5)}
+              className="px-2 py-1 text-xs hover:bg-surface-700 rounded-l-md"
+              aria-label="Zoom out"
+              disabled={zoomLevel <= -3}
+            >-</button>
+            <button
+              onClick={() => doZoom(0)}
+              className="px-2 py-1 text-[10px] font-mono text-text-secondary hover:bg-surface-700 min-w-[48px]"
+              aria-label="Reset zoom"
+              title="Click to reset to 100%"
+            >{zoomPct}%</button>
+            <button
+              onClick={() => doZoom(0.5)}
+              className="px-2 py-1 text-xs hover:bg-surface-700 rounded-r-md"
+              aria-label="Zoom in"
+              disabled={zoomLevel >= 5}
+            >+</button>
+          </div>
           <button
             type="button"
             onClick={() => {

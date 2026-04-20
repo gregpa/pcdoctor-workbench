@@ -62,6 +62,27 @@ export function registerIpcHandlers() {
     }
   });
 
+  // Browser-style zoom. Matches Ctrl+=, Ctrl+-, Ctrl+0 accelerators wired
+  // in main.ts; also callable from the HeaderBar zoom widget. Level is
+  // clamped to [-3, 5] which maps roughly to 50% - 250%.
+  ipcMain.handle('api:setZoom', (evt, delta: number): IpcResult<number> => {
+    try {
+      const wc = evt.sender;
+      const clamp = (n: number) => Math.max(-3, Math.min(5, n));
+      const next = delta === 0 ? 0 : clamp(wc.getZoomLevel() + delta);
+      wc.setZoomLevel(next);
+      try { setSetting('ui_zoom_level', String(next)); } catch {}
+      return { ok: true, data: next };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
+  ipcMain.handle('api:getZoom', (evt): IpcResult<number> => {
+    try { return { ok: true, data: evt.sender.getZoomLevel() }; }
+    catch (e: any) { return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } }; }
+  });
+
   ipcMain.handle('api:getStatus', async (): Promise<IpcResult<SystemStatus>> => {
     try {
       const data = await getStatus();
