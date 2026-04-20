@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync } fr
 import path from 'node:path';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { runPowerShellScript } from './scriptRunner.js';
-import { createRollbackRow, getRollback, markRollbackReverted, pruneExpiredRollbacks } from './dataStore.js';
+import { createRollbackRow, getRollback, markRollbackReverted, pruneExpiredRollbacks, updateRollbackSnapshotPath } from './dataStore.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionDefinition } from '@shared/actions.js';
 
@@ -95,21 +95,9 @@ export async function prepareRollback(
   return rollbackId;
 }
 
-/** Helper - writes snapshot_path to an existing rollback row. */
-function updateRollbackSnapshotPath(id: number, snapshotPath: string) {
-  // We avoid circular deps by doing this via dataStore in a small patch.
-  // For simplicity, use a direct SQL via the shared db connection.
-  // This function should be moved to dataStore if used more than here.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const Database: new (p: string) => import('better-sqlite3').Database = require('better-sqlite3');
-  const { WORKBENCH_DB_PATH } = require('./constants.js');
-  const conn = new Database(WORKBENCH_DB_PATH);
-  try {
-    conn.prepare(`UPDATE rollbacks SET snapshot_path = ? WHERE id = ?`).run(snapshotPath, id);
-  } finally {
-    conn.close();
-  }
-}
+// Note: updateRollbackSnapshotPath is now imported from dataStore (above).
+// The previous inline "new Database(...)" opened a second connection to the
+// WAL-mode DB which raced with the primary and surfaced as SQLITE_READONLY.
 
 export type RevertOutcome =
   | { method: 'system-restore'; reboot_required: true; rp_seq: number }

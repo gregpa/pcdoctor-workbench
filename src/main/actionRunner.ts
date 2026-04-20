@@ -1,7 +1,7 @@
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, ActionResult } from '@shared/types.js';
 import { runPowerShellScript, PCDoctorScriptError } from './scriptRunner.js';
-import { startActionLog, finishActionLog, insertToolResult } from './dataStore.js';
+import { startActionLog, finishActionLog, insertToolResult, updateActionLogRollbackId } from './dataStore.js';
 import { prepareRollback } from './rollbackManager.js';
 import { notify } from './notifier.js';
 
@@ -36,15 +36,10 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     try {
       rollbackId = await prepareRollback(def, logId);
       if (rollbackId !== null) {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Database: new (p: string) => import('better-sqlite3').Database = require('better-sqlite3');
-        const { WORKBENCH_DB_PATH } = require('./constants.js');
-        const conn = new Database(WORKBENCH_DB_PATH);
-        try {
-          conn.prepare(`UPDATE actions_log SET rollback_id = ? WHERE id = ?`).run(rollbackId, logId);
-        } finally {
-          conn.close();
-        }
+        // Use the dataStore singleton connection. Opening a second connection
+        // to a WAL-mode DB from the same process can race with the primary
+        // connection's write transaction and surface as SQLITE_READONLY.
+        updateActionLogRollbackId(logId, rollbackId);
       }
     } catch (e) {
       // Proceeding without rollback - action may still succeed, but revert won't be available.

@@ -216,6 +216,16 @@ export function markActionReverted(id: number) {
   openDb().prepare(`UPDATE actions_log SET reverted_at = ? WHERE id = ?`).run(Date.now(), id);
 }
 
+/** Set the rollback_id on an existing actions_log row. */
+export function updateActionLogRollbackId(actionLogId: number, rollbackId: number) {
+  openDb().prepare(`UPDATE actions_log SET rollback_id = ? WHERE id = ?`).run(rollbackId, actionLogId);
+}
+
+/** Set the snapshot_path on an existing rollbacks row. */
+export function updateRollbackSnapshotPath(rollbackId: number, snapshotPath: string) {
+  openDb().prepare(`UPDATE rollbacks SET snapshot_path = ? WHERE id = ?`).run(snapshotPath, rollbackId);
+}
+
 export interface ActionLogRow {
   id: number;
   ts: number;
