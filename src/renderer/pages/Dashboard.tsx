@@ -11,9 +11,12 @@ import { KpiCard } from '@renderer/components/dashboard/KpiCard.js';
 import { Gauge } from '@renderer/components/dashboard/Gauge.js';
 import { ActionButton } from '@renderer/components/dashboard/ActionButton.js';
 import { AlertCard } from '@renderer/components/dashboard/AlertCard.js';
+import { AlertDetailModal } from '@renderer/components/dashboard/AlertDetailModal.js';
+import type { Finding } from '@shared/types.js';
 import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
 import { TrendLineModal } from '@renderer/components/dashboard/TrendLineModal.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
+import { EventLogDetailModal } from '@renderer/components/dashboard/EventLogDetailModal.js';
 import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
 import { AuthEventsWidget } from '@renderer/components/dashboard/AuthEventsWidget.js';
 import { BsodPanel } from '@renderer/components/dashboard/BsodPanel.js';
@@ -75,7 +78,7 @@ export function Dashboard() {
   });
   const { trend: cpuTrend } = useTrend('cpu', 'load_pct', 7);
   const { trend: eventsTrend } = useTrend('events', 'system_count', 7);
-  const { data: security } = useSecurityPosture();
+  const { data: security, refresh: refreshSecurity } = useSecurityPosture();
   const { review: weeklyReview } = useWeeklyReview();
   const navigate = useNavigate();
   const [toast, setToast] = useState<string | null>(null);
@@ -85,6 +88,13 @@ export function Dashboard() {
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
   const [expandedTrend, setExpandedTrend] = useState<null | { title: string; unit: string; yDomain?: [number, number] }>(null);
+  // v2.4.6: Event Log chart click-to-expand. Opens a modal that fetches
+  // Get-EventLogBreakdown.ps1 on demand and lists the top providers/IDs.
+  const [showEventLogDetail, setShowEventLogDetail] = useState(false);
+  // v2.4.6: active alert detail modal. Hoisted to Dashboard so the modal
+  // is a sibling of the alert list (not a child of the clicked card),
+  // preventing click-bubble / hover flash cycles.
+  const [activeAlertDetail, setActiveAlertDetail] = useState<Finding | null>(null);
   const [lastActionSuccess, setLastActionSuccess] = useState<Record<string, number>>({});
 
   // Pull the action_name -> last-success-ts map so recommendations show
@@ -130,6 +140,10 @@ export function Dashboard() {
       }
       const fresh = await refetch();
       if (fresh && fresh.generated_at > beforeTs) {
+        // v2.4.6: Scan Now also re-fetches the security posture so Harden
+        // recommendations reflect live state (previously cached from first
+        // mount, so PUA/CFA changes required an app restart to surface).
+        void refreshSecurity();
         setScanning(false);
         setToast(`Scan complete · ${fresh.findings.length} findings`);
         setTimeout(() => setToast(null), 5000);
@@ -240,11 +254,29 @@ export function Dashboard() {
           : status.gauges.slice(0, 3);
         return (
           <div className="grid grid-cols-4 gap-2.5 mb-3">
-            {gaugesToShow.map((g) => (
-              <div key={g.label} className="bg-surface-800 border border-surface-600 rounded-lg p-3">
-                <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
-              </div>
-            ))}
+            {gaugesToShow.map((g) => {
+              // v2.4.6: click-to-expand on the CPU gauge opens the same
+              // 7-day trend modal the panel below uses. RAM/Disk gauges
+              // stay non-clickable until we wire per-metric trends —
+              // RAM already flips to the pressure panel at >75%, and
+              // disk trend is per-drive (needs a label filter on the
+              // useTrend hook that we don't have yet).
+              const isCpu = g.label?.toLowerCase().includes('cpu');
+              const clickable = isCpu && !!cpuTrend;
+              const onClick = clickable
+                ? () => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', unit: '%', yDomain: [0, 100] })
+                : undefined;
+              return (
+                <div
+                  key={g.label}
+                  className={`bg-surface-800 border border-surface-600 rounded-lg p-3 ${clickable ? 'cursor-pointer hover:border-status-info/60 transition-colors' : ''}`}
+                  onClick={onClick}
+                  title={clickable ? 'Click to open 7-day trend' : undefined}
+                >
+                  <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
+                </div>
+              );
+            })}
             {showPanel && (
               <RamPressurePanel status={status} onKillProcess={(name) => handleAction('kill_process', { target: name })} />
             )}
@@ -402,11 +434,8 @@ export function Dashboard() {
               <AlertCard
                 key={i}
                 finding={f}
+                onOpenDetail={setActiveAlertDetail}
                 onApply={async (name, params) => {
-                  // v2.3.14: ALWAYS open the picker for any disable_startup_item
-                  // click regardless of params. Previous code would auto-fire if
-                  // the recommendation pre-filled item_name (e.g. 'nzbget') -
-                  // violates user-in-the-loop for destructive edits to startup.
                   if (name === 'disable_startup_item') {
                     setShowStartupPicker(true);
                     return;
@@ -423,7 +452,14 @@ export function Dashboard() {
       <div className="grid grid-cols-3 gap-2.5">
         <SmartTable entries={status.smart ?? []} />
         {eventsTrend ? (
-          <TrendBar title="Event Log Errors - 7 Day" trend={eventsTrend} warnAt={300} critAt={500} />
+          <TrendBar
+            title="Event Log Errors - 7 Day"
+            trend={eventsTrend}
+            warnAt={300}
+            critAt={500}
+            onExpand={() => setShowEventLogDetail(true)}
+            expandHint="Click to see which providers and event IDs are driving the count"
+          />
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
         )}
@@ -519,6 +555,58 @@ export function Dashboard() {
           onClose={() => setExpandedTrend(null)}
         />
       )}
+
+      {showEventLogDetail && (
+        <EventLogDetailModal onClose={() => setShowEventLogDetail(false)} />
+      )}
+
+      {activeAlertDetail && (() => {
+        const f = activeAlertDetail;
+        const actionDef = f.suggested_action ? ACTIONS[f.suggested_action] : undefined;
+        const requiredParams = actionDef?.params_schema
+          ? Object.entries(actionDef.params_schema).filter(([, s]) => s.required).map(([k]) => k)
+          : [];
+        const derivedParams: Record<string, string> | undefined = (() => {
+          if (!actionDef?.params_schema || !f.detail || typeof f.detail !== 'object') return undefined;
+          const d = f.detail as Record<string, unknown>;
+          const out: Record<string, string> = {};
+          for (const k of Object.keys(actionDef.params_schema)) {
+            const v = d[k];
+            if (v != null) out[k] = String(v);
+          }
+          return Object.keys(out).length > 0 ? out : undefined;
+        })();
+        const missingParams = requiredParams.filter(k => !derivedParams || !derivedParams[k]);
+        const canAutoFix = !!actionDef && missingParams.length === 0;
+        const rec = f.suggested_action ? recommendAction(f.suggested_action, status, security) : null;
+        const blockedReason = rec?.level === 'blocked' ? rec.reason : undefined;
+        return (
+          <AlertDetailModal
+            finding={f}
+            actionDef={actionDef}
+            blockedReason={blockedReason}
+            canAutoFix={canAutoFix}
+            missingParams={missingParams}
+            onClose={() => setActiveAlertDetail(null)}
+            onFix={async () => {
+              if (!f.suggested_action) return;
+              if (f.suggested_action === 'disable_startup_item') {
+                setShowStartupPicker(true);
+                return;
+              }
+              await handleAction(f.suggested_action, derivedParams);
+            }}
+            onDismiss={() => setActiveAlertDetail(null)}
+            onInvestigateWithClaude={async () => {
+              const ctx = actionDef
+                ? `Investigate this alert:\n- Area: ${f.area}\n- Severity: ${f.severity}\n- Message: ${f.message}\n- Auto-fixed: ${f.auto_fixed}\n\nExplain the root cause, describe what the "${actionDef.label}" action would do, and recommend whether to run it.`
+                : `Investigate this alert:\n- Area: ${f.area}\n- Severity: ${f.severity}\n- Message: ${f.message}\n\nExplain what this means, why it matters, and what options the user has.`;
+              await (window as any).api.investigateWithClaude(ctx);
+              setActiveAlertDetail(null);
+            }}
+          />
+        );
+      })()}
 
       {toast && (
         <div className={`fixed bottom-4 right-4 rounded-lg px-4 py-3 text-sm shadow-xl flex items-center gap-3 ${

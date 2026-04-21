@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
+import { access, constants as fsConstants } from 'node:fs/promises';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
 import { getStatus } from './pcdoctorBridge.js';
@@ -26,10 +27,16 @@ let mainWindow: BrowserWindow | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
 
 function createWindow() {
+  // v2.4.6: show the window by default on launch. Previously always
+  // started hidden which was fine for the scheduled-task autostart at
+  // login but broke user expectation when double-clicking the desktop
+  // icon (app appeared to do nothing). The scheduled task now passes
+  // --hidden; only that suppresses the initial window.
+  const startHidden = process.argv.includes('--hidden');
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 980,
-    show: false,     // Start hidden - tray click reveals
+    show: !startHidden,
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
     webPreferences: {
@@ -135,6 +142,17 @@ async function backgroundPoll() {
 app.whenReady().then(() => {
   registerIpcHandlers();
 
+  // v2.4.6: sync NAS config (server IP + drive mappings) from the settings
+  // DB to the sidecar JSON at C:\ProgramData\PCDoctor\settings\nas.json.
+  // Scanner + Remap-NAS action read this file; falling back to hardcoded
+  // defaults if it's missing keeps fresh installs + upgrades silent.
+  (async () => {
+    try {
+      const { syncNasConfigToDisk } = await import('./nasConfig.js');
+      syncNasConfigToDisk();
+    } catch { /* non-fatal */ }
+  })();
+
   // Auto-register PCDoctor scheduled tasks (best-effort, once per session).
   // v2.3.0 B2: on the first launch of 2.3.0, force-recreate existing tasks so
   // the user/SYSTEM context split applies. This rewrites /RU for tasks that
@@ -164,23 +182,119 @@ app.whenReady().then(() => {
   //       the UAC-elevated path, which uses icacls to restore inheritance.
   //   (3) Remember the last repair_version so we don't spam UAC on every
   //       startup - only re-prompt when a new version ships.
+  //
+  // v2.4.6: BEFORE the ACL repair, run Sync-ScriptsFromBundle.ps1 to
+  // detect missing / size-mismatched scripts (root cause of the v2.4.4/5
+  // stale-deploy cascade). If any mismatches show up, we reuse the same
+  // once-per-upgrade UAC prompt to copy them from the bundle.
   (async () => {
     try {
       const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
       const thisVersion = app.getVersion();
       const lastRepair = getSetting('last_acl_repair_version');
-      const r = await runPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
-      if (r?.needs_elevation && lastRepair !== thisVersion) {
-        // Prompt UAC once per Workbench upgrade. The one-shot elevated
-        // run restores inheritance on every stripped file.
+
+      // Resolve the bundled powershell/ path. In a packaged app this sits
+      // at <resourcesPath>/powershell/ via electron-builder's
+      // extraResources. In dev, use the repo root.
+      const bundledPsDir = app.isPackaged
+        ? path.join(process.resourcesPath, 'powershell')
+        : path.join(app.getAppPath(), 'powershell');
+
+      let syncNeedsElevation = false;
+      try {
+        const syncResult = await runPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
+          '-SourceDir', bundledPsDir, '-JsonOutput',
+        ], { timeoutMs: 20_000 });
+        syncNeedsElevation = !!syncResult?.needs_elevation;
+      } catch { /* Sync probe failed - fall through to ACL repair anyway */ }
+
+      const aclResult = await runPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      const aclNeedsElevation = !!aclResult?.needs_elevation;
+
+      if ((syncNeedsElevation || aclNeedsElevation) && lastRepair !== thisVersion) {
+        // One UAC prompt per upgrade covers both the bundle sync and the
+        // ACL repair. Order matters: sync first (so fresh files land with
+        // correct ACLs from inheritance), then repair any zero-ACE files.
         try {
-          await runElevatedPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput', '-Elevated'], { timeoutMs: 60_000 });
+          if (syncNeedsElevation) {
+            await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
+              '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',
+            ], { timeoutMs: 60_000 });
+          }
+          if (aclNeedsElevation) {
+            await runElevatedPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput', '-Elevated'], { timeoutMs: 60_000 });
+          }
+          // v2.4.10: only mark this version repaired if the elevation chain
+          // actually completed. Prior code set the marker unconditionally
+          // after the if-block, so a UAC decline would silence future
+          // re-prompts even though nothing was repaired. Now the marker
+          // only persists on successful completion of the elevated calls.
+          setSetting('last_acl_repair_version', thisVersion);
         } catch { /* user declined UAC; we'll try again next upgrade */ }
+      } else {
+        // Nothing to repair OR already repaired at this version — safe to
+        // record the marker so we don't re-probe on every boot.
+        setSetting('last_acl_repair_version', thisVersion);
       }
-      // Record this version either way so we don't prompt repeatedly.
-      setSetting('last_acl_repair_version', thisVersion);
     } catch { /* non-fatal; most users will never hit this path */ }
+  })();
+
+  // v2.4.9: runtime ACL self-heal. Belt-and-suspenders on top of the
+  // installer's fixed ACL phase (installer.nsh → Apply-TieredAcl.ps1)
+  // and the pre-ship gate (scripts/test-installer-acl.ps1).
+  //
+  // Detects ACL breakage at startup by probing `reports/latest.json`:
+  //   - EPERM / EACCES → ACLs corrupted, invoke elevated Heal-InstallAcls.ps1
+  //   - ENOENT         → fresh install with no scan yet, skip
+  //   - OK             → healthy, skip
+  //
+  // The heal runs the same sequence as installer steps 2-7 (takeown +
+  // /reset + Apply-TieredAcl per subdir). One UAC prompt if the heal
+  // needs to fire. Non-fatal on failure — user gets the EPERM UI error
+  // and can run the hotfix manually.
+  //
+  // Why this exists: v2.4.6/7/8 all shipped with installer ACL bugs that
+  // left files unreadable. Having a runtime self-heal means future
+  // regressions — or external causes like malware, manual icacls misuse,
+  // Windows Update side-effects — don't require a manual hotfix.
+  (async () => {
+    try {
+      const { PCDOCTOR_ROOT } = await import('./constants.js');
+      const latestJsonPath = path.join(PCDOCTOR_ROOT, 'reports', 'latest.json');
+
+      let needsHeal = false;
+      try {
+        await access(latestJsonPath, fsConstants.R_OK);
+      } catch (e: any) {
+        // EPERM / EACCES / EBUSY = ACL breakage. ENOENT = no scan yet (fine).
+        if (e?.code && e.code !== 'ENOENT') {
+          needsHeal = true;
+        }
+      }
+
+      if (needsHeal) {
+        console.log('[self-heal] ACL breakage detected on reports/latest.json, invoking Heal-InstallAcls.ps1 elevated');
+        try {
+          const { runElevatedPowerShellScript } = await import('./scriptRunner.js');
+          // 3-minute budget. Typical heal is ~30-60s: takeown /r on ~1000
+          // files (~15s) + icacls /reset /T (~10s) + per-subdir
+          // Apply-TieredAcl calls (~3-5s each, 9 subdirs = ~45s). 180s is
+          // ~2x headroom for slow disks, AV interference, large trees.
+          const HEAL_TIMEOUT_MS = 180_000;
+          const result = await runElevatedPowerShellScript<any>('Heal-InstallAcls.ps1', ['-JsonOutput'], {
+            timeoutMs: HEAL_TIMEOUT_MS,
+          });
+          console.log('[self-heal] result:', result?.message ?? 'ok');
+          // Refresh the window so the dashboard picks up the now-readable file.
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.reload();
+          }
+        } catch (err: any) {
+          console.warn('[self-heal] Heal-InstallAcls.ps1 failed:', err?.message ?? err);
+        }
+      }
+    } catch { /* non-fatal */ }
   })();
 
   // v2.3.0 first-run self-test: fires once per major version, only if Telegram

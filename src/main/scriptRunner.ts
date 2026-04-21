@@ -187,20 +187,41 @@ export async function runElevatedPowerShellScript<T = unknown>(
   const safeOut = outPath.replace(/'/g, "''");
   const safeErr = errPath.replace(/'/g, "''");
   const safeExit = exitPath.replace(/'/g, "''");
-  const argsStr = args.map(a => `'${a.replace(/'/g, "''")}'`).join(',');
 
-  // v2.4.5: capture ALL streams (not just 1 + 2). PowerShell's Write-Host
-  // writes to the information stream (stream 6), not stdout (stream 1),
-  // so "1>out 2>err" dropped the PCDOCTOR_ERROR sentinel on the floor and
-  // the elevated action failed with "Elevated script exited with code 1"
-  // instead of the actionable error the script was trying to report.
-  //   $output collects success(1) + error(2) + warning(3) + verbose(4) +
-  //           debug(5) + information(6) via the *>&1 merge operator
-  //   errPath keeps a copy of the merged output for diagnostics
-  //   exitPath stores the real exit code separately
+  // v2.4.8: inline-token arg emission.
+  //
+  // v2.4.7 FIRST attempt was `& $script @('-JsonOutput')` — passed array as
+  // a single positional arg, coerced to string, bound to the first [string]
+  // param (Update-HostsFromStevenBlack: $SourceUrl='-JsonOutput', DNS fail).
+  //
+  // v2.4.7 SECOND attempt tried variable splat: `$psArgs = @('-JsonOutput'); &
+  // $script @psArgs`. Empirically broken: PowerShell's ARRAY splatting passes
+  // elements positionally regardless of `-` prefix, so switches STILL bind as
+  // string values. Only hashtable splat (`@{JsonOutput=$true}`) binds by name.
+  //
+  // v2.4.8 correct fix: emit each arg as an inline literal token.
+  //   - Args matching /^-[A-Za-z_]\w*$/  (switch / param name): pass unquoted
+  //   - Everything else (values, paths):  single-quote escape
+  // PowerShell's `&` operator then parses `-JsonOutput` as a switch because it
+  // sees the `-` prefix at invocation time, not through a splat indirection.
+  //
+  // v2.4.5: capture ALL streams (1+2+3+4+5+6) via *>&1 so Write-Host output
+  // (stream 6, used by the trap's PCDOCTOR_ERROR sentinel) is preserved.
+  const argsInline = args.map(a => {
+    // Parameter/switch name — pass literal. Safe character set prevents
+    // a malicious caller from sneaking metachars into the command line.
+    //   MATCHES:    "-JsonOutput", "-DryRun", "-SourceUrl", "-Days"
+    //   REJECTS:    "--double-dash", "-1abc" (starts with digit),
+    //               "value-with-dash", "-has.dot", "-has'quote"
+    //               → these get single-quote escaped below.
+    if (/^-[A-Za-z_][\w]*$/.test(a)) return a;
+    // Value — single-quote escape (doubled-quote is the PS escape for ').
+    return `'${a.replace(/'/g, "''")}'`;
+  }).join(' ');
+
   const innerCmd =
     `try { ` +
-    `  $output = & '${safeScript}' ${argsStr ? `@(${argsStr})` : ''} *>&1 | Out-String; ` +
+    `  $output = & '${safeScript}' ${argsInline} *>&1 | Out-String; ` +
     `  Set-Content -Path '${safeOut}' -Value $output -Encoding utf8; ` +
     `  $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }; ` +
     `  Set-Content -Path '${safeExit}' -Value $code -Encoding ascii ` +

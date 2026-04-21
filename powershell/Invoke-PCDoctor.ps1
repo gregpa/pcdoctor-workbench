@@ -91,15 +91,22 @@ $report = [ordered]@{
 function Add-Finding {
     param(
         [ValidateSet('critical','warning','info')]$Severity,
-        [string]$Area, [string]$Message, $Detail=$null, [bool]$AutoFixed=$false
+        [string]$Area, [string]$Message, $Detail=$null, [bool]$AutoFixed=$false,
+        # v2.4.6: long-form rationale shown in AlertDetailModal's
+        # "Why this matters" section. Optional - the renderer falls back
+        # to a static keyword map when this is absent (older scanner
+        # reports), so new finding emits can opt in incrementally.
+        [string]$Why=$null
     )
-    $report.findings += [ordered]@{
+    $entry = [ordered]@{
         severity   = $Severity
         area       = $Area
         message    = $Message
         detail     = $Detail
         auto_fixed = $AutoFixed
     }
+    if ($Why) { $entry.why = $Why }
+    $report.findings += $entry
 }
 
 function Add-Action {
@@ -138,7 +145,7 @@ try {
     $report.metrics.cpu_load_pct      = $cpuLoad
 
     if ($report.metrics.ram_used_pct -ge 85) {
-        Add-Finding warning 'Memory' "RAM usage $($report.metrics.ram_used_pct)% at check time" @{ free_gb = $report.metrics.ram_free_gb }
+        Add-Finding warning 'Memory' "RAM usage $($report.metrics.ram_used_pct)% at check time" @{ free_gb = $report.metrics.ram_free_gb } -Why "High RAM usage forces Windows to page active memory to disk (pagefile.sys). Once swap kicks in, apps stutter, input latency spikes, and disk I/O pressure cascades. Common causes on a dev box: Chrome tabs, Electron apps (VS Code / Discord / Slack), WSL2 (vmmemWSL), Docker Desktop. Fix options: kill top consumer (see RAM Pressure panel), cap WSL memory (Apply WSL Memory Cap action), restart Explorer, or reboot."
     }
     if ($report.metrics.uptime_hours -ge 168) {
         Add-Finding info 'Uptime' "System has been up $($report.metrics.uptime_hours) hours; a reboot can resolve accumulated memory issues"
@@ -229,7 +236,7 @@ try {
             } else {
                 $recurring += $item
                 $sev = if ($group.Count -ge 100) { 'warning' } else { 'info' }
-                Add-Finding $sev 'EventLog' "Recurring error: $($first.ProviderName) event $($first.Id) occurred $($group.Count) times in 7 days" $item
+                Add-Finding $sev 'EventLog' "Recurring error: $($first.ProviderName) event $($first.Id) occurred $($group.Count) times in 7 days" $item $false -Why "A single event in the Windows Event Log is usually noise. A recurring pattern (same EventID, same source, multiple times per day) indicates a service, driver, or hardware component that's failing silently. Hyper-V VmSwitch errors (event 76) often trace to a virtual network adapter that WSL / Docker / a VM left in a bad state; usually benign on the host but worth investigating. Click Investigate with Claude to have Claude read the Event Log around this event and identify the root cause."
             }
         }
     }
@@ -238,7 +245,7 @@ try {
 
     # Specific problem signatures
     if ($sysErrors | Where-Object { $_.Id -in 41, 1001 -and $_.ProviderName -match 'Kernel-Power|BugCheck' }) {
-        Add-Finding warning 'Stability' 'Unexpected shutdowns or BSODs detected in last 7 days'
+        Add-Finding warning 'Stability' 'Unexpected shutdowns or BSODs detected in last 7 days' $null $false -Why "Unexpected shutdowns or BSODs within a 7-day rolling window usually point to one of three things: a recently updated/broken driver, failing memory (run MemTest86), or thermal issues under load. Analyze Latest Minidump runs WinDbg's !analyze -v against C:\Windows\Minidump\*.dmp to identify the faulting module. If the analyzer returns empty fields, WinDbg couldn't load symbols -- the raw output is still shown so Claude can interpret it."
     }
 } catch { Log "Event log error: $_" }
 
@@ -349,9 +356,20 @@ if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Aut
 # before deciding whether to flag. Only flag if there is at least one
 # actionable entry remaining.
 $pfroBenignPatterns = @(
-    'gamingservicesproxy_e\.dll',       # Microsoft Gaming Services re-registers every boot
+    'gamingservicesproxy_e\.dll',           # Microsoft Gaming Services re-registers every boot
     'gamingservices_e\.dll',
-    'InstallerService'                 # Known to queue stale renames after MSIX upgrades
+    'InstallerService',                     # Known to queue stale renames after MSIX upgrades
+    # v2.4.6: Chrome / Edge / Firefox auto-updaters queue old-binary deletes
+    # into their Temp folders and never finish if the browser is running at
+    # reboot time. Safe to treat as benign; the `Clear Stale Pending Renames`
+    # action proactively scrubs them from the queue.
+    # (?:\\|$) catches both the subfolder form (\Chrome\Temp\...) and the
+    # bare-dir form (...\Chrome\Temp at end of entry string). Without the
+    # end anchor, the bare-dir entry silently slipped past the filter and
+    # kept PendingFileRename flagged even after a Clear action ran.
+    '\\\\Google\\\\Chrome\\\\Temp(?:\\\\|$)',
+    '\\\\Microsoft\\\\Edge\\\\Temp(?:\\\\|$)',
+    '\\\\Mozilla Firefox\\\\updated(?:\\\\|$)'
 )
 $pfro = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue
 if ($pfro) {
@@ -372,7 +390,12 @@ $report.metrics.pending_reboot = $pend
 if ($pend) {
     $uptimeH = $report.metrics.uptime_hours
     $sev = if ($uptimeH -gt 168) { 'warning' } else { 'info' }
-    Add-Finding $sev 'Reboot' "Pending reboot flags: $($pend -join ', ') (uptime $uptimeH h)" @{ flags = $pend; uptime_hours = $uptimeH }
+    $rebootWhy = if ($pend -contains 'PendingFileRename' -and $pend.Count -eq 1) {
+        "The only pending operation is a file-rename queue. If this flag has survived multiple reboots, the stuck entries are almost certainly browser auto-updater leftovers (Chrome's old_chrome.exe deletes that never complete when Chrome is running at reboot time). Run Clear Stale Pending Renames to scrub those entries so the flag clears without another reboot."
+    } else {
+        "Windows queued a file rename, service restart, or component update that only completes on reboot. Ignoring it leaves the system half-patched -- new Windows Updates may refuse to install until you reboot. If CBS / WU flags are present, a real reboot IS needed; PendingFileRename alone is usually benign updater leftovers (use Clear Stale Pending Renames)."
+    }
+    Add-Finding $sev 'Reboot' "Pending reboot flags: $($pend -join ', ') (uptime $uptimeH h)" @{ flags = $pend; uptime_hours = $uptimeH } $false -Why $rebootWhy
 }
 
 # =================================================================
@@ -508,7 +531,7 @@ try {
         } else {
             "$($startup.Count) real auto-start entries$phantomNote (healthy: under 20). Boot time and idle RAM suffer."
         }
-        Add-Finding warning 'Startup' $msg $detail
+        Add-Finding warning 'Startup' $msg $detail $false -Why "Windows auto-starts programs from ~15 different registry and folder locations at every boot. Each entry adds startup time plus background memory. Healthy is under 20 real entries (phantom service-account rows are filtered out and don't count). The Fix button opens a picker so you explicitly choose what to disable; nothing gets auto-disabled without confirmation (v2.3.14 changed this after the nzbget-auto-disable incident). For bulk cleanup, Sysinternals Autoruns remains the gold standard."
     }
 } catch { Log "Startup error: $_" }
 
@@ -605,7 +628,18 @@ try {
 Log "Checking NAS and SMB health..."
 try {
     # ===== NAS section (robust detection) =====
+    # v2.4.6: NAS server IP moved to the settings sidecar at
+    # C:\ProgramData\PCDoctor\settings\nas.json. Scanner reads that if
+    # present and falls back to the pre-v2.4.6 Greg default so upgrades
+    # don't break existing installs that haven't opened Workbench yet.
     $nasIp = '192.168.50.226'
+    try {
+        $nasCfgPath = 'C:\ProgramData\PCDoctor\settings\nas.json'
+        if (Test-Path $nasCfgPath) {
+            $cfg = Get-Content $nasCfgPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($cfg.nas_server) { $nasIp = "$($cfg.nas_server)" }
+        }
+    } catch { }
     $nasData = @{
         ip = $nasIp
         ping = $false

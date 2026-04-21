@@ -1015,4 +1015,70 @@ export function registerIpcHandlers() {
     installNow();
     return { ok: true, data: {} };
   });
+
+  // v2.4.6: NAS config settings (server IP + drive mappings). Read is
+  // cheap, pulls from DB with defaults. Write validates and syncs the
+  // sidecar JSON so the scanner + Remap-NAS action pick up changes
+  // immediately without requiring an app restart.
+  ipcMain.handle('api:getNasConfig', async (): Promise<IpcResult<{ nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }>> => {
+    try {
+      const { readNasConfig } = await import('./nasConfig.js');
+      const cfg = readNasConfig();
+      return { ok: true, data: { nas_server: cfg.nas_server, nas_mappings: cfg.nas_mappings } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to read NAS config' } };
+    }
+  });
+
+  ipcMain.handle('api:setNasConfig', async (_evt, payload: { nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }): Promise<IpcResult<{}>> => {
+    try {
+      const { writeNasConfig } = await import('./nasConfig.js');
+      writeNasConfig(payload.nas_server, payload.nas_mappings);
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_VALIDATION', message: e?.message ?? 'Invalid NAS config' } };
+    }
+  });
+
+  // v2.4.6: Event Log errors chart click-to-expand fetches this breakdown
+  // on demand (not part of the scheduled scan — cheap enough to run
+  // interactively, stale data in the main scan report was misleading
+  // anyway since the 7-day window slides forward continuously).
+  ipcMain.handle('api:getEventLogBreakdown', async (_evt, opts: { days?: number; topN?: number; level?: string }): Promise<IpcResult<any>> => {
+    try {
+      const { runPowerShellScript } = await import('./scriptRunner.js');
+      // v2.4.10: validate inputs. Even though scriptRunner uses execFile
+      // (array-form spawn — no shell interpolation), PS-side code still
+      // parses these. Out-of-range days would bog down the WinEvent query;
+      // unrecognised level strings would throw late. Reject here with a
+      // clear error rather than letting bad values flow through.
+      const args = ['-JsonOutput'];
+      if (opts?.days !== undefined) {
+        const d = Number(opts.days);
+        if (!Number.isInteger(d) || d < 1 || d > 90) {
+          return { ok: false, error: { code: 'E_VALIDATION', message: 'days must be an integer between 1 and 90' } };
+        }
+        args.push('-Days', String(d));
+      }
+      if (opts?.topN !== undefined) {
+        const n = Number(opts.topN);
+        if (!Number.isInteger(n) || n < 1 || n > 100) {
+          return { ok: false, error: { code: 'E_VALIDATION', message: 'topN must be an integer between 1 and 100' } };
+        }
+        args.push('-TopN', String(n));
+      }
+      if (opts?.level !== undefined) {
+        // PS script accepts '2' (Error) or '2,3' (Error+Warning).
+        // Reject anything else to avoid surprising WinEvent filter behaviour.
+        if (opts.level !== '2' && opts.level !== '2,3' && opts.level !== '3') {
+          return { ok: false, error: { code: 'E_VALIDATION', message: "level must be one of: '2' (Error), '3' (Warning), '2,3' (both)" } };
+        }
+        args.push('-Level', opts.level);
+      }
+      const r = await runPowerShellScript<any>('Get-EventLogBreakdown.ps1', args, { timeoutMs: 45_000 });
+      return { ok: true, data: r };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to read Event Log breakdown' } };
+    }
+  });
 }

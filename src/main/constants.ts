@@ -7,8 +7,21 @@ export const PCDOCTOR_ROOT = 'C:\\ProgramData\\PCDoctor';
 /** Path to the live diagnostic JSON written by Invoke-PCDoctor.ps1. */
 export const LATEST_JSON_PATH = path.join(PCDOCTOR_ROOT, 'reports', 'latest.json');
 
-/** Path where Workbench stores its own SQLite database. */
-export const WORKBENCH_DB_PATH = path.join(PCDOCTOR_ROOT, 'workbench.db');
+/**
+ * Path where Workbench stores its own SQLite database.
+ *
+ * v2.4.11: honor `PCD_DB_PATH_OVERRIDE` env var. Tests set this to point
+ * at a throwaway temp-dir DB so they don't touch the production one.
+ * Prior code hard-coded the production path, so the autopilot rules
+ * test was silently writing into the LIVE workbench.db — and once
+ * v2.4.10's tier-A root lockdown made the parent dir non-writable,
+ * the test flipped to "attempt to write a readonly database".
+ * Same SQLite-sibling-creation bug that broke the live app,
+ * inadvertently providing regression coverage we weren't relying on.
+ */
+export const WORKBENCH_DB_PATH = process.env.PCD_DB_PATH_OVERRIDE
+  ? process.env.PCD_DB_PATH_OVERRIDE
+  : path.join(PCDOCTOR_ROOT, 'workbench.db');
 
 /** Path where electron-log should write main-process logs. */
 export const LOG_DIR = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'PCDoctor', 'logs');

@@ -183,6 +183,15 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'hardening', icon: '🛡',
     tooltip: 'Opens the Windows Security -> Virus & threat protection page directly. Use this when Tamper Protection blocks Set-MpPreference (for toggling PUA Protection, Controlled Folder Access, etc.). No state change.',
   },
+  clear_stale_pending_renames: {
+    name: 'clear_stale_pending_renames', label: 'Clear Stale Pending Renames',
+    ps_script: 'actions/Clear-StalePendingRenames.ps1',
+    confirm_level: 'risky', rollback_tier: 'C',
+    estimated_duration_s: 3,
+    needs_admin: true,
+    category: 'repair', icon: '🧹',
+    tooltip: 'Removes stale entries from HKLM\\...\\PendingFileRenameOperations - typically Chrome/Edge updater leftovers that queue forever when the browser is running at reboot time. Clears the "Pending Reboot" alert immediately. Admin required.',
+  },
   disable_firewall_temporarily: {
     name: 'disable_firewall_temporarily', label: 'Disable Firewall Temporarily',
     ps_script: 'actions/Disable-FirewallTemporary.ps1',

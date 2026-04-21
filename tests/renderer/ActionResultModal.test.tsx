@@ -10,7 +10,11 @@ describe('<ActionResultModal> — B1', () => {
       faulting_module: 'nvlddmkm.sys',
       probable_cause: 'IRQL_NOT_LESS_OR_EQUAL (NVIDIA driver)',
       dump_path: 'C:\\Windows\\Minidump\\041926-12344-01.dmp',
-      full_output_tail: Array.from({ length: 30 }, (_, i) => `line ${i + 1}`),
+      // v2.4.6: widened the tail window from 15 to 40 lines so users
+      // get real context when the parser's regexes miss (raw cdb output
+      // is often what matters most on a failed run). Fixture sized to
+      // 50 so we can assert the trimming still happens.
+      full_output_tail: Array.from({ length: 50 }, (_, i) => `line ${i + 1}`),
     };
     render(
       <ActionResultModal
@@ -26,11 +30,11 @@ describe('<ActionResultModal> — B1', () => {
     expect(screen.getByText('0xA')).toBeTruthy();
     expect(screen.getByText('nvlddmkm.sys')).toBeTruthy();
     expect(screen.getByText(/IRQL_NOT_LESS_OR_EQUAL/)).toBeTruthy();
-    // Only last 15 lines rendered
+    // v2.4.6: last 40 lines rendered (lines 11-50 present, line 10 cut).
     const pre = document.querySelector('pre')!;
-    expect(pre.textContent).toContain('line 30');
-    expect(pre.textContent).toContain('line 16');
-    expect(pre.textContent).not.toContain('line 15');
+    expect(pre.textContent).toContain('line 50');
+    expect(pre.textContent).toContain('line 11');
+    expect(pre.textContent).not.toContain('line 10');
   });
 
   it('renders SMART result drives + warnings', () => {

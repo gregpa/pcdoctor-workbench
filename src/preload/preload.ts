@@ -79,6 +79,14 @@ const api = {
   checkForUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:checkForUpdates'),
   downloadUpdate: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:downloadUpdate'),
   installUpdateNow: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installUpdateNow'),
+  // v2.4.6: NAS config read/write for Settings page.
+  getNasConfig: (): Promise<IpcResult<{ nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }>> =>
+    ipcRenderer.invoke('api:getNasConfig'),
+  setNasConfig: (payload: { nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }): Promise<IpcResult<{}>> =>
+    ipcRenderer.invoke('api:setNasConfig', payload),
+  // v2.4.6: on-demand Event Log breakdown for the chart click-to-expand.
+  getEventLogBreakdown: (opts?: { days?: number; topN?: number; level?: string }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:getEventLogBreakdown', opts ?? {}),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

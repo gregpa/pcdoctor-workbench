@@ -134,6 +134,50 @@ export function registerPtyIpc(getWindow: () => BrowserWindow | null): void {
       });
 
       sessions.set(id, { id, proc });
+
+      // v2.4.6: auto-inject the context-read command into Claude's input
+      // after a delay so the user doesn't have to copy-paste
+      //   type "C:\Users\greg_\AppData\Local\Temp\pcdoctor-claude-.../context.md"
+      // themselves. The delay gives Claude time to print its splash
+      // (Welcome back / Tips / Recent activity) and land on the `>`
+      // prompt. Claude treats the message as a chat request and reads
+      // the file via its Read tool so subsequent turns have full context.
+      //
+      // If the user closes the session before the timer fires, the
+      // sessions.get() check below is a no-op. We intentionally don't
+      // cancel the timer — the cost of a spurious write is zero since
+      // proc is already dead.
+      // 2.5s is empirically the time Claude Code v2.1.x needs to render
+      // its splash (logo + "Welcome back" + "Tips for getting started" +
+      // "Recent activity") and land the cursor at the `>` prompt ready
+      // for input. Firing sooner causes the injected text to arrive
+      // during splash rendering and be ignored. If future Claude versions
+      // speed up or slow down startup, tune here. A fixed delay is ugly
+      // but the PTY has no "ready for input" signal we can observe.
+      const INJECT_DELAY_MS = 2500;
+      setTimeout(() => {
+        // v2.4.10: verify proc identity, not just id presence. If the
+        // user closed + reopened a session with the same id in under 2.5s,
+        // `sessions.has(id)` would be true for the NEW proc — we'd inject
+        // stale context into the wrong session. Compare the captured proc
+        // to the currently-stored one.
+        const s = sessions.get(id);
+        if (!s || s.proc !== proc) return;
+        try {
+          // v2.4.9 (E-18 — reverts E-2): restored trailing \r for
+          // auto-submit. E-2 "pre-populate without submit" was
+          // architecturally infeasible: Claude Code v2.1.116 TUI runs
+          // stdin in raw mode and only flushes buffered input to the
+          // terminal when a line-terminator arrives. Writing the text
+          // without \r leaves it invisible in Claude's internal input
+          // buffer — F5 QA confirmed the prompt stayed blank for 3+
+          // minutes until the user typed a char. Auto-submit with \r
+          // is the proven-working behaviour; revisit "pre-fill" later
+          // via clipboard paste or an escape-sequence approach.
+          proc.write(`type "${ctxPath}"\r`);
+        } catch { /* best effort */ }
+      }, INJECT_DELAY_MS);
+
       return { ok: true };
     } catch (e: any) {
       return { ok: false, error: e?.message ?? 'Failed to spawn pty' };

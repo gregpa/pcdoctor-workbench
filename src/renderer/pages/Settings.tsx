@@ -27,6 +27,13 @@ export function Settings() {
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
   const [updateStatus, setUpdateStatus] = useState<any>({ state: 'idle' });
   const [appVersion, setAppVersion] = useState('…');
+  // v2.4.6: NAS config editor state. nasJson holds the pretty-printed
+  // mappings array so the user can bulk-edit without a nested-form UI.
+  const [nasServer, setNasServer] = useState('');
+  const [nasJson, setNasJson] = useState('');
+  const [nasDirty, setNasDirty] = useState(false);
+  const [nasError, setNasError] = useState<string | null>(null);
+  const [nasLoaded, setNasLoaded] = useState(false);
 
   async function checkForUpdatesNow() {
     showToast('Checking for updates…');
@@ -61,6 +68,53 @@ export function Settings() {
     const id = setInterval(tick, 15000);
     return () => { alive = false; clearInterval(id); };
   }, []);
+
+  // v2.4.6: load NAS config from main. Only runs once per mount; edits
+  // hydrate the controlled state locally until the user clicks Save.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const r = await (api as any).getNasConfig?.();
+      if (alive && r?.ok) {
+        setNasServer(r.data.nas_server);
+        setNasJson(JSON.stringify(r.data.nas_mappings, null, 2));
+        setNasLoaded(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  async function saveNasConfig() {
+    setNasError(null);
+    let parsedMappings: Array<{ drive: string; share: string }>;
+    try {
+      parsedMappings = JSON.parse(nasJson);
+    } catch (e: any) {
+      setNasError(`Mappings JSON is invalid: ${e?.message ?? e}`);
+      return;
+    }
+    if (!Array.isArray(parsedMappings) || parsedMappings.length === 0) {
+      setNasError('Mappings must be a non-empty array.');
+      return;
+    }
+    for (const m of parsedMappings) {
+      if (!m || typeof m !== 'object' || typeof m.drive !== 'string' || !/^[A-Z]:$/.test(m.drive) || typeof m.share !== 'string' || !m.share) {
+        setNasError(`Each mapping must be {drive:"X:", share:"..."}. Bad entry: ${JSON.stringify(m)}`);
+        return;
+      }
+    }
+    if (!nasServer || !nasServer.trim()) {
+      setNasError('Server address is required.');
+      return;
+    }
+    const r = await (api as any).setNasConfig?.({ nas_server: nasServer.trim(), nas_mappings: parsedMappings });
+    if (r?.ok) {
+      setNasDirty(false);
+      showToast('NAS settings saved. Scanner + Remap will use new values.');
+    } else {
+      setNasError(r?.error?.message ?? 'Save failed.');
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -298,6 +352,68 @@ export function Settings() {
               {saving ? 'Testing…' : 'Test + Save Connection'}
             </button>
           </div>
+        )}
+      </section>
+
+      {/* v2.4.6: NAS config (server IP + drive mappings) */}
+      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <h2 className="text-sm font-bold mb-3">🌐 NAS / SMB Mappings</h2>
+        <div className="text-xs text-text-secondary mb-3">
+          Server IP and drive mappings used by the scanner and Remap NAS Drives action.
+          Previously hardcoded to Greg's QNAP at 192.168.50.226 — now configurable per install.
+          Changes write immediately to <code>C:\ProgramData\PCDoctor\settings\nas.json</code>.
+        </div>
+        {!nasLoaded ? (
+          <div className="text-xs text-text-secondary">Loading…</div>
+        ) : (
+          <>
+            <label className="block text-xs font-semibold mb-1">NAS server IP or hostname</label>
+            <input
+              type="text"
+              value={nasServer}
+              onChange={(e) => { setNasServer(e.target.value); setNasDirty(true); }}
+              placeholder="192.168.50.226"
+              className="w-full mb-3 px-2 py-1.5 text-xs font-mono bg-surface-900 border border-surface-600 rounded"
+            />
+            <label className="block text-xs font-semibold mb-1">
+              Drive mappings (JSON array of <code>{'{ drive: "X:", share: "..." }'}</code>)
+            </label>
+            <textarea
+              value={nasJson}
+              onChange={(e) => { setNasJson(e.target.value); setNasDirty(true); }}
+              rows={10}
+              spellCheck={false}
+              className="w-full mb-3 px-2 py-1.5 text-xs font-mono bg-surface-900 border border-surface-600 rounded resize-y"
+            />
+            {nasError && (
+              <div className="text-xs text-status-crit mb-3 p-2 bg-status-crit/10 border border-status-crit/40 rounded">
+                {nasError}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={saveNasConfig}
+                disabled={!nasDirty}
+                className="px-3 py-1.5 rounded-md text-xs bg-status-good/20 border border-status-good/40 text-status-good disabled:opacity-50"
+              >
+                Save NAS settings
+              </button>
+              <button
+                onClick={async () => {
+                  const r = await (api as any).getNasConfig?.();
+                  if (r?.ok) {
+                    setNasServer(r.data.nas_server);
+                    setNasJson(JSON.stringify(r.data.nas_mappings, null, 2));
+                    setNasDirty(false);
+                    setNasError(null);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+              >
+                Revert
+              </button>
+            </div>
+          </>
         )}
       </section>
 

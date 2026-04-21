@@ -57,21 +57,68 @@ function CollapsibleJson({ label, value }: { label: string; value: unknown }) {
 }
 
 function renderMinidump(result: Record<string, unknown>) {
-  const tail = Array.isArray(result.full_output_tail)
-    ? (result.full_output_tail as string[]).slice(-15).join('\n')
+  const tailRaw = Array.isArray(result.full_output_tail)
+    ? (result.full_output_tail as string[]).join('\n')
     : typeof result.full_output_tail === 'string'
-      ? (result.full_output_tail as string).split(/\r?\n/).slice(-15).join('\n')
+      ? (result.full_output_tail as string)
       : '';
+  const tail = tailRaw.split(/\r?\n/).slice(-40).join('\n').trim();
+  // v2.4.6: treat null / 'null' / empty as empty-parse. Upstream cdb may
+  // have returned output but the regexes didn't match (symbol load
+  // failure, unusual dump format, or the Analyze-Minidump.ps1 script
+  // deployed to ProgramData is pre-v2.4.x and didn't capture tail).
+  const isEmpty = (v: unknown) => v == null || v === '' || v === 'null';
+  const allStructuredEmpty =
+    isEmpty(result.bug_check_hex) &&
+    isEmpty(result.faulting_module) &&
+    isEmpty(result.probable_cause) &&
+    isEmpty(result.bug_check);
+  const dumpPath = typeof result.dump_path === 'string' ? result.dump_path : '';
+  const errMessage = typeof result.message === 'string' ? result.message : '';
+
+  // Surface a helpful "what now" block when the analyzer couldn't extract
+  // the usual fields. Most common reason: Microsoft Symbol Server is
+  // unreachable or slow on first use (no local SymCache yet). Second
+  // most common: `cdb.exe` isn't installed (v2.4.6 fallback in v2.4.7).
   return (
     <div className="space-y-2">
       <KV k="bug_check_hex" v={result.bug_check_hex} />
       <KV k="faulting_module" v={result.faulting_module} />
       <KV k="probable_cause" v={result.probable_cause} />
       <KV k="dump_path" v={result.dump_path} />
+
+      {allStructuredEmpty && (
+        <div className="mt-3 p-3 rounded-md border border-status-warn/40 bg-status-warn/[0.06] text-[11px] leading-relaxed">
+          <div className="font-semibold text-status-warn mb-1">⚠ Analyzer returned no structured findings</div>
+          <div className="text-text-secondary space-y-1.5">
+            <p>
+              <strong>cdb.exe</strong> ran against <code className="font-mono">{dumpPath || '(unknown path)'}</code>
+              {' '}but the parser didn't find BUGCHECK_CODE / MODULE_NAME / PROBABLY_CAUSED_BY in the output.
+            </p>
+            <p>Most common causes:</p>
+            <ul className="list-disc list-inside space-y-0.5 ml-1">
+              <li>Microsoft Symbol Server didn't finish downloading symbols on this run. Retry — the second run uses the local SymCache and completes in seconds.</li>
+              <li><code>cdb.exe</code> not installed (no Windows SDK Debuggers / WinDbg). Run <code>winget install Microsoft.WinDbg</code>, then retry.</li>
+              <li>Script deployment is stale (pre-v2.4.x <code>Analyze-Minidump.ps1</code> didn't capture the raw output tail). Upgrade to v2.4.6.</li>
+            </ul>
+            <p>Meanwhile, click <strong>Investigate with Claude</strong> in the footer to hand the dump path + whatever cdb did emit to Claude for a manual read.</p>
+          </div>
+        </div>
+      )}
+
+      {errMessage && allStructuredEmpty && !tail && (
+        <div className="mt-2 text-[11px] text-text-secondary">
+          <span className="font-semibold">Script message:</span>{' '}
+          <code className="font-mono">{errMessage}</code>
+        </div>
+      )}
+
       {tail && (
         <div>
-          <div className="text-[10px] text-text-secondary mt-3 mb-1">Last 15 lines of !analyze -v</div>
-          <pre className="text-[10px] bg-surface-900 border border-surface-700 rounded p-2 overflow-auto max-h-60 font-mono">
+          <div className="text-[10px] text-text-secondary mt-3 mb-1">
+            {allStructuredEmpty ? 'Raw cdb output (last 40 lines)' : 'Last 15 lines of !analyze -v'}
+          </div>
+          <pre className="text-[10px] bg-surface-900 border border-surface-700 rounded p-2 overflow-auto max-h-60 font-mono whitespace-pre-wrap break-all">
             {tail}
           </pre>
         </div>
@@ -219,6 +266,30 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
               {copyFlash === 'copied' ? '✓ Copied' : '✗ Failed'}
             </span>
           )}
+          {/* v2.4.6: Investigate-with-Claude shortcut for informational
+              actions. Sends the action label + full result JSON into a
+              Claude PTY session so the user doesn't have to copy-paste
+              it manually. Especially useful when the minidump analyzer
+              returns empty structured fields and the user needs help
+              reading raw cdb output. */}
+          <button
+            onClick={async () => {
+              const ctx = [
+                `Investigate this ${action.label} result.`,
+                '',
+                `Context: the user ran "${action.label}" from PCDoctor Workbench and got the result below. Help them interpret it, identify anything concerning, and recommend next steps.`,
+                '',
+                '```json',
+                JSON.stringify(result, null, 2),
+                '```',
+              ].join('\n');
+              await api.investigateWithClaude(ctx);
+            }}
+            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            title="Open a Claude session with this result pre-loaded as context"
+          >
+            🤖 Investigate with Claude
+          </button>
           <button
             onClick={saveResult}
             className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"

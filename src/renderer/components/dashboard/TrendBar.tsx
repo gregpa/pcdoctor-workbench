@@ -7,9 +7,16 @@ interface TrendBarProps {
   warnAt?: number;
   critAt?: number;
   height?: number;
+  /** v2.4.6: optional click handler. When provided, the panel becomes
+   *  clickable (cursor + hover cue) and fires onExpand on any click
+   *  inside the panel area. Used to open a detail modal — see the
+   *  EventLogDetailModal wired from Dashboard. */
+  onExpand?: () => void;
+  /** Hint text shown in `title` attribute when the panel is clickable. */
+  expandHint?: string;
 }
 
-export function TrendBar({ title, trend, warnAt, critAt, height = 120 }: TrendBarProps) {
+export function TrendBar({ title, trend, warnAt, critAt, height = 120, onExpand, expandHint }: TrendBarProps) {
   const W = 400;
   const H = height;
   const padL = 28, padR = 10, padT = 10, padB = 22;
@@ -18,6 +25,7 @@ export function TrendBar({ title, trend, warnAt, critAt, height = 120 }: TrendBa
 
   const points = trend.points;
   if (points.length === 0) {
+    // Empty-state never becomes clickable — no data to expand into.
     return (
       <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary mb-1">{title}</div>
@@ -36,8 +44,16 @@ export function TrendBar({ title, trend, warnAt, critAt, height = 120 }: TrendBa
     return '#22c55e';
   };
 
+  const clickable = typeof onExpand === 'function';
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+    <div
+      className={`bg-surface-800 border border-surface-600 rounded-lg p-3 ${clickable ? 'cursor-pointer hover:border-status-info/60 transition-colors' : ''}`}
+      onClick={clickable ? onExpand : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand!(); } } : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={clickable ? (expandHint ?? 'Click for details') : undefined}
+    >
       <div className="text-[9.5px] uppercase tracking-wider text-text-secondary mb-1">{title}</div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         <text x={padL - 4} y={padT + 6} fontSize="8" fill="#8b949e" textAnchor="end">{Math.round(max)}</text>

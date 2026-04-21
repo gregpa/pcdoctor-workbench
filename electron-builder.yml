@@ -8,6 +8,13 @@ artifactName: "PCDoctor-Workbench-Setup-${version}.${ext}"
 # GitHub Releases as the auto-update feed. electron-updater pulls
 # `latest.yml` + the .exe from the repo's Releases page. Public repo so no
 # token is needed inside the app.
+#
+# Forking: change `owner` and `repo` below to your own GitHub coordinates.
+# electron-builder's YAML interpolation does NOT support bash-style
+# `${env.X:-default}` fallbacks (tried in v2.4.6-pre, baked the literal
+# template string into app-update.yml → 404 on every update check).
+# Keep these hardcoded; forks edit this file. See docs/SIGNING.md for the
+# full fork checklist (cert subject, publisher name, this block).
 publish:
   - provider: github
     owner: gregpa
@@ -52,12 +59,23 @@ win:
   target:
     - nsis
   icon: resources/icons/icon.ico
-  # signtoolOptions.publisherName is intentionally omitted. When set,
-  # electron-updater enforces Authenticode signature verification against
-  # that publisher on every downloaded update; since we are not code-signing
-  # (cert is a planned v3 feature), the check fails with "not signed by the
-  # application owner". Re-enable once a cert is purchased.
   requestedExecutionLevel: asInvoker
+  # v2.4.6: signing scaffold is in place (scripts/generate-signing-cert.ps1,
+  # docs/SIGNING.md, .gitignore rule for build/signing/*.pfx) but the
+  # signtoolOptions block below is commented out so v2.4.6 ships unsigned
+  # like all prior releases. Flipping the switch is the whole point of a
+  # future v2.4.7 "public readiness" cut — run generate-signing-cert.ps1,
+  # set CSC_LINK + CSC_KEY_PASSWORD, uncomment the block, re-package.
+  # Once enabled, every subsequent release MUST use the same PFX or
+  # electron-updater will reject the update on existing installs.
+  #
+  # publisherName MUST match the CN of the signing cert exactly.
+  # Mismatches cause electron-updater to reject valid updates. When you
+  # fork, regenerate your own cert and update this value to match.
+  # signtoolOptions:
+  #   publisherName: "Greg Pajak (PCDoctor Workbench)"
+  #   signingHashAlgorithms:
+  #     - sha256
 
 nsis:
   oneClick: false

@@ -127,7 +127,17 @@ export function recommendAction(
 
     case 'enable_pua_protection': {
       const pua = security?.defender?.puaprotection;
-      if (!pua || pua === '' || pua.toLowerCase() === 'disabled' || pua === '0') {
+      const tamperOn = security?.defender?.tamper_protection === true;
+      const unknown = !pua || pua === '';
+      // v2.4.6: Get-MpPreference returns empty strings for PUAProtection /
+      // EnableControlledFolderAccess / EnableNetworkProtection when run
+      // non-elevated AND Tamper Protection is on (post-22H2 behavior). We
+      // have no way to tell "off" from "unreadable" in that case, so don't
+      // scare-recommend enabling something that may already be enabled.
+      if (unknown && tamperOn) {
+        return { level: 'skip', reason: 'PUA state cannot be read without elevation while Tamper Protection is on. Use "Verify Security State" in Settings if you need to confirm.' };
+      }
+      if (unknown || pua.toLowerCase() === 'disabled' || pua === '0') {
         return { level: 'recommended', reason: 'PUA protection is off — blocks bundled crapware and shady installers with no downside.', priority: 3 };
       }
       return { level: 'skip', reason: `PUA protection is already ${pua}.` };
@@ -135,8 +145,23 @@ export function recommendAction(
 
     case 'enable_controlled_folder_access': {
       const cfa = security?.defender?.controlled_folder_access;
+      const tamperOn = security?.defender?.tamper_protection === true;
+      const unknown = !cfa || cfa === '';
+      // v2.4.6: same unreadable-under-Tamper caveat as PUA.
+      if (unknown && tamperOn) {
+        return { level: 'skip', reason: 'CFA state cannot be read without elevation while Tamper Protection is on.' };
+      }
       if (cfa && cfa.toLowerCase() !== 'disabled' && cfa !== '0' && cfa !== '') {
-        return { level: 'skip', reason: `Controlled Folder Access is already ${cfa}.` };
+        // v2.4.7 (E-6): stringify raw registry value. "1" / "enabled" / "block"
+        // → "enabled"; "2" / "audit" → "in audit mode"; anything else shows
+        // the raw value so it's still diagnosable.
+        const lc = cfa.toLowerCase();
+        const label = (lc === '1' || lc === 'enabled' || lc === 'block')
+          ? 'enabled'
+          : (lc === 'audit' || lc === '2')
+            ? 'in audit mode'
+            : cfa;
+        return { level: 'skip', reason: `Controlled Folder Access is already ${label}.` };
       }
       // Always 'consider', never 'recommended' — can break legitimate apps
       return { level: 'consider', reason: 'Anti-ransomware protection — enable if you can allowlist apps that get blocked.' };
@@ -435,6 +460,18 @@ export function recommendAction(
 
     case 'open_firewall_console': {
       return { level: 'consider', reason: 'Opens wf.msc (Windows Firewall MMC) for manual rule review/edit.' };
+    }
+
+    case 'clear_stale_pending_renames': {
+      // Surface as 'recommended' only when the scanner flagged a pending
+      // reboot AND the PendingFileRename signal is present — actual
+      // CBS / WU / post-install renames still need a real reboot.
+      const flags = status?.metrics?.pending_reboot ?? [];
+      const hasFileRename = Array.isArray(flags) && flags.includes('PendingFileRename');
+      if (hasFileRename) {
+        return { level: 'recommended', reason: 'PendingFileRename queued — usually browser updater leftovers. Scrub them so the "Pending Reboot" alert clears without actually rebooting.', priority: 4 };
+      }
+      return { level: 'skip', reason: 'No stale rename entries detected.' };
     }
 
     default:

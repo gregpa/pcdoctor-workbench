@@ -25,6 +25,13 @@ export interface Finding {
   detail?: unknown;
   auto_fixed: boolean;
   suggested_action?: ActionName;
+  /**
+   * v2.4.6: optional long-form explanation emitted by the scanner.
+   * Displayed in AlertDetailModal's "Why this matters" section. Falls
+   * back to a static map on the renderer side if absent — which makes
+   * this backward-compatible with older scanner reports.
+   */
+  why?: string;
 }
 
 export interface TrendPoint {
@@ -101,6 +108,10 @@ export interface SystemMetrics {
   wsl_config?: WslConfigMetric;
   memory_pressure?: MemoryPressureMetric;
   startup_items?: StartupItemMetric[];
+  /** v2.4.6: list of pending-reboot flags (CBS, WU, PendingFileRename, ...) */
+  pending_reboot?: string[];
+  /** v2.4.6: uptime in hours, surfaced for "do I really need to reboot" UX */
+  uptime_hours?: number;
 }
 
 export interface SystemStatus {
@@ -141,6 +152,7 @@ export type ActionName =
   | 'reset_firewall'
   | 'open_firewall_console'
   | 'open_windows_security'
+  | 'clear_stale_pending_renames'
   | 'disable_firewall_temporarily'
   | 'flush_arp_cache'
   | 'reset_network_adapters'

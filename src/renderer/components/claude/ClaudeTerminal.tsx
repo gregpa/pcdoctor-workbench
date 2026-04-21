@@ -58,10 +58,28 @@ export function ClaudeTerminal({ contextText, onExit }: ClaudeTerminalProps) {
       else { setStatus('error'); setErrorMsg(r.error ?? 'Failed to start'); }
     })();
 
+    // v2.4.11: debounce the resize handler.
+    //
+    // Browsers fire window.resize at 100+ events/sec during a drag. Each
+    // event previously called fit.fit() (xterm layout recompute — SVG work)
+    // AND an IPC round-trip to node-pty's PTY resize (5-20ms on Windows).
+    // The combined load backpressures the renderer, producing a 10-30s
+    // period of choppy UI / frozen paint cycles while the IPC queue
+    // drains. Observed on v2.4.10 live install.
+    //
+    // 150ms wait is an "interaction settled" threshold — long enough
+    // to collapse a drag into a single resize, short enough to feel
+    // instantaneous when the user releases the window edge.
+    const RESIZE_DEBOUNCE_MS = 150;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const onResize = () => {
-      if (!termRef.current) return;
-      fit.fit();
-      api.claudePty.resize(sessionId, termRef.current.cols, termRef.current.rows);
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        if (!termRef.current) return;
+        fit.fit();
+        api.claudePty.resize(sessionId, termRef.current.cols, termRef.current.rows);
+      }, RESIZE_DEBOUNCE_MS);
     };
     window.addEventListener('resize', onResize);
 
@@ -70,6 +88,7 @@ export function ClaudeTerminal({ contextText, onExit }: ClaudeTerminalProps) {
       exitUnsub();
       api.claudePty.kill(sessionId);
       window.removeEventListener('resize', onResize);
+      if (resizeTimer !== null) clearTimeout(resizeTimer);
       term.dispose();
     };
   }, [sessionId, contextText]);

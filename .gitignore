@@ -15,3 +15,9 @@ coverage/
 
 # Conversational context docs — not part of the product
 SESSION_SUMMARY.md
+
+# v2.4.6: self-signed Authenticode signing artifacts. NEVER commit the
+# PFX — it contains the private key that signs releases. Forkers run
+# scripts/generate-signing-cert.ps1 to produce their own.
+build/signing/
+*.pfx

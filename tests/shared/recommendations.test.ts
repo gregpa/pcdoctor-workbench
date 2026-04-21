@@ -169,11 +169,30 @@ describe('shrink_component_store — blocked with pending reboot', () => {
 });
 
 describe('enable_pua_protection', () => {
-  it('recommended when puaprotection is falsy', () => {
+  // v2.4.6: when Tamper Protection is on AND the posture probe comes back
+  // empty, we can't tell "off" from "can't read" - Get-MpPreference returns
+  // empty strings for PUA/CFA/NP fields under non-elevated context when TP
+  // is on. Don't scare-recommend enabling something that might already
+  // be on.
+  it('skip when puaprotection is empty AND tamper protection is on (unreadable)', () => {
     const sec = makeSecurityPosture({
       defender: {
         ...makeSecurityPosture().defender!,
         puaprotection: '',
+        tamper_protection: true,
+      },
+    });
+    const rec = recommendAction('enable_pua_protection', null, sec);
+    expect(rec.level).toBe('skip');
+    expect(rec.reason).toContain('cannot be read without elevation');
+  });
+
+  it('recommended when puaprotection is empty AND tamper protection is off', () => {
+    const sec = makeSecurityPosture({
+      defender: {
+        ...makeSecurityPosture().defender!,
+        puaprotection: '',
+        tamper_protection: false,
       },
     });
     const rec = recommendAction('enable_pua_protection', null, sec);
@@ -181,7 +200,7 @@ describe('enable_pua_protection', () => {
     expect(rec.priority).toBe(3);
   });
 
-  it('recommended when puaprotection is "Disabled"', () => {
+  it('recommended when puaprotection is "Disabled" (explicit off, even under Tamper)', () => {
     const sec = makeSecurityPosture({
       defender: {
         ...makeSecurityPosture().defender!,
@@ -228,6 +247,20 @@ describe('enable_controlled_folder_access — never recommended', () => {
   it('skip when already enabled', () => {
     const rec = recommendAction('enable_controlled_folder_access', null, makeSecurityPosture());
     expect(rec.level).toBe('skip');
+  });
+
+  // v2.4.6: symmetric to PUA — empty + Tamper = unreadable, not "off".
+  it('skip when CFA is empty AND tamper protection is on (unreadable)', () => {
+    const sec = makeSecurityPosture({
+      defender: {
+        ...makeSecurityPosture().defender!,
+        controlled_folder_access: '',
+        tamper_protection: true,
+      },
+    });
+    const rec = recommendAction('enable_controlled_folder_access', null, sec);
+    expect(rec.level).toBe('skip');
+    expect(rec.reason).toContain('cannot be read without elevation');
   });
 });
 
@@ -318,6 +351,33 @@ describe('update_hosts_stevenblack', () => {
     const rec = recommendAction('update_hosts_stevenblack', null, null, getLastRun);
     expect(rec.level).toBe('recommended');
     expect(rec.reason).toContain('Never applied');
+  });
+});
+
+// v2.4.10: added per /ultrareview feedback — this rule shipped in v2.4.6
+// with zero test coverage. Covers the three logical paths:
+// 1. No status object at all → skip
+// 2. pending_reboot array missing or empty → skip
+// 3. pending_reboot includes 'PendingFileRename' → recommended (the Chrome
+//    reboot-loop scenario this action was designed for)
+describe('clear_stale_pending_renames', () => {
+  it('skip when status is null (no scan yet)', () => {
+    const rec = recommendAction('clear_stale_pending_renames', null, null);
+    expect(rec.level).toBe('skip');
+    expect(rec.reason).toContain('No stale rename entries');
+  });
+
+  it('skip when pending_reboot flag array does not include PendingFileRename', () => {
+    const status = makeStatus({ metrics: { pending_reboot: ['CBSRebootPending'] } });
+    const rec = recommendAction('clear_stale_pending_renames', status, null);
+    expect(rec.level).toBe('skip');
+  });
+
+  it('recommended when PendingFileRename flag is present', () => {
+    const status = makeStatus({ metrics: { pending_reboot: ['PendingFileRename'] } });
+    const rec = recommendAction('clear_stale_pending_renames', status, null);
+    expect(rec.level).toBe('recommended');
+    expect(rec.reason).toContain('PendingFileRename');
   });
 });
 

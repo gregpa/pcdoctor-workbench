@@ -1,11 +1,13 @@
 import { useSecurityPosture } from '@renderer/hooks/useSecurityPosture.js';
 import { useAction } from '@renderer/hooks/useAction.js';
 import { ACTIONS } from '@shared/actions.js';
-import type { ActionName } from '@shared/types.js';
-import { useState } from 'react';
+import type { ActionName, ThreatIndicator } from '@shared/types.js';
+import { useState, useEffect } from 'react';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 import { SecurityDetailModal } from '@renderer/components/security/SecurityDetailModal.js';
 import { DefenderScanStatus } from '@renderer/components/security/DefenderScanStatus.js';
+import { ThreatIndicatorModal, threatIndicatorDismissedKey } from '@renderer/components/security/ThreatIndicatorModal.js';
+import { api } from '@renderer/lib/ipc.js';
 import { useNavigate } from 'react-router-dom';
 
 type DetailKind = 'defender' | 'firewall' | 'wu' | 'auth' | 'bitlocker' | 'uac' | 'gpu' | null;
@@ -42,6 +44,31 @@ export function Security() {
   const { run } = useAction();
   const [toast, setToast] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailKind>(null);
+  // v2.4.11 (E-15): threat indicator click-to-detail modal state. Hoisted
+  // to the page level (not inside the row) so the modal's clicks don't
+  // bubble back into the indicator card and re-open repeatedly — the
+  // same pattern v2.4.6 established for AlertDetailModal.
+  const [activeThreat, setActiveThreat] = useState<ThreatIndicator | null>(null);
+  // Persisted dismiss-set: which threat IDs has the user already
+  // acknowledged or marked as false positive? Loaded once on mount from
+  // workbench_settings via the typed api surface. Updating it locally
+  // after each dismiss keeps the UI responsive without a round-trip.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.getSettings();
+        if (!alive || !r.ok) return;
+        const prefix = threatIndicatorDismissedKey('');
+        const ids = Object.keys(r.data)
+          .filter(k => k.startsWith(prefix) && r.data[k] === '1')
+          .map(k => k.slice(prefix.length));
+        setDismissedIds(new Set(ids));
+      } catch { /* non-fatal; renders all indicators until refresh */ }
+    })();
+    return () => { alive = false; };
+  }, []);
   const navigate = useNavigate();
 
   if (loading) return (
@@ -142,21 +169,45 @@ export function Security() {
         </Panel>
       </div>
 
-      {data.threat_indicators.length > 0 && (
-        <Panel title={`Threat Indicators (${data.threat_indicators.length})`} severity="warn">
-          <div className="space-y-2">
-            {data.threat_indicators.map((t) => (
-              <div key={t.id} className="text-xs p-2 rounded-md bg-status-warn/10 border border-status-warn/30">
-                <div className="font-semibold flex items-center gap-2">
-                  <span>{t.severity === 'critical' ? '🔴' : t.severity === 'high' ? '⚠' : 'ℹ'}</span>
-                  <span>{t.category}</span>
-                  <span className="text-text-secondary text-[10px]">{new Date(t.detected_at * 1000).toLocaleString()}</span>
-                </div>
-                <div className="mt-1 text-text-secondary">{t.message}</div>
-              </div>
-            ))}
-          </div>
-        </Panel>
+      {(() => {
+        // v2.4.11 (E-15): filter out indicators the user has already
+        // acknowledged / marked as false positive. The filter is
+        // client-side for now — the scanner still raises them, but the
+        // page hides them until a matching re-detection with a new id.
+        // (v2.4.12 will wire Get-ThreatIndicators.ps1 to consult the
+        // false-positive setting and suppress at source.)
+        const visible = data.threat_indicators.filter(t => !dismissedIds.has(t.id));
+        if (visible.length === 0) return null;
+        return (
+          <Panel title={`Threat Indicators (${visible.length})`} severity="warn">
+            <div className="space-y-2">
+              {visible.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveThreat(t)}
+                  className="w-full text-left text-xs p-2 rounded-md bg-status-warn/10 border border-status-warn/30 hover:border-status-warn/60 transition cursor-pointer"
+                  title="Click for details + acknowledge / dismiss options"
+                >
+                  <div className="font-semibold flex items-center gap-2">
+                    <span>{t.severity === 'critical' ? '🔴' : t.severity === 'high' ? '⚠' : 'ℹ'}</span>
+                    <span>{t.category}</span>
+                    <span className="text-text-secondary text-[10px]">{new Date(t.detected_at * 1000).toLocaleString()}</span>
+                    <span className="ml-auto text-text-secondary text-[10px]">Click for actions →</span>
+                  </div>
+                  <div className="mt-1 text-text-secondary">{t.message}</div>
+                </button>
+              ))}
+            </div>
+          </Panel>
+        );
+      })()}
+      {activeThreat && (
+        <ThreatIndicatorModal
+          indicator={activeThreat}
+          onClose={() => setActiveThreat(null)}
+          onDismissed={(id) => setDismissedIds(prev => new Set(prev).add(id))}
+        />
       )}
 
       <div className="mt-3">

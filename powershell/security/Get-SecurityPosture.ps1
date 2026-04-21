@@ -18,6 +18,44 @@ try {
     $sev = 'good'
     if (-not $mp.RealTimeProtectionEnabled) { $sev = 'crit' }
     elseif ($defsAge -gt 72 -or ($lastFull -ne $null -and $lastFull -gt 30)) { $sev = 'warn' }
+    # v2.4.6: Get-MpPreference returns EMPTY strings for PUAProtection /
+    # EnableControlledFolderAccess / EnableNetworkProtection when run
+    # non-elevated AND Tamper Protection is on (post-22H2 behavior). Try
+    # registry fallbacks for the gpedit / MDM / policy-managed forms.
+    # Pref-store values still can't be read without admin; the UI handles
+    # empty results as "unreadable" rather than "disabled" when TP is on.
+    function Read-DefenderPolicyField {
+        param([string[]] $Paths, [string] $Name)
+        foreach ($p in $Paths) {
+            try {
+                $v = (Get-ItemProperty -Path $p -Name $Name -EA SilentlyContinue).$Name
+                if ($null -ne $v -and $v -ne '') { return "$v" }
+            } catch {}
+        }
+        return ''
+    }
+    $puaRaw = "$($mp.PUAProtection)"
+    if (-not $puaRaw) {
+        $puaRaw = Read-DefenderPolicyField -Paths @(
+            'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender',
+            'HKLM:\SOFTWARE\Microsoft\Windows Defender\Features'
+        ) -Name 'PUAProtection'
+    }
+    $cfaRaw = "$($mp.EnableControlledFolderAccess)"
+    if (-not $cfaRaw) {
+        $cfaRaw = Read-DefenderPolicyField -Paths @(
+            'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access',
+            'HKLM:\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access'
+        ) -Name 'EnableControlledFolderAccess'
+    }
+    $npRaw = "$($mp.EnableNetworkProtection)"
+    if (-not $npRaw) {
+        $npRaw = Read-DefenderPolicyField -Paths @(
+            'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Network Protection',
+            'HKLM:\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\Network Protection'
+        ) -Name 'EnableNetworkProtection'
+    }
+
     $defender = @{
         realtime_protection = [bool]$mp.RealTimeProtectionEnabled
         antispyware_enabled = [bool]$mp.AntispywareEnabled
@@ -30,9 +68,9 @@ try {
         threats_active = 0
         tamper_protection = [bool]$mp.IsTamperProtected
         cloud_protection = $mp.MAPSReporting -ne 0
-        puaprotection = "$($mp.PUAProtection)"
-        controlled_folder_access = "$($mp.EnableControlledFolderAccess)"
-        network_protection = "$($mp.EnableNetworkProtection)"
+        puaprotection = $puaRaw
+        controlled_folder_access = $cfaRaw
+        network_protection = $npRaw
         exclusions_count = 0
         severity = $sev
     }
