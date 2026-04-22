@@ -43,13 +43,27 @@ $drives           = @()
 $warningLines     = [System.Collections.Generic.List[string]]::new()
 $skipped          = @()
 
-# v2.4.19: smartctl third-tier fallback for drives where the primary
-# Windows APIs (Get-StorageReliabilityCounter + MSFT_PhysicalDisk) come
-# up empty. Samsung + Intel NVMe drives routinely return Temperature=1 C
-# (filtered out) and Wear=0 (suspicious) from the Windows Storage stack.
-# smartctl reads the NVMe SMART log directly via the Windows NVMe driver
-# and returns real values for both. For SATA drives it reads ATA SMART
-# attributes the same way smartctl -a always has.
+# v2.4.19 (rewritten v2.4.21): smartctl third-tier fallback for drives
+# where the primary Windows APIs (Get-StorageReliabilityCounter +
+# MSFT_PhysicalDisk) come up empty. Samsung + Intel NVMe routinely
+# return Temperature=1 C (filtered out) and Wear=0 (suspicious) from
+# the Windows Storage stack. smartctl reads the NVMe SMART log directly
+# via the Windows NVMe driver.
+#
+# v2.4.21 fix: smartctl 7.5+ on Windows uses Linux-style /dev/sdX
+# device paths for its unified driver abstraction, NOT \\.\PhysicalDriveN.
+# Calls using the Windows-style path return "Invalid argument" or
+# "Unable to detect device type". We now:
+#   1. Invoke `smartctl --scan` ONCE to get the real device list with
+#      the correct `-d <type>` flag per device (e.g. `-d ata`, `-d sat`,
+#      `-d nvme`, `-d scsi`).
+#   2. Run `-i -j` on each scan entry to learn its model + capacity
+#      + serial (cheap query, no SMART pass-through needed).
+#   3. Match each Get-PhysicalDisk row to a scan entry by capacity
+#      (exact bytes) and use that entry's dev path + type for the
+#      full `-a -j` query.
+# This correctly handles Intel RST, USB-SATA bridges, and direct NVMe
+# without needing to know the vendor-specific naming conventions.
 function Get-SmartctlPath {
     $candidates = @(
         'C:\Program Files\smartmontools\bin\smartctl.exe',
@@ -61,19 +75,71 @@ function Get-SmartctlPath {
     return $null
 }
 
+function Get-SmartctlInventory {
+    param([string]$SmartctlPath)
+    if (-not $SmartctlPath) { return @() }
+    $inventory = @()
+    try {
+        $scanOut = & $SmartctlPath --scan 2>&1 | Out-String
+        foreach ($line in ($scanOut -split "`r?`n")) {
+            # Match the scan format:
+            #   "/dev/sda -d ata # /dev/sda, ATA device"
+            #   "\\.\PhysicalDrive0 -d nvme # (older builds / WinNT API)"
+            if ($line -match '^\s*(\S+)\s+-d\s+(\S+)') {
+                $dev = $Matches[1]
+                $type = $Matches[2]
+                try {
+                    $infoJson = & $SmartctlPath -j -i -d $type $dev 2>&1 | Out-String
+                    $info = $infoJson | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    if ($info) {
+                        $inventory += @{
+                            dev        = $dev
+                            type       = $type
+                            model      = "$($info.model_name)"
+                            size_bytes = if ($info.user_capacity.bytes) { [long]$info.user_capacity.bytes } else { 0 }
+                            serial     = "$($info.serial_number)"
+                        }
+                    }
+                } catch { }
+            }
+        }
+    } catch { }
+    return $inventory
+}
+
+function Find-SmartctlMatchForDisk {
+    param(
+        [Parameter(Mandatory=$true)] $PhysicalDisk,
+        [Parameter(Mandatory=$true)] [array] $Inventory
+    )
+    if (-not $PhysicalDisk.Size -or $Inventory.Count -eq 0) { return $null }
+    $targetBytes = [long]$PhysicalDisk.Size
+    # Exact capacity match first - bytes-level match guarantees this is
+    # the same drive. Two drives with the exact same byte count is
+    # essentially never a real-world occurrence (even two drives of the
+    # "same" marketed size have tiny spare-area differences).
+    foreach ($inv in $Inventory) {
+        if ($inv.size_bytes -eq $targetBytes) { return $inv }
+    }
+    # Fallback: within 1 GB tolerance, in case the Windows Storage stack
+    # reports a slightly different capacity than smartctl does.
+    foreach ($inv in $Inventory) {
+        if ([math]::Abs($inv.size_bytes - $targetBytes) -lt 1GB) { return $inv }
+    }
+    return $null
+}
+
 function Get-SmartctlDriveData {
     param(
         [Parameter(Mandatory=$true)][string]$SmartctlPath,
-        [Parameter(Mandatory=$true)][int]$DeviceId
+        [Parameter(Mandatory=$true)][string]$DevPath,
+        [Parameter(Mandatory=$true)][string]$DevType
     )
-    $devPath = "\\.\PhysicalDrive$DeviceId"
-
-    function Parse-SmartctlJson {
-        param([string]$raw)
-        if (-not $raw) { return $null }
-        try {
-            $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
-        } catch { return $null }
+    try {
+        $json = & $SmartctlPath -j -d $DevType -a $DevPath 2>&1 | Out-String
+        if (-not $json) { return $null }
+        $parsed = $json | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if (-not $parsed) { return $null }
         $temp = $null; $wearPct = $null
         if ($parsed.nvme_smart_health_information_log) {
             $nvme = $parsed.nvme_smart_health_information_log
@@ -84,8 +150,8 @@ function Get-SmartctlDriveData {
         } elseif ($parsed.ata_smart_attributes -and $parsed.ata_smart_attributes.table) {
             foreach ($attr in $parsed.ata_smart_attributes.table) {
                 if ($attr.name -in @('Wear_Leveling_Count','SSD_Life_Left','Media_Wearout_Indicator')) {
-                    # ATA attr.value is the normalized current health (100 =
-                    # new, 0 = worn). Invert to wear percentage.
+                    # ATA attr.value is normalized current health (100 = new,
+                    # 0 = worn). Invert to wear percentage.
                     $wearPct = 100 - [int]$attr.value
                 }
                 if ($attr.name -in @('Temperature_Celsius','Airflow_Temperature_Cel')) {
@@ -96,26 +162,11 @@ function Get-SmartctlDriveData {
             }
         }
         return @{ temp_c = $temp; wear_pct = $wearPct }
-    }
-
-    # Try auto-detect first, then NVMe explicitly. Samsung NVMe drives on
-    # Intel RST/RAID occasionally need the explicit -d nvme flag.
-    try {
-        $json = & $SmartctlPath -j -a $devPath 2>&1 | Out-String
-        $result = Parse-SmartctlJson -raw $json
-        if ($result -and ($null -ne $result.temp_c -or $null -ne $result.wear_pct)) {
-            return $result
-        }
-    } catch { }
-    try {
-        $json = & $SmartctlPath -j -d nvme -a $devPath 2>&1 | Out-String
-        $result = Parse-SmartctlJson -raw $json
-        if ($result) { return $result }
-    } catch { }
-    return $null
+    } catch { return $null }
 }
 
 $smartctlPath = Get-SmartctlPath
+$smartctlInventory = if ($smartctlPath) { Get-SmartctlInventory -SmartctlPath $smartctlPath } else { @() }
 
 # NVMe temperature is reported in multiple places and Get-StorageReliabilityCounter
 # frequently returns a stale/low value (1 C is a known bug).  Build a fallback
@@ -165,19 +216,27 @@ foreach ($p in $physical) {
     # Intel NVMe internals (temp missing) and sometimes on SATA SSDs
     # (wear reported as 0 by the counter).
     $needsSmartctl = ($null -eq $temp) -or ($null -eq $wearPct) -or ($wearPct -eq 0)
-    if ($needsSmartctl -and $smartctlPath) {
+    if ($needsSmartctl -and $smartctlPath -and $smartctlInventory.Count -gt 0) {
         try {
-            $sc = Get-SmartctlDriveData -SmartctlPath $smartctlPath -DeviceId ([int]$p.DeviceId)
-            if ($sc) {
-                if ($null -eq $temp -and $null -ne $sc.temp_c -and $sc.temp_c -ge 15 -and $sc.temp_c -le 120) {
-                    $temp = $sc.temp_c
-                }
-                # Override wear only when smartctl gives a non-zero reading
-                # and the primary path was null or zero. Protects against
-                # downgrading a valid non-zero wear to a potentially worse
-                # value from a flaky smartctl parse.
-                if ($null -ne $sc.wear_pct -and $sc.wear_pct -gt 0 -and (($null -eq $wearPct) -or ($wearPct -eq 0))) {
-                    $wearPct = $sc.wear_pct
+            # v2.4.21: match by capacity against the scan-derived inventory
+            # so we use smartctl's own device path + detected type. Avoids
+            # the prior hardcoded \\.\PhysicalDriveN path which smartctl
+            # 7.5+ on Windows rejects with "Invalid argument" on non-SAT
+            # USB and NVMe-on-RST drives.
+            $inv = Find-SmartctlMatchForDisk -PhysicalDisk $p -Inventory $smartctlInventory
+            if ($inv) {
+                $sc = Get-SmartctlDriveData -SmartctlPath $smartctlPath -DevPath $inv.dev -DevType $inv.type
+                if ($sc) {
+                    if ($null -eq $temp -and $null -ne $sc.temp_c -and $sc.temp_c -ge 15 -and $sc.temp_c -le 120) {
+                        $temp = $sc.temp_c
+                    }
+                    # Override wear only when smartctl gives a non-zero
+                    # reading and the primary path was null or zero. Protects
+                    # against downgrading a valid non-zero wear to a
+                    # potentially worse value from a flaky smartctl parse.
+                    if ($null -ne $sc.wear_pct -and $sc.wear_pct -gt 0 -and (($null -eq $wearPct) -or ($wearPct -eq 0))) {
+                        $wearPct = $sc.wear_pct
+                    }
                 }
             }
         } catch {
