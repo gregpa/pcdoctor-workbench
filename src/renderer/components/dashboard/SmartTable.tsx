@@ -63,12 +63,35 @@ export function SmartTable({ entries, onRunSmartCheck }: SmartTableProps) {
             const sevColor = e.status_severity === 'good' ? 'text-status-good' : e.status_severity === 'warn' ? 'text-status-warn' : 'text-status-crit';
             const sevMark = e.status_severity === 'good' ? '✓' : e.status_severity === 'warn' ? '!' : '✗';
             const dim = e.needs_admin ? 'text-text-secondary' : '';
+            // v2.4.22: when the drive IS cached (needs_admin=false) but a
+            // value is still null, it's a vendor-gated value - typically
+            // an NVMe behind Intel RST where smartctl can see the drive
+            // but can't reach the NVMe SMART log. Show a subtle "(n/a)"
+            // hint instead of "-" so the user isn't left wondering
+            // whether we tried. Tooltip explains.
+            const wearDisplay = e.wear_pct != null
+              ? `${e.wear_pct}%`
+              : e.needs_admin ? 'admin' : 'n/a';
+            const tempDisplay = e.temp_c != null
+              ? `${e.temp_c}°C`
+              : e.needs_admin ? 'admin' : 'n/a';
+            const gatedTitle = 'Drive is cached but this value is not exposed - typical for NVMe behind Intel RST / RAID controllers. Status column still reflects Windows HealthStatus.';
             return (
               <tr key={i} className="border-t border-surface-700">
                 <td className="py-1.5">{e.drive}</td>
                 <td className="py-1.5 text-center">{e.health}</td>
-                <td className={`py-1.5 text-center ${dim}`}>{e.wear_pct != null ? `${e.wear_pct}%` : (e.needs_admin ? 'admin' : '-')}</td>
-                <td className={`py-1.5 text-center ${dim}`}>{e.temp_c != null ? `${e.temp_c}°C` : (e.needs_admin ? 'admin' : '-')}</td>
+                <td
+                  className={`py-1.5 text-center ${dim}`}
+                  title={wearDisplay === 'n/a' ? gatedTitle : undefined}
+                >
+                  {wearDisplay}
+                </td>
+                <td
+                  className={`py-1.5 text-center ${dim}`}
+                  title={tempDisplay === 'n/a' ? gatedTitle : undefined}
+                >
+                  {tempDisplay}
+                </td>
                 <td className={`py-1.5 text-center ${sevColor}`}>{sevMark}</td>
               </tr>
             );

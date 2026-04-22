@@ -43,13 +43,13 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   flush_dns: {
     name: 'flush_dns', label: 'Flush DNS', ps_script: 'actions/Flush-DNS.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
-    category: 'network', icon: '🔄',
+    category: 'network', icon: '🔄', informational: true,
     tooltip: 'Clears the Windows DNS resolver cache (ipconfig /flushdns). Fixes stale domain lookups after VPN changes or DNS outages. Instant.',
   },
   clear_temp_files: {
     name: 'clear_temp_files', label: 'Clear Temp Files', ps_script: 'actions/Clear-TempFiles.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 30,
-    category: 'cleanup', icon: '🧹',
+    category: 'cleanup', icon: '🧹', informational: true,
     tooltip: 'Deletes contents of %TEMP%, %LOCALAPPDATA%\\Temp, C:\\Windows\\Temp, and all user profile temp folders. Typically reclaims 500MB-2GB. Irreversible.',
   },
   clean_recycle_bin: {
@@ -107,7 +107,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     snapshot_paths: ['C:\\ProgramData\\Microsoft\\Search\\Data\\Applications\\Windows\\GatherLogs'],
     estimated_duration_s: 45,
     needs_admin: true,
-    category: 'repair', icon: '🔍',
+    category: 'repair', icon: '🔍', informational: true,
     tooltip: 'Stops WSearch, deletes the index, restarts the service. Rebuilds index over 30-60 min in background.',
   },
   run_sfc: {
@@ -217,7 +217,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'flush_arp_cache', label: 'Flush ARP Cache',
     ps_script: 'actions/Flush-ARP-Cache.ps1',
     confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
-    category: 'network', icon: '🔀',
+    category: 'network', icon: '🔀', informational: true,
     tooltip: 'arp -d *. Clears the ARP table so LAN addresses resolve fresh. Use after router/switch changes.',
   },
   reset_network_adapters: {
@@ -255,7 +255,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'restart_explorer', label: 'Restart Explorer',
     ps_script: 'actions/Restart-Explorer.ps1',
     confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 5,
-    category: 'service', icon: '🪟',
+    category: 'service', icon: '🪟', informational: true,
     tooltip: 'Kills and relaunches explorer.exe. Fixes stuck taskbar/tray/File Explorer. Taskbar blinks briefly.',
   },
   restart_network_stack: {
