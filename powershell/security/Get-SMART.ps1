@@ -17,7 +17,32 @@ $isAdmin = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::A
 
 $drives = @()
 
+# v2.4.18: read the cache written by Run-SmartCheck.ps1 when it ran
+# elevated. Cache is a { serial -> {wear_pct, temp_c, ...} } dict. We
+# look up each physical disk by serial number first, then fall back to
+# model::size_gb. When a match is found we merge wear + temp into the
+# non-admin row AND flip needs_admin to false, because the real values
+# are now in hand. Cache > 30 days old is ignored (stale).
+function Read-SmartCache {
+    $cachePath = 'C:\ProgramData\PCDoctor\reports\smart-cache.json'
+    if (-not (Test-Path $cachePath)) { return $null }
+    try {
+        $raw = Get-Content -Path $cachePath -Raw -ErrorAction Stop | ConvertFrom-Json
+        if (-not $raw.generated_at) { return $null }
+        $nowUnix = [int64](([DateTimeOffset](Get-Date)).ToUnixTimeSeconds())
+        $ageHours = ($nowUnix - [int64]$raw.generated_at) / 3600.0
+        if ($ageHours -gt (30 * 24)) { return $null }  # expire after 30d
+        # Return the entries object as a plain hashtable for fast lookup
+        $dict = @{}
+        foreach ($prop in $raw.entries.PSObject.Properties) {
+            $dict[$prop.Name] = $prop.Value
+        }
+        return @{ entries = $dict; age_hours = $ageHours; generated_at = $raw.generated_at }
+    } catch { return $null }
+}
+
 function Add-NonAdminFallback {
+    param([object]$Cache = $null)
     $out = @()
     try {
         $phys = Get-PhysicalDisk -ErrorAction SilentlyContinue
@@ -29,20 +54,51 @@ function Add-NonAdminFallback {
                 'Unhealthy' { 'FAILED' }
                 default     { 'UNKNOWN' }
             }
-            $severity = if ($health -eq 'FAILED') { 'crit' } elseif ($health -eq 'WARN') { 'warn' } else { 'good' }
             $model = "$($p.FriendlyName)"
             if (-not $model) { $model = "$($p.Model)" }
+
+            # Cache lookup: prefer serial, fall back to model::size.
+            $wearPct = $null; $tempC = $null; $poh = $null; $mediaErrors = $null
+            $needsAdmin = $true
+            if ($Cache -and $Cache.entries) {
+                $key = if ($p.SerialNumber) { "$($p.SerialNumber)".Trim() } else { "$model::$sizeGB" }
+                $cachedEntry = $Cache.entries[$key]
+                if (-not $cachedEntry -and $p.SerialNumber) {
+                    # Also try the model::size fallback if serial lookup missed
+                    $cachedEntry = $Cache.entries["$model::$sizeGB"]
+                }
+                if ($cachedEntry) {
+                    $wearPct = $cachedEntry.wear_pct
+                    $tempC   = $cachedEntry.temp_c
+                    $poh     = $cachedEntry.power_on_hours
+                    $mediaErrors = $cachedEntry.reallocated_sectors
+                    # With real values merged in, we can drop the "admin
+                    # required" banner. The elevate button still shows up
+                    # if ANY other row lacks a cache match.
+                    $needsAdmin = $false
+                }
+            }
+
+            # Severity reconsidered with cache data: high wear or temp
+            # escalates to warn/crit even if Windows' HealthStatus is "Healthy".
+            $severity = if ($health -eq 'FAILED') { 'crit' }
+                        elseif ($health -eq 'WARN') { 'warn' }
+                        elseif ($wearPct -ne $null -and $wearPct -gt 90) { 'crit' }
+                        elseif ($wearPct -ne $null -and $wearPct -gt 75) { 'warn' }
+                        elseif ($tempC -ne $null -and $tempC -gt 70) { 'warn' }
+                        else { 'good' }
+
             $out += @{
                 drive          = "$model ($sizeGB GB)"
                 model          = $model
                 device         = "PhysicalDisk$($p.DeviceId)"
                 health         = $health
-                wear_pct       = $null
-                temp_c         = $null
-                media_errors   = $null
-                power_on_hours = $null
+                wear_pct       = $wearPct
+                temp_c         = $tempC
+                media_errors   = $mediaErrors
+                power_on_hours = $poh
                 status_severity = $severity
-                needs_admin    = $true
+                needs_admin    = $needsAdmin
             }
         }
     } catch {}
@@ -50,15 +106,24 @@ function Add-NonAdminFallback {
 }
 
 if (-not $isAdmin) {
-    $drives = Add-NonAdminFallback
+    # v2.4.18: load the cache (if fresh) so wear/temp can be merged into
+    # the non-admin rows. When the cache hits on every drive, needs_admin
+    # flips to false per-row and the UI stops nagging for elevation.
+    $cache = Read-SmartCache
+    $drives = Add-NonAdminFallback -Cache $cache
     $sw.Stop()
+    $anyNeedsAdmin = @($drives | Where-Object { $_.needs_admin }).Count -gt 0
+    $cacheAgeHours = if ($cache) { [math]::Round($cache.age_hours, 1) } else { $null }
+    $cacheMsg = if ($cache) { "cache from $cacheAgeHours h ago" } else { "no cache yet" }
+    $hintMsg = if ($anyNeedsAdmin) { " - run SMART Health Check to refresh" } else { "" }
     @{
         success = $true
         duration_ms = $sw.ElapsedMilliseconds
         drives = $drives
         count = $drives.Count
-        needs_admin = $true
-        message = "SMART: $($drives.Count) drive(s) (basic info only - run SMART Health Check for full attributes)"
+        needs_admin = $anyNeedsAdmin
+        cache_age_hours = $cacheAgeHours
+        message = "SMART: $($drives.Count) drive(s) ($cacheMsg)$hintMsg"
     } | ConvertTo-Json -Depth 6 -Compress
     exit 0
 }

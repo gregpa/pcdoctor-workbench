@@ -467,7 +467,18 @@ export function Dashboard() {
 
       {/* SMART + Event log chart + Security stub */}
       <div className="grid grid-cols-3 gap-2.5">
-        <SmartTable entries={status.smart ?? []} />
+        <SmartTable
+          entries={status.smart ?? []}
+          onRunSmartCheck={async () => {
+            // v2.4.18: elevate + run SMART check, then refresh the
+            // Security posture so the cache merge in Get-SMART.ps1
+            // picks up the fresh wear/temp values on the next Dashboard
+            // render. Without refreshSecurity(), the user would see no
+            // change until a full Scan Now.
+            await handleAction('run_smart_check');
+            await refreshSecurity();
+          }}
+        />
         {eventsTrend ? (
           <TrendBar
             title="Event Log Errors - 7 Day"

@@ -104,6 +104,43 @@ foreach ($p in $physical) {
 
 $sw.Stop()
 $warnCount = $warningLines.Count
+
+# v2.4.18: persist the elevated SMART data to a known cache path. The
+# non-admin Get-SMART.ps1 reads this on its next invocation and merges
+# wear_pct + temp_c into its fallback rows, letting the Dashboard show
+# real data without requiring admin on every scan. Cache survives app
+# restarts. The security scan cycle picks it up within seconds of any
+# successful elevated SMART check.
+$cacheDir = 'C:\ProgramData\PCDoctor\reports'
+$cachePath = Join-Path $cacheDir 'smart-cache.json'
+try {
+    if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+    # Key by serial + model for stable lookup across scans. The cache is a
+    # dictionary (serial -> {wear_pct, temp_c, power_on_hours, reallocated
+    # _sectors}) so Get-SMART.ps1 can merge precisely.
+    $cacheEntries = @{}
+    foreach ($d in $drives) {
+        $key = if ($d.serial) { "$($d.serial)" } else { "$($d.model)::$($d.size_gb)" }
+        $cacheEntries[$key] = [ordered]@{
+            model               = $d.model
+            serial              = $d.serial
+            wear_pct            = $d.wear_pct
+            temp_c              = $d.temp_c
+            power_on_hours      = $d.power_on_hours
+            reallocated_sectors = $d.reallocated_sectors
+            health              = $d.health
+        }
+    }
+    $cache = [ordered]@{
+        generated_at  = [int64](([DateTimeOffset](Get-Date)).ToUnixTimeSeconds())
+        drive_count   = @($drives).Count
+        entries       = $cacheEntries
+    }
+    $cache | ConvertTo-Json -Depth 6 | Set-Content -Path $cachePath -Encoding UTF8 -Force
+} catch {
+    [void]$warningLines.Add("Cache write failed: $($_.Exception.Message)")
+}
+
 $result = [ordered]@{
     success     = $true
     duration_ms = $sw.ElapsedMilliseconds
@@ -111,7 +148,7 @@ $result = [ordered]@{
     skipped     = @($skipped)
     warnings    = @($warningLines)
     summary     = "Checked $(@($drives).Count) disk(s); $warnCount warning(s)."
-    message     = if ($warnCount -eq 0) { "SMART check complete - all drives healthy." } else { "SMART check found $warnCount issue(s)." }
+    message     = if ($warnCount -eq 0) { "SMART check complete - all drives healthy. Cache updated." } else { "SMART check found $warnCount issue(s). Cache updated." }
 }
 $result | ConvertTo-Json -Depth 6 -Compress
 exit 0

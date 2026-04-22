@@ -253,6 +253,10 @@ function mapToSystemStatus(r: any): SystemStatus {
     media_errors: s.media_errors,
     power_on_hours: s.power_on_hours,
     status_severity: s.health === 'PASSED' ? 'good' : s.health === 'FAILED' ? 'crit' : 'warn',
+    // v2.4.18: preserve the admin-required flag. Without it, SmartTable
+    // hides the "Run SMART Check (admin)" button and users see "-" with
+    // no hint that wear/temp needs elevation.
+    needs_admin: s.needs_admin === true,
   })) : cachedSmart;
 
   // v2.3.0 B4/C1/C3: pass through the rich scanner metrics that power the new

@@ -409,6 +409,12 @@ export function registerIpcHandlers() {
           media_errors: d.media_errors,
           power_on_hours: d.power_on_hours,
           status_severity: d.status_severity ?? 'good',
+          // v2.4.18: preserve the admin-required flag through to the
+          // renderer. Previously dropped here, which meant SmartTable's
+          // "Run SMART Check (admin)" button never appeared, the `admin`
+          // placeholder was replaced with `-`, and the user had no way to
+          // discover that wear/temp required elevation.
+          needs_admin: d.needs_admin === true,
         })),
         overall_severity: posture.overall_severity ?? 'good',
       };
