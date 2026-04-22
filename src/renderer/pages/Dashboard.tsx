@@ -612,6 +612,10 @@ export function Dashboard() {
             await handleAction('unblock_ip', { ip });
             await refreshSecurity();
           }}
+          onOpenNvidiaApp={async () => {
+            setSelectedSecurityKind(null);
+            await handleAction('open_nvidia_app');
+          }}
         />
       )}
 

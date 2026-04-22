@@ -46,6 +46,9 @@ export interface SecurityDetailModalProps {
   onOpenUpdatesPage?: () => void;
   /** Routes to `unblock_ip` action with the ip param. */
   onUnblockIP?: (ip: string) => void | Promise<void>;
+  /** Launches the locally-installed NVIDIA App / GeForce Experience /
+   *  Control Panel. Only meaningful when the GPU vendor is NVIDIA. */
+  onOpenNvidiaApp?: () => void | Promise<void>;
 }
 
 // E-13: Tamper-aware Defender field value.
@@ -103,6 +106,7 @@ export function SecurityDetailModal({
   onOpenFirewallConsole,
   onOpenUpdatesPage,
   onUnblockIP,
+  onOpenNvidiaApp,
 }: SecurityDetailModalProps) {
   const title = modalTitleFor(kind);
 
@@ -176,6 +180,15 @@ export function SecurityDetailModal({
               className="px-3 py-1.5 rounded-md text-xs bg-status-info/20 border border-status-info/50 text-status-info hover:bg-status-info/30"
             >
               Open Updates page
+            </button>
+          )}
+          {kind === 'gpu_driver' && onOpenNvidiaApp && posture.gpu_driver?.gpu_vendor?.toUpperCase().includes('NVIDIA') && (
+            <button
+              onClick={() => void onOpenNvidiaApp()}
+              className="px-3 py-1.5 rounded-md text-xs bg-status-info/20 border border-status-info/50 text-status-info hover:bg-status-info/30"
+              title="Launches the NVIDIA App / GeForce Experience where drivers are managed. Falls back to the web page only if no local tool is detected."
+            >
+              Open NVIDIA App
             </button>
           )}
           <button
@@ -446,7 +459,10 @@ function GpuDriverBody({ posture }: { posture: SecurityPosture }) {
         <Field label="Vendor" value={g.gpu_vendor ?? '(unknown)'} />
         <Field label="Version" value={g.gpu_current_version ?? '(unknown)'} />
         <Field label="Age" value={g.age_days === null ? 'unknown' : `${g.age_days} days`} />
-        {vendorKey && (
+        {vendorKey && vendorKey !== 'NVIDIA' && (
+          // v2.4.27: AMD + Intel still link to the web. NVIDIA gets
+          // the "Open NVIDIA App" footer button instead because Greg
+          // installs drivers through the local app, not the web page.
           <Field
             label="Update"
             value={

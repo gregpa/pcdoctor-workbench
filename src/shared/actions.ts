@@ -187,6 +187,13 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'hardening', icon: '🛡',
     tooltip: 'Opens the Windows Security -> Virus & threat protection page directly. Use this when Tamper Protection blocks Set-MpPreference (for toggling PUA Protection, Controlled Folder Access, etc.). No state change.',
   },
+  open_nvidia_app: {
+    name: 'open_nvidia_app', label: 'Open NVIDIA App',
+    ps_script: 'actions/Open-NvidiaApp.ps1',
+    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
+    category: 'diagnostic', icon: '🎮',
+    tooltip: 'Launches the locally-installed NVIDIA App (or GeForce Experience / Control Panel as fallback) where GPU drivers are managed. Falls back to the NVIDIA driver downloads web page only if no local tool is present.',
+  },
   clear_stale_pending_renames: {
     name: 'clear_stale_pending_renames', label: 'Clear Stale Pending Renames',
     ps_script: 'actions/Clear-StalePendingRenames.ps1',

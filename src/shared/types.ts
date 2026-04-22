@@ -204,6 +204,8 @@ export type ActionName =
   | 'disable_startup_items_batch'
   // v2.4.13 - Per-NAS-drive @Recycle empty (QNAP/Synology convention)
   | 'empty_nas_recycle_bin'
+  // v2.4.27 - Launch NVIDIA App / GeForce Experience / Control Panel
+  | 'open_nvidia_app'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
