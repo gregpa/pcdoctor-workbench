@@ -104,7 +104,20 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
           error: { code: 'E_INVALID_PARAM', message: `Invalid param '${name}': expected number` },
         };
       }
-      scriptArgs.push(`-${name.charAt(0).toUpperCase() + name.slice(1)}`, str);
+      // v2.4.16: proper snake_case -> PascalCase transform. The old code
+      // uppercased only char-0, turning 'drive_letter' into '-Drive_letter',
+      // which PowerShell rejected against $DriveLetter. The historical
+      // workaround was to name PS params with Title_Case_Underscores to
+      // match (e.g. $Item_Name, $Items_Json, $Kb_Id, $Csv_Path). v2.4.16
+      // aligns both sides on idiomatic PascalCase: 'drive_letter' ->
+      // '-DriveLetter', and the 5 affected PS scripts renamed to
+      // $DriveLetter, $ItemName, $ItemsJson, $KbId, $CsvPath.
+      const pascalName = name
+        .split('_')
+        .filter((s) => s.length > 0)
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join('');
+      scriptArgs.push(`-${pascalName}`, str);
     }
   }
 

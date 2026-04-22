@@ -3,7 +3,7 @@
     Disables a startup item by removing it from the HKCU/HKLM Run keys or the Startup folder.
 #>
 param(
-    [string]$Item_Name,
+    [string]$ItemName,
     [switch]$DryRun,
     [switch]$JsonOutput
 )
@@ -30,7 +30,7 @@ if ($DryRun) {
     exit 0
 }
 
-if (-not $Item_Name) { throw "Item_Name parameter is required" }
+if (-not $ItemName) { throw "ItemName parameter is required" }
 
 $keys = @(
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
@@ -40,10 +40,10 @@ $removed = $null
 foreach ($k in $keys) {
     if (-not (Test-Path $k)) { continue }
     $props = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
-    if ($props.PSObject.Properties.Name -contains $Item_Name) {
-        $value = $props.$Item_Name
-        Remove-ItemProperty -Path $k -Name $Item_Name -Force -ErrorAction Stop
-        $removed = @{ key = $k; name = $Item_Name; value = $value }
+    if ($props.PSObject.Properties.Name -contains $ItemName) {
+        $value = $props.$ItemName
+        Remove-ItemProperty -Path $k -Name $ItemName -Force -ErrorAction Stop
+        $removed = @{ key = $k; name = $ItemName; value = $value }
         break
     }
 }
@@ -51,7 +51,7 @@ foreach ($k in $keys) {
 if (-not $removed) {
     $startupFolder = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
     $match = Get-ChildItem -Path $startupFolder -ErrorAction SilentlyContinue |
-        Where-Object { $_.BaseName -eq $Item_Name -or $_.Name -eq $Item_Name } |
+        Where-Object { $_.BaseName -eq $ItemName -or $_.Name -eq $ItemName } |
         Select-Object -First 1
     if ($match) {
         Remove-Item -Path $match.FullName -Force -ErrorAction Stop
@@ -59,14 +59,14 @@ if (-not $removed) {
     }
 }
 
-if (-not $removed) { throw "Startup item '$Item_Name' not found in Run keys or Startup folder" }
+if (-not $removed) { throw "Startup item '$ItemName' not found in Run keys or Startup folder" }
 
 $sw.Stop()
 $result = @{
     success     = $true
     duration_ms = $sw.ElapsedMilliseconds
     removed     = $removed
-    message     = "Removed startup item '$Item_Name'"
+    message     = "Removed startup item '$ItemName'"
 }
 $result | ConvertTo-Json -Depth 3 -Compress
 exit 0

@@ -80,7 +80,11 @@ foreach ($d in $fixedDrives) {
     Start-Sleep -Milliseconds 200
 
     $after = Get-RecycleBinSize -DriveRoot $driveRoot
-    $freed = [math]::Max(0, $before - $after)
+    # v2.4.16: explicit Int64 conditional rather than [math]::Max(0, int64).
+    # The 0 literal selects the Int32 Max overload and downcasts the
+    # Int64 result, which fails for bins > 2 GiB with a confusing
+    # "Cannot convert value 'X' to type 'System.Int32'" error.
+    $freed = if ($before -gt $after) { [int64]($before - $after) } else { [int64]0 }
 
     $status =
         if ($before -eq 0 -and $null -eq $clearError) { 'empty' }

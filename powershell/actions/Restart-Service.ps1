@@ -3,7 +3,7 @@
     Restarts a named Windows service.
 #>
 param(
-    [string]$Service_Name,
+    [string]$ServiceName,
     [switch]$DryRun,
     [switch]$JsonOutput
 )
@@ -30,18 +30,18 @@ if ($DryRun) {
     exit 0
 }
 
-if (-not $Service_Name) { throw "Service_Name parameter is required" }
-$svc = Get-Service -Name $Service_Name -ErrorAction Stop
+if (-not $ServiceName) { throw "Service_Name parameter is required" }
+$svc = Get-Service -Name $ServiceName -ErrorAction Stop
 $before = $svc.Status
-Restart-Service -Name $Service_Name -Force -ErrorAction Stop
+Restart-Service -Name $ServiceName -Force -ErrorAction Stop
 Start-Sleep -Seconds 1
-$after = (Get-Service -Name $Service_Name).Status
+$after = (Get-Service -Name $ServiceName).Status
 
 $sw.Stop()
 $result = @{
     success     = $true
     duration_ms = $sw.ElapsedMilliseconds
-    service     = $Service_Name
+    service     = $ServiceName
     before      = "$before"
     after       = "$after"
     message     = "Service ${Service_Name}: $before -> $after"

@@ -1,12 +1,12 @@
-param([string]$Csv_Path, [switch]$DryRun, [switch]$JsonOutput)
+param([string]$CsvPath, [switch]$DryRun, [switch]$JsonOutput)
 $ErrorActionPreference = 'Stop'
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 if ($DryRun) { @{success=$true;dry_run=$true;duration_ms=0;message='DryRun'}|ConvertTo-Json -Compress; exit 0 }
-if (-not $Csv_Path -or -not (Test-Path $Csv_Path)) { throw "Csv_Path required and must exist" }
+if (-not $CsvPath -or -not (Test-Path $CsvPath)) { throw "CsvPath required and must exist" }
 
 # OCCT CSV is comma-separated with "Time" in col 1. Parse temps + errors.
-$content = Get-Content $Csv_Path -Head 2
+$content = Get-Content $CsvPath -Head 2
 if ($content.Count -lt 2) { throw "OCCT CSV appears empty" }
 $headers = $content[0] -split ','
 
@@ -21,7 +21,7 @@ $col = @{
     errors = Find-Col $headers @('Errors')
 }
 
-$reader = [System.IO.File]::OpenRead($Csv_Path)
+$reader = [System.IO.File]::OpenRead($CsvPath)
 $sr = New-Object System.IO.StreamReader($reader)
 $null = $sr.ReadLine()  # skip header
 
@@ -61,7 +61,7 @@ foreach ($k in $acc.Keys) {
 @{
     success = $true
     duration_ms = $sw.ElapsedMilliseconds
-    csv_path = $Csv_Path
+    csv_path = $CsvPath
     samples = $sampleCount
     errors = $errorsTotal
     findings = $findings

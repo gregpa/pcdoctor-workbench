@@ -2,7 +2,7 @@
 .SYNOPSIS
   Batch-disable Windows startup entries via the StartupApproved registry keys.
 .DESCRIPTION
-  v2.3.0 - C1. Accepts a JSON array of { kind, name } records (via -Items_Json)
+  v2.3.0 - C1. Accepts a JSON array of { kind, name } records (via -ItemsJson)
   and marks each entry as user-disabled in the appropriate
   Explorer\StartupApproved\* registry key. Task Manager treats 0x03 as the
   "disabled" byte[0] marker; 0x02 means enabled. This mirrors what the Startup
@@ -12,7 +12,7 @@
   affected registry keys before calling this script so `Revert` restores them.
 #>
 param(
-    [string]$Items_Json,
+    [string]$ItemsJson,
     [switch]$DryRun,
     [switch]$JsonOutput
 )
@@ -33,13 +33,13 @@ if ($DryRun) {
     exit 0
 }
 
-if (-not $Items_Json) {
+if (-not $ItemsJson) {
     Out-Result @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; error=@{ code='E_INVALID_PARAM'; message='items_json required' } }
     exit 1
 }
 
 try {
-    $items = $Items_Json | ConvertFrom-Json
+    $items = $ItemsJson | ConvertFrom-Json
 } catch {
     Out-Result @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; error=@{ code='E_INVALID_JSON'; message=$_.Exception.Message } }
     exit 1

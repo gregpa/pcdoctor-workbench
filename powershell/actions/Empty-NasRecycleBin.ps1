@@ -18,11 +18,10 @@
     (actionRunner routes this through the confirm-modal flow via the
     `confirm_level: 'destructive'` registration in src/shared/actions.ts).
 
-.PARAMETER Drive
+.PARAMETER DriveLetter
     Single uppercase letter - "M", "Z", "U", etc. No colon, no backslash.
-    Validated against ^[A-Za-z]$. Single-word name (not "DriveLetter")
-    because actionRunner uppercases char-0 only of the params_schema key
-    and PS rejects the resulting -Drive_letter flag - see v2.4.15 notes.
+    Validated against ^[A-Za-z]$. v2.4.16: aligned with actionRunner's
+    snake_case -> PascalCase transform ('drive_letter' -> '-DriveLetter').
 
 .PARAMETER DryRun
     Skip the deletion phase. Still measures before-size and reports what
@@ -38,7 +37,7 @@
     E_NAS_RECYCLE_BLOCKED; caller should show the per-entry error list.
 #>
 param(
-    [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z]$')][string]$Drive,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z]$')][string]$DriveLetter,
     [switch]$DryRun,
     [switch]$JsonOutput
 )
@@ -58,7 +57,7 @@ trap {
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$letter = $Drive.ToUpper()
+$letter = $DriveLetter.ToUpper()
 
 # Safety: refuse to run on anything that isn't a network drive. Catches
 # the case where a caller passes a local drive letter - Clear-RecycleBin
@@ -150,7 +149,12 @@ Get-ChildItem -Path $recyclePath -Force -ErrorAction SilentlyContinue | ForEach-
 # volumes, Size queries can lag the actual state by a few hundred ms.
 Start-Sleep -Milliseconds 300
 $after = Get-NasRecycleSize -Path $recyclePath
-$freed = [math]::Max(0, $before - $after)
+# v2.4.16: explicit Int64 conditional rather than [math]::Max(0, int64).
+# PowerShell's overload resolver treats the 0 literal as Int32 and
+# selects Max(int32, int32), which fails to downcast byte totals
+# above 2 GiB with "Cannot convert value 'X' to type 'System.Int32'".
+# Greg's M: bin at 45 GB hit this.
+$freed = if ($before -gt $after) { [int64]($before - $after) } else { [int64]0 }
 
 $sw.Stop()
 

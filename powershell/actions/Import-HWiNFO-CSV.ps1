@@ -1,5 +1,5 @@
 param(
-    [string]$Csv_Path,
+    [string]$CsvPath,
     [switch]$DryRun,
     [switch]$JsonOutput
 )
@@ -7,11 +7,11 @@ $ErrorActionPreference = 'Stop'
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 if ($DryRun) { @{success=$true;dry_run=$true;duration_ms=0;message='DryRun'}|ConvertTo-Json -Compress; exit 0 }
-if (-not $Csv_Path -or -not (Test-Path $Csv_Path)) { throw "Csv_Path required and must exist" }
+if (-not $CsvPath -or -not (Test-Path $CsvPath)) { throw "CsvPath required and must exist" }
 
 # HWiNFO CSVs have a header row, then data rows. Column positions vary by sensor set.
 # We stream-read and compute min/avg/max for a fixed set of well-known sensors.
-$reader = [System.IO.File]::OpenRead($Csv_Path)
+$reader = [System.IO.File]::OpenRead($CsvPath)
 $sr = New-Object System.IO.StreamReader($reader)
 $headerLine = $sr.ReadLine()
 if (-not $headerLine) { throw "Empty CSV" }
@@ -99,7 +99,7 @@ $sw.Stop()
 $result = @{
     success = $true
     duration_ms = $sw.ElapsedMilliseconds
-    csv_path = $Csv_Path
+    csv_path = $CsvPath
     samples = $sampleCount
     ts_start = if ($tsStart) { $tsStart.ToString('o') } else { $null }
     ts_end = if ($tsEnd) { $tsEnd.ToString('o') } else { $null }

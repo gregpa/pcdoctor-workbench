@@ -1,19 +1,19 @@
-param([string]$Dump_Path, [switch]$DryRun, [switch]$JsonOutput)
+param([string]$DumpPath, [switch]$DryRun, [switch]$JsonOutput)
 $ErrorActionPreference = 'Stop'
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 if ($DryRun) { @{success=$true;dry_run=$true;duration_ms=0;message='DryRun'}|ConvertTo-Json -Compress; exit 0 }
 
 # If no dump path given, find the most recent .dmp
-if (-not $Dump_Path) {
+if (-not $DumpPath) {
     $minidumpDir = 'C:\Windows\Minidump'
     if (Test-Path $minidumpDir) {
         $latest = Get-ChildItem -Path $minidumpDir -Filter '*.dmp' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($latest) { $Dump_Path = $latest.FullName }
+        if ($latest) { $DumpPath = $latest.FullName }
     }
 }
-if (-not $Dump_Path -or -not (Test-Path $Dump_Path)) {
-    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; message="No minidump found at $Dump_Path (or C:\Windows\Minidump)"; dumps_available=0 } | ConvertTo-Json -Compress
+if (-not $DumpPath -or -not (Test-Path $DumpPath)) {
+    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; message="No minidump found at $DumpPath (or C:\Windows\Minidump)"; dumps_available=0 } | ConvertTo-Json -Compress
     exit 0
 }
 
@@ -44,13 +44,13 @@ if (-not $cdb) {
 }
 
 if (-not $cdb) {
-    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; dump_path=$Dump_Path; message='cdb.exe not found. Install the MS Store WinDbg (winget: Microsoft.WinDbg) or Windows SDK Debugging Tools.'; searched=$cdbCandidates + 'C:\Program Files\WindowsApps\Microsoft.WinDbg_*' } | ConvertTo-Json -Compress
+    @{ success=$false; duration_ms=$sw.ElapsedMilliseconds; dump_path=$DumpPath; message='cdb.exe not found. Install the MS Store WinDbg (winget: Microsoft.WinDbg) or Windows SDK Debugging Tools.'; searched=$cdbCandidates + 'C:\Program Files\WindowsApps\Microsoft.WinDbg_*' } | ConvertTo-Json -Compress
     exit 0
 }
 
 # Run cdb with !analyze -v and capture output
 $symbolPath = 'SRV*C:\SymCache*https://msdl.microsoft.com/download/symbols'
-$cdbArgs = @('-z', $Dump_Path, '-y', $symbolPath, '-c', '!analyze -v; q')
+$cdbArgs = @('-z', $DumpPath, '-y', $symbolPath, '-c', '!analyze -v; q')
 $output = & $cdb @cdbArgs 2>&1 | Out-String
 
 # Extract key fields
@@ -64,7 +64,7 @@ if (-not $probableCause -and $output -match 'FAILURE_BUCKET_ID:\s*(\S+)') { $pro
 @{
     success = $true
     duration_ms = $sw.ElapsedMilliseconds
-    dump_path = $Dump_Path
+    dump_path = $DumpPath
     bug_check = $bugCheck
     bug_check_hex = $bugCheckHex
     probable_cause = $probableCause
