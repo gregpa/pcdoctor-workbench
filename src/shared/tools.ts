@@ -101,6 +101,23 @@ export const TOOLS: Record<string, ToolDefinition> = {
     launch_modes: [{ id: 'gui', label: 'Open', args: [], detached: true }],
     icon: '💻',
   },
+  'librehardwaremonitor': {
+    // v2.4.31: LHM exposes CPU / mobo / fan / per-core temps via the
+    // 'root\\LibreHardwareMonitor' WMI namespace when its service (or
+    // the app itself) is running. Get-Temperatures.ps1 prefers that
+    // namespace if present - unlocks CPU temp tracking without admin
+    // every time PCDoctor wants a reading.
+    id: 'librehardwaremonitor', name: 'LibreHardwareMonitor', category: 'hardware',
+    description: 'Open-source sensor monitor. Exposes CPU / mobo / fan / per-core temps via WMI so PCDoctor reads them non-admin.',
+    publisher: 'LibreHardwareMonitor',
+    detect_paths: [
+      'C:\\Program Files\\LibreHardwareMonitor\\LibreHardwareMonitor.exe',
+      'C:\\Program Files (x86)\\LibreHardwareMonitor\\LibreHardwareMonitor.exe',
+    ],
+    winget_id: 'LibreHardwareMonitor.LibreHardwareMonitor',
+    launch_modes: [{ id: 'gui', label: 'Open (start WMI exposure)', args: [], detached: true }],
+    icon: '🌡',
+  },
 
   // ============ DISK ============
   treesize: {

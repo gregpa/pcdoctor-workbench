@@ -45,29 +45,69 @@ trap {
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-# ---- CPU via MSAcpi_ThermalZoneTemperature (admin-gated on most builds) ----
+# ---- CPU temperatures ----
 $cpuZones     = @()
 $cpuNeedsAdmin = $false
+$cpuSource    = 'none'
+
+# v2.4.31: prefer LibreHardwareMonitor's WMI namespace when its
+# service (or the GUI app) is running. LHM exposes per-core CPU
+# temps + mobo + fan data without admin privileges, unlike the
+# MSAcpi thermal zone which requires elevation. Namespace name
+# follows the LHM branding (not the abandoned OpenHardwareMonitor
+# fork it replaced in 2020).
 try {
-    $zones = Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSAcpi_ThermalZoneTemperature' -ErrorAction Stop
-    foreach ($z in $zones) {
-        # CurrentTemperature is in tenths of Kelvin. 3000 -> 27 C, 3500 -> 77 C.
-        # Skip zones that report <0 or >150 C - those are sensor-read
-        # errors, not real temps.
-        if ($null -ne $z.CurrentTemperature -and $z.CurrentTemperature -gt 0) {
-            $tempC = [math]::Round(($z.CurrentTemperature / 10) - 273.15, 1)
-            if ($tempC -ge 0 -and $tempC -le 150) {
-                $cpuZones += [ordered]@{
-                    name   = "$($z.InstanceName)"
-                    temp_c = $tempC
-                }
+    $lhmSensors = Get-CimInstance -Namespace 'root\LibreHardwareMonitor' -ClassName 'Sensor' -ErrorAction Stop
+    foreach ($s in $lhmSensors) {
+        if ("$($s.SensorType)" -ne 'Temperature') { continue }
+        if ($null -eq $s.Value) { continue }
+        $parent = "$($s.Parent)"
+        # CPU sensors only - skip GPU / mobo / drive temps here.
+        # LHM's Parent contains model strings like "/intelcpu/0" or
+        # "/amdcpu/0" for CPU sensors.
+        if ($parent -notmatch '/cpu/|/intelcpu/|/amdcpu/') { continue }
+        $tempC = [math]::Round([double]$s.Value, 1)
+        if ($tempC -ge 0 -and $tempC -le 150) {
+            $cpuZones += [ordered]@{
+                name   = "$parent/$($s.Name)"
+                temp_c = $tempC
             }
         }
     }
+    if ($cpuZones.Count -gt 0) {
+        $cpuSource = 'LibreHardwareMonitor'
+    }
 } catch {
-    $msg = "$($_.Exception.Message)"
-    if ($msg -match 'Access denied' -or $msg -match 'privilege' -or $msg -match '0x80041003') {
-        $cpuNeedsAdmin = $true
+    # LHM not installed or service not running - fall through to ACPI path.
+}
+
+# Fallback: MSAcpi_ThermalZoneTemperature (admin-gated on most builds).
+# Only try this if LHM didn't return anything.
+if ($cpuZones.Count -eq 0) {
+    try {
+        $zones = Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSAcpi_ThermalZoneTemperature' -ErrorAction Stop
+        foreach ($z in $zones) {
+            # CurrentTemperature is in tenths of Kelvin. 3000 -> 27 C, 3500 -> 77 C.
+            # Skip zones that report <0 or >150 C - those are sensor-read
+            # errors, not real temps.
+            if ($null -ne $z.CurrentTemperature -and $z.CurrentTemperature -gt 0) {
+                $tempC = [math]::Round(($z.CurrentTemperature / 10) - 273.15, 1)
+                if ($tempC -ge 0 -and $tempC -le 150) {
+                    $cpuZones += [ordered]@{
+                        name   = "$($z.InstanceName)"
+                        temp_c = $tempC
+                    }
+                }
+            }
+        }
+        if ($cpuZones.Count -gt 0) {
+            $cpuSource = 'MSAcpi_ThermalZoneTemperature'
+        }
+    } catch {
+        $msg = "$($_.Exception.Message)"
+        if ($msg -match 'Access denied' -or $msg -match 'privilege' -or $msg -match '0x80041003') {
+            $cpuNeedsAdmin = $true
+        }
     }
 }
 
@@ -92,6 +132,7 @@ if ($cpuZones.Count -eq 0) {
                 }
                 $cpuCacheUsed = $true
                 $cpuNeedsAdmin = $false
+                $cpuSource = 'cache'
             }
         } catch { }
     }
@@ -231,6 +272,7 @@ $payload = [ordered]@{
         zones       = $cpuZones
         needs_admin = $cpuNeedsAdmin
         from_cache  = $cpuCacheUsed
+        source      = $cpuSource
     }
     gpu          = $gpuList
     disks        = $diskList

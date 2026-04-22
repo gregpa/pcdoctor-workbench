@@ -6,6 +6,7 @@
  * surface commit state, top consumers, and a contextual advice sentence.
  */
 import type { SystemStatus } from '@shared/types.js';
+import { useConfirm } from '@renderer/lib/confirmContext.js';
 
 interface TopProcess {
   name: string;
@@ -72,6 +73,28 @@ function advice(status: SystemStatus): string | null {
 }
 
 export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProps) {
+  const confirm = useConfirm();
+  // v2.4.31 B22: gate the Kill button behind a destructive confirm.
+  // Previously a single mis-click terminated a user-process with its
+  // unsaved work. All dashboard action buttons go through confirm at
+  // risky/destructive levels; the kill button was the one exception.
+  async function handleKillClick(name: string) {
+    if (!onKillProcess) return;
+    const ok = await confirm({
+      title: `Kill ${name}?`,
+      body: (
+        <div>
+          <p className="mb-2">Terminates the process. Any unsaved work is lost immediately and there is no Undo.</p>
+          <p className="text-xs">Use this when a process is runaway or unresponsive; for normal quitting, close the app via its own UI first.</p>
+        </div>
+      ),
+      tier: 'destructive',
+      confirmLabel: 'Kill',
+    });
+    if (!ok) return;
+    await onKillProcess(name);
+  }
+
   const m = status.metrics?.memory_pressure ?? {
     committed_bytes: null, commit_limit: null, pages_per_sec: null, page_faults_per_sec: null, compression_mb: null, top_processes: [],
   };
@@ -129,7 +152,7 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
                 <span className="text-text-secondary">{gb(p.ws_bytes)}</span>
                 {p.kind === 'user' && onKillProcess && (
                   <button
-                    onClick={() => onKillProcess(p.name)}
+                    onClick={() => { void handleKillClick(p.name); }}
                     className="px-1.5 py-0.5 rounded text-[10px] bg-status-crit/20 text-status-crit border border-status-crit/40"
                   >
                     Kill

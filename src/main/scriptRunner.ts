@@ -2,12 +2,35 @@ import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { BrowserWindow } from 'electron';
 import {
   PCDOCTOR_ROOT,
   resolvePwshPath,
   PWSH_FALLBACK,
   DEFAULT_SCRIPT_TIMEOUT_MS,
 } from './constants.js';
+
+// v2.4.31 B39: bring the app window to front + flash its taskbar icon
+// before every elevated spawn so the UAC prompt (which tracks focus)
+// lands on top of whatever the user is doing. Reset flags after the
+// elevated work completes so normal focus behaviour resumes.
+function cueUacForeground(): { restore: () => void } {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return { restore: () => {} };
+  try {
+    win.setAlwaysOnTop(true);
+    win.focus();
+    win.flashFrame(true);
+  } catch { /* ignore */ }
+  return {
+    restore: () => {
+      try {
+        win.setAlwaysOnTop(false);
+        win.flashFrame(false);
+      } catch { /* ignore */ }
+    },
+  };
+}
 
 export class PCDoctorScriptError extends Error {
   code: string;
@@ -257,6 +280,10 @@ export async function runElevatedPowerShellScript<T = unknown>(
     `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NonInteractive','-WindowStyle','Hidden','-Command','${innerCmd.replace(/'/g, "''")}'); ` +
     `exit $p.ExitCode`;
 
+  // v2.4.31 B39: flash the app window + raise to top so the UAC dialog
+  // (which follows focus) doesn't land hidden behind other windows.
+  const uacCue = cueUacForeground();
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn(pwsh, ['-NoProfile', '-NonInteractive', '-Command', outerCmd], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -266,10 +293,12 @@ export async function runElevatedPowerShellScript<T = unknown>(
     child.stderr?.on('data', (c: Buffer) => { wrapStderr += c.toString('utf8'); });
     const timer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch {}
+      uacCue.restore();
       reject(new PCDoctorScriptError('E_TIMEOUT_KILLED', `Elevated script exceeded ${timeoutMs}ms`));
     }, timeoutMs);
     child.on('exit', (code) => {
       clearTimeout(timer);
+      uacCue.restore();
       if (code === 1223) { reject(new PCDoctorScriptError('E_UAC_CANCELLED', 'UAC prompt was cancelled by user')); return; }
       // Wrapper failed *and* no output captured - treat as a hard elevation error.
       if (code !== 0 && !existsSync(outPath)) {

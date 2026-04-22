@@ -19,6 +19,7 @@
  * "Not readable - Tamper Protection on" instead of a blank field.
  */
 import type { SecurityPosture } from '@shared/types.js';
+import { useConfirm } from '@renderer/lib/confirmContext.js';
 
 export type SecurityDetailKind =
   | 'defender'
@@ -314,6 +315,28 @@ function WindowsUpdateBody({ posture }: { posture: SecurityPosture }) {
 }
 
 function FailedLoginsBody({ posture, onUnblockIP }: { posture: SecurityPosture; onUnblockIP?: (ip: string) => void | Promise<void> }) {
+  const confirm = useConfirm();
+  // v2.4.31 B28: confirm before unblocking. The auto-block engine
+  // blocked this IP for a reason (RDP brute-force, lockout burst);
+  // unblocking restores whatever access the attacker had. Not
+  // destructive to local data but can re-expose the machine.
+  async function handleUnblockClick(ip: string) {
+    if (!onUnblockIP) return;
+    const ok = await confirm({
+      title: `Unblock ${ip}?`,
+      body: (
+        <div>
+          <p className="mb-2">Removes the PCDoctor firewall rule blocking this IP. Any inbound traffic from it will be allowed again.</p>
+          <p className="text-xs">Only unblock if you recognise the IP as friendly (e.g. your own remote desktop source, a known VPN exit). If the block was from RDP brute-force, leave it in place.</p>
+        </div>
+      ),
+      tier: 'risky',
+      confirmLabel: 'Unblock',
+    });
+    if (!ok) return;
+    await onUnblockIP(ip);
+  }
+
   const fl = posture.failed_logins;
   if (!fl) return <div className="text-[11px] text-text-secondary">No auth-event data.</div>;
   return (
@@ -354,7 +377,7 @@ function FailedLoginsBody({ posture, onUnblockIP }: { posture: SecurityPosture; 
                   <td className="py-1 text-right">
                     {onUnblockIP && (
                       <button
-                        onClick={() => void onUnblockIP(s.ip)}
+                        onClick={() => { void handleUnblockClick(s.ip); }}
                         className="text-[10px] text-status-info hover:underline"
                         title={`Remove any existing PCDoctor block rule for ${s.ip}`}
                       >
