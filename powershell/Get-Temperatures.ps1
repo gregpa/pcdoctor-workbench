@@ -50,35 +50,97 @@ $cpuZones     = @()
 $cpuNeedsAdmin = $false
 $cpuSource    = 'none'
 
-# v2.4.31: prefer LibreHardwareMonitor's WMI namespace when its
-# service (or the GUI app) is running. LHM exposes per-core CPU
-# temps + mobo + fan data without admin privileges, unlike the
-# MSAcpi thermal zone which requires elevation. Namespace name
-# follows the LHM branding (not the abandoned OpenHardwareMonitor
-# fork it replaced in 2020).
+# v2.4.32: try LibreHardwareMonitor's HTTP API first. LHM 0.9+ dropped
+# the WMI provider in favor of a Remote Web Server (Options menu ->
+# Remote Web Server -> Run, default port 8085). When the user has
+# enabled it, we get non-admin CPU / mobo / fan temps without needing
+# admin every refresh.
+#
+# Quick TCP probe first. Invoke-RestMethod's -TimeoutSec waits the full
+# duration on connection-refused too (observed ~2s even for a closed
+# port), which would cost every scanner poll when LHM isn't running.
+# TcpClient.BeginConnect + WaitOne gives us a hard 200ms cap whether
+# the port is listening or closed.
+$lhmHttpOpen = $false
 try {
-    $lhmSensors = Get-CimInstance -Namespace 'root\LibreHardwareMonitor' -ClassName 'Sensor' -ErrorAction Stop
-    foreach ($s in $lhmSensors) {
-        if ("$($s.SensorType)" -ne 'Temperature') { continue }
-        if ($null -eq $s.Value) { continue }
-        $parent = "$($s.Parent)"
-        # CPU sensors only - skip GPU / mobo / drive temps here.
-        # LHM's Parent contains model strings like "/intelcpu/0" or
-        # "/amdcpu/0" for CPU sensors.
-        if ($parent -notmatch '/cpu/|/intelcpu/|/amdcpu/') { continue }
-        $tempC = [math]::Round([double]$s.Value, 1)
-        if ($tempC -ge 0 -and $tempC -le 150) {
-            $cpuZones += [ordered]@{
-                name   = "$parent/$($s.Name)"
-                temp_c = $tempC
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $iar = $tcp.BeginConnect('127.0.0.1', 8085, $null, $null)
+    $connected = $iar.AsyncWaitHandle.WaitOne(200, $false)
+    if ($connected) {
+        $tcp.EndConnect($iar)
+        $lhmHttpOpen = $true
+    }
+    try { $tcp.Close() } catch { }
+} catch { }
+if ($lhmHttpOpen) { try {
+    $lhmJson = Invoke-RestMethod -Uri 'http://127.0.0.1:8085/data.json' -TimeoutSec 2 -ErrorAction Stop
+    # Recursive walker: LHM returns a tree with nested 'Children' arrays.
+    # Leaf sensor nodes have a 'Value' string like '45.0 °C'. We collect
+    # all such leaves and filter to CPU-related ones by Text.
+    $lhmLeaves = [System.Collections.Generic.List[object]]::new()
+    function Collect-LhmLeaves {
+        param($node, $list)
+        if (-not $node) { return }
+        if ($node.Value -and "$($node.Value)" -match '°\s*C\s*$') {
+            $list.Add($node) | Out-Null
+        }
+        if ($node.Children) {
+            foreach ($c in $node.Children) { Collect-LhmLeaves $c $list }
+        }
+    }
+    Collect-LhmLeaves $lhmJson $lhmLeaves
+    foreach ($leaf in $lhmLeaves) {
+        $text = "$($leaf.Text)"
+        # CPU sensor names include "CPU Core #N", "CPU Package",
+        # "Core (Tctl/Tdie)" (AMD), "Package" (Intel). Skip GPU / mobo /
+        # drive temps here; they're reported from their dedicated
+        # sources elsewhere (nvidia-smi, SMART cache).
+        if ($text -notmatch '(?i)(CPU|Core|Package|Tdie|Tctl)') { continue }
+        # Guard against sensor groupings mislabelled as temps
+        if ($text -match '(?i)(GPU|VRM|Mainboard|Chipset|Mobo|Motherboard)') { continue }
+        if ("$($leaf.Value)" -match '([\d.,]+)\s*°\s*C') {
+            $tempC = [double]($Matches[1] -replace ',', '.')
+            if ($tempC -ge 0 -and $tempC -le 150) {
+                $cpuZones += [ordered]@{
+                    name   = "LHM/$text"
+                    temp_c = [math]::Round($tempC, 1)
+                }
             }
         }
     }
     if ($cpuZones.Count -gt 0) {
-        $cpuSource = 'LibreHardwareMonitor'
+        $cpuSource = 'LibreHardwareMonitor HTTP'
     }
 } catch {
-    # LHM not installed or service not running - fall through to ACPI path.
+    # LHM HTTP parse failed - fall through to legacy WMI, MSAcpi, cache.
+} }  # close inner try + close `if ($lhmHttpOpen)`
+
+# v2.4.31: legacy LHM WMI namespace (pre-0.9 releases or custom builds
+# that still expose it). Older OpenHardwareMonitor-fork users + anyone
+# running a patched LHM may still have this. Harmless 50ms probe when
+# absent.
+if ($cpuZones.Count -eq 0) {
+    try {
+        $lhmSensors = Get-CimInstance -Namespace 'root\LibreHardwareMonitor' -ClassName 'Sensor' -ErrorAction Stop
+        foreach ($s in $lhmSensors) {
+            if ("$($s.SensorType)" -ne 'Temperature') { continue }
+            if ($null -eq $s.Value) { continue }
+            $parent = "$($s.Parent)"
+            if ($parent -notmatch '/cpu/|/intelcpu/|/amdcpu/') { continue }
+            $tempC = [math]::Round([double]$s.Value, 1)
+            if ($tempC -ge 0 -and $tempC -le 150) {
+                $cpuZones += [ordered]@{
+                    name   = "$parent/$($s.Name)"
+                    temp_c = $tempC
+                }
+            }
+        }
+        if ($cpuZones.Count -gt 0) {
+            $cpuSource = 'LibreHardwareMonitor WMI'
+        }
+    } catch {
+        # WMI namespace not present - fall through to ACPI.
+    }
 }
 
 # Fallback: MSAcpi_ThermalZoneTemperature (admin-gated on most builds).

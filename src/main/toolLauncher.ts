@@ -86,17 +86,24 @@ export async function launchTool(toolId: string, modeId: string): Promise<{ ok: 
     }
   }
 
-  // If detection returned installed-via-winget but no resolved_path, try launching via winget
+  // v2.4.32: the v2.3.x "winget run" fallback here has never worked -
+  // 'winget run' isn't a real subcommand, so spawn succeeds (the winget
+  // binary exists) but the process dies immediately with exit 1 which
+  // we never saw because we returned ok=true without waiting. Result:
+  // users clicked Launch, saw a success toast, and nothing opened.
+  // Instead: if detection finds the tool installed-via-winget but not
+  // at a known exe path, surface a clear error asking the user to
+  // update detect_paths or launch from Start Menu. LHM is the first
+  // tool to hit this because winget installs it per-user under
+  // %LOCALAPPDATA%\Microsoft\WinGet\Packages\...; tools.ts now
+  // includes that path in LHM's detect_paths so this branch isn't
+  // taken for LHM any more. Other winget-only tools may trigger it;
+  // the error text tells the user what to do.
   if (status.installed && !status.resolved_path && def.winget_id) {
-    try {
-      const child = spawn('winget', ['run', '--id', def.winget_id], {
-        detached: true, stdio: 'ignore', windowsHide: false,
-      });
-      child.unref();
-      return { ok: true, pid: child.pid };
-    } catch (e: any) {
-      // Fall through to the path-based path even though we know it won't work
-    }
+    return {
+      ok: false,
+      error: `${def.name} is installed via winget but PCDoctor couldn't find its exe. Launch it from the Start Menu once; if the launch still fails after that, please file an issue so we can add the path to tools.ts.`,
+    };
   }
 
   if (!status.installed || !status.resolved_path) {

@@ -102,20 +102,26 @@ export const TOOLS: Record<string, ToolDefinition> = {
     icon: '💻',
   },
   'librehardwaremonitor': {
-    // v2.4.31: LHM exposes CPU / mobo / fan / per-core temps via the
-    // 'root\\LibreHardwareMonitor' WMI namespace when its service (or
-    // the app itself) is running. Get-Temperatures.ps1 prefers that
-    // namespace if present - unlocks CPU temp tracking without admin
-    // every time PCDoctor wants a reading.
+    // v2.4.31 (v2.4.32 expanded): LHM installs per-user via winget, so
+    // its exe lives under %LOCALAPPDATA% not Program Files. Must match
+    // this path exactly or the Launch button appears to succeed but
+    // launches nothing (winget's silent scoop install pattern).
+    //
+    // v2.4.32: LHM 0.9+ removed the WMI provider in favor of the
+    // HTTP API on port 8085 (enable via Options -> Remote Web Server
+    // -> Run). Get-Temperatures.ps1 queries that endpoint for CPU
+    // temperatures when it responds; falls back to MSAcpi + cache
+    // otherwise.
     id: 'librehardwaremonitor', name: 'LibreHardwareMonitor', category: 'hardware',
-    description: 'Open-source sensor monitor. Exposes CPU / mobo / fan / per-core temps via WMI so PCDoctor reads them non-admin.',
+    description: 'Open-source sensor monitor. Enable Options -> Remote Web Server -> Run for PCDoctor to read CPU / mobo / fan / per-core temps via HTTP.',
     publisher: 'LibreHardwareMonitor',
     detect_paths: [
+      '%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\LibreHardwareMonitor.LibreHardwareMonitor_Microsoft.Winget.Source_8wekyb3d8bbwe\\LibreHardwareMonitor.exe',
       'C:\\Program Files\\LibreHardwareMonitor\\LibreHardwareMonitor.exe',
       'C:\\Program Files (x86)\\LibreHardwareMonitor\\LibreHardwareMonitor.exe',
     ],
     winget_id: 'LibreHardwareMonitor.LibreHardwareMonitor',
-    launch_modes: [{ id: 'gui', label: 'Open (start WMI exposure)', args: [], detached: true }],
+    launch_modes: [{ id: 'gui', label: 'Open (enable Remote Web Server after)', args: [], detached: true }],
     icon: '🌡',
   },
 
