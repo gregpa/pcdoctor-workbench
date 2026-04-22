@@ -47,6 +47,14 @@ function Add-NonAdminFallback {
     try {
         $phys = Get-PhysicalDisk -ErrorAction SilentlyContinue
         foreach ($p in $phys) {
+            # v2.4.19: skip non-storage devices that PhysicalDisk enumerates
+            # (2FA tokens like GoldKey, smart card readers, tiny removable
+            # drives). They never carry SMART data and confuse the UI with
+            # perpetual "admin admin" placeholders. Run-SmartCheck.ps1
+            # applies the same filter, so their absence from the cache is
+            # not evidence of needing elevation - just skip them here too.
+            if (-not $p.Size -or $p.Size -lt 1GB) { continue }
+
             $sizeGB = if ($p.Size) { [math]::Round($p.Size / 1GB, 1) } else { 0 }
             $health = switch ("$($p.HealthStatus)") {
                 'Healthy'   { 'PASSED' }

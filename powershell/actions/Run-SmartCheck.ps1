@@ -43,6 +43,80 @@ $drives           = @()
 $warningLines     = [System.Collections.Generic.List[string]]::new()
 $skipped          = @()
 
+# v2.4.19: smartctl third-tier fallback for drives where the primary
+# Windows APIs (Get-StorageReliabilityCounter + MSFT_PhysicalDisk) come
+# up empty. Samsung + Intel NVMe drives routinely return Temperature=1 C
+# (filtered out) and Wear=0 (suspicious) from the Windows Storage stack.
+# smartctl reads the NVMe SMART log directly via the Windows NVMe driver
+# and returns real values for both. For SATA drives it reads ATA SMART
+# attributes the same way smartctl -a always has.
+function Get-SmartctlPath {
+    $candidates = @(
+        'C:\Program Files\smartmontools\bin\smartctl.exe',
+        'C:\Program Files (x86)\smartmontools\bin\smartctl.exe'
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    $cmd = Get-Command smartctl -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Get-SmartctlDriveData {
+    param(
+        [Parameter(Mandatory=$true)][string]$SmartctlPath,
+        [Parameter(Mandatory=$true)][int]$DeviceId
+    )
+    $devPath = "\\.\PhysicalDrive$DeviceId"
+
+    function Parse-SmartctlJson {
+        param([string]$raw)
+        if (-not $raw) { return $null }
+        try {
+            $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        } catch { return $null }
+        $temp = $null; $wearPct = $null
+        if ($parsed.nvme_smart_health_information_log) {
+            $nvme = $parsed.nvme_smart_health_information_log
+            if ($nvme.temperature) { $temp = [int]$nvme.temperature }
+            # percentage_used is the manufacturer's wear indicator,
+            # 0 = new, 100 = EOL. Matches our wear_pct semantics.
+            if ($null -ne $nvme.percentage_used) { $wearPct = [int]$nvme.percentage_used }
+        } elseif ($parsed.ata_smart_attributes -and $parsed.ata_smart_attributes.table) {
+            foreach ($attr in $parsed.ata_smart_attributes.table) {
+                if ($attr.name -in @('Wear_Leveling_Count','SSD_Life_Left','Media_Wearout_Indicator')) {
+                    # ATA attr.value is the normalized current health (100 =
+                    # new, 0 = worn). Invert to wear percentage.
+                    $wearPct = 100 - [int]$attr.value
+                }
+                if ($attr.name -in @('Temperature_Celsius','Airflow_Temperature_Cel')) {
+                    if ($attr.raw -and $null -ne $attr.raw.value) {
+                        $temp = [int]$attr.raw.value
+                    }
+                }
+            }
+        }
+        return @{ temp_c = $temp; wear_pct = $wearPct }
+    }
+
+    # Try auto-detect first, then NVMe explicitly. Samsung NVMe drives on
+    # Intel RST/RAID occasionally need the explicit -d nvme flag.
+    try {
+        $json = & $SmartctlPath -j -a $devPath 2>&1 | Out-String
+        $result = Parse-SmartctlJson -raw $json
+        if ($result -and ($null -ne $result.temp_c -or $null -ne $result.wear_pct)) {
+            return $result
+        }
+    } catch { }
+    try {
+        $json = & $SmartctlPath -j -d nvme -a $devPath 2>&1 | Out-String
+        $result = Parse-SmartctlJson -raw $json
+        if ($result) { return $result }
+    } catch { }
+    return $null
+}
+
+$smartctlPath = Get-SmartctlPath
+
 # NVMe temperature is reported in multiple places and Get-StorageReliabilityCounter
 # frequently returns a stale/low value (1 C is a known bug).  Build a fallback
 # map from Win32_TemperatureProbe / MSStorageDriver_ATAPISmartData.  Best-effort only.
@@ -79,11 +153,44 @@ foreach ($p in $physical) {
     } elseif ($nvmeTemps.ContainsKey($p.DeviceId.ToString())) {
         $temp = $nvmeTemps[$p.DeviceId.ToString()]
     }
+
+    # Wear: raw counter value. Get-StorageReliabilityCounter returns 0 on
+    # many SSDs where the Windows Storage stack can't translate the
+    # manufacturer's wear indicator. smartctl picks those up reliably.
+    $wearPct = if ($rel) { $rel.Wear } else { $null }
+
+    # v2.4.19: smartctl third-tier fallback. Triggered when primary path
+    # returned null/zero for temp or wear - skips the subprocess cost for
+    # drives that already have real values. Typically fires on Samsung /
+    # Intel NVMe internals (temp missing) and sometimes on SATA SSDs
+    # (wear reported as 0 by the counter).
+    $needsSmartctl = ($null -eq $temp) -or ($null -eq $wearPct) -or ($wearPct -eq 0)
+    if ($needsSmartctl -and $smartctlPath) {
+        try {
+            $sc = Get-SmartctlDriveData -SmartctlPath $smartctlPath -DeviceId ([int]$p.DeviceId)
+            if ($sc) {
+                if ($null -eq $temp -and $null -ne $sc.temp_c -and $sc.temp_c -ge 15 -and $sc.temp_c -le 120) {
+                    $temp = $sc.temp_c
+                }
+                # Override wear only when smartctl gives a non-zero reading
+                # and the primary path was null or zero. Protects against
+                # downgrading a valid non-zero wear to a potentially worse
+                # value from a flaky smartctl parse.
+                if ($null -ne $sc.wear_pct -and $sc.wear_pct -gt 0 -and (($null -eq $wearPct) -or ($wearPct -eq 0))) {
+                    $wearPct = $sc.wear_pct
+                }
+            }
+        } catch {
+            # smartctl call failed; leave existing values. Don't warn
+            # unless the user set $VerbosePreference.
+        }
+    }
+
     if ($temp -and $temp -gt 65) { $warns += "Temp=${temp}C (>65C)" }
 
     if ($rel -and $rel.ReadErrorsUncorrected -gt 0)   { $warns += "Uncorrected read errors: $($rel.ReadErrorsUncorrected)" }
     if ($rel -and $rel.WriteErrorsUncorrected -gt 0)  { $warns += "Uncorrected write errors: $($rel.WriteErrorsUncorrected)" }
-    if ($rel -and $rel.Wear -and $rel.Wear -ge 80)    { $warns += "Wear level: $($rel.Wear)%" }
+    if ($wearPct -and $wearPct -ge 80)                { $warns += "Wear level: $wearPct%" }
 
     $drives += [ordered]@{
         model               = $p.FriendlyName
@@ -95,7 +202,7 @@ foreach ($p in $physical) {
         temp_c              = $temp
         power_on_hours      = if ($rel) { $rel.PowerOnHours } else { $null }
         reallocated_sectors = if ($rel) { $rel.ReadErrorsUncorrected } else { $null }
-        wear_pct            = if ($rel) { $rel.Wear } else { $null }
+        wear_pct            = $wearPct
         warnings            = @($warns)
     }
 
