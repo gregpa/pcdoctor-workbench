@@ -3,9 +3,12 @@ import type { SmartEntry } from '@shared/types.js';
 interface SmartTableProps {
   entries: SmartEntry[];
   onRunSmartCheck?: () => void;
+  /** v2.4.25: click a row to open DiskSmartDetailModal. Optional so other
+   *  places can still embed the table in read-only mode. */
+  onRowClick?: (entry: SmartEntry) => void;
 }
 
-export function SmartTable({ entries, onRunSmartCheck }: SmartTableProps) {
+export function SmartTable({ entries, onRunSmartCheck, onRowClick }: SmartTableProps) {
   if (entries.length === 0) {
     return (
       <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
@@ -76,19 +79,26 @@ export function SmartTable({ entries, onRunSmartCheck }: SmartTableProps) {
               ? `${e.temp_c}°C`
               : e.needs_admin ? 'admin' : 'n/a';
             const gatedTitle = 'Drive is cached but this value is not exposed - typical for NVMe behind Intel RST / RAID controllers. Status column still reflects Windows HealthStatus.';
+            const clickable = !!onRowClick;
+            const rowClasses = `border-t border-surface-700 ${clickable ? 'cursor-pointer hover:bg-surface-700/40' : ''}`;
             return (
-              <tr key={i} className="border-t border-surface-700">
+              <tr
+                key={i}
+                className={rowClasses}
+                onClick={clickable ? () => onRowClick!(e) : undefined}
+                title={clickable ? 'Click for SMART details and refresh' : undefined}
+              >
                 <td className="py-1.5">{e.drive}</td>
                 <td className="py-1.5 text-center">{e.health}</td>
                 <td
                   className={`py-1.5 text-center ${dim}`}
-                  title={wearDisplay === 'n/a' ? gatedTitle : undefined}
+                  title={!clickable && wearDisplay === 'n/a' ? gatedTitle : undefined}
                 >
                   {wearDisplay}
                 </td>
                 <td
                   className={`py-1.5 text-center ${dim}`}
-                  title={tempDisplay === 'n/a' ? gatedTitle : undefined}
+                  title={!clickable && tempDisplay === 'n/a' ? gatedTitle : undefined}
                 >
                   {tempDisplay}
                 </td>

@@ -21,6 +21,8 @@ import { SmartTable } from '@renderer/components/dashboard/SmartTable.js';
 import { AuthEventsWidget } from '@renderer/components/dashboard/AuthEventsWidget.js';
 import { BsodPanel } from '@renderer/components/dashboard/BsodPanel.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
+import { ServiceDetailModal } from '@renderer/components/dashboard/ServiceDetailModal.js';
+import { DiskSmartDetailModal } from '@renderer/components/dashboard/DiskSmartDetailModal.js';
 import { CleanMyPC } from '@renderer/components/dashboard/CleanMyPC.js';
 import { TodaysActionsWidget } from '@renderer/components/dashboard/TodaysActionsWidget.js';
 import { ActionResultModal } from '@renderer/components/dashboard/ActionResultModal.js';
@@ -30,7 +32,7 @@ import { NasRecycleBinPanel } from '@renderer/components/dashboard/NasRecycleBin
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionDefinition } from '@shared/actions.js';
 import { recommendAction, getTopRecommendations } from '@shared/recommendations.js';
-import type { ActionName, ServiceHealth } from '@shared/types.js';
+import type { ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
 const QUICK_ACTIONS: ActionName[] = [
@@ -85,6 +87,8 @@ export function Dashboard() {
   const [toast, setToast] = useState<string | null>(null);
   const [toastVariant, setToastVariant] = useState<'default' | 'noop' | 'error' | 'admin'>('default');
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
+  // v2.4.25: click a Disk SMART Health row for the detail modal.
+  const [selectedSmartDrive, setSelectedSmartDrive] = useState<SmartEntry | null>(null);
   const [scanning, setScanning] = useState(false);
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
@@ -478,6 +482,7 @@ export function Dashboard() {
             await handleAction('run_smart_check');
             await refreshSecurity();
           }}
+          onRowClick={setSelectedSmartDrive}
         />
         {eventsTrend ? (
           <TrendBar
@@ -520,38 +525,30 @@ export function Dashboard() {
       </div>
 
       {selectedService && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSelectedService(null)}>
-          <div className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-md p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${selectedService.status_severity === 'good' ? 'bg-status-good' : selectedService.status_severity === 'warn' ? 'bg-status-warn' : 'bg-status-crit'}`}></span>
-              <span>{selectedService.display}</span>
-            </h2>
-            <div className="text-sm text-text-secondary space-y-1 mb-4">
-              <div>Status: <span className="text-text-primary font-mono">{selectedService.status}</span></div>
-              {selectedService.start && <div>Start type: <span className="text-text-primary font-mono">{selectedService.start}</span></div>}
-              <div>Service key: <span className="text-text-primary font-mono">{selectedService.key}</span></div>
-              {selectedService.detail && <div className="text-[10px] mt-2">{selectedService.detail}</div>}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setSelectedService(null)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
-                Close
-              </button>
-              <button
-                onClick={async () => {
-                  const name = selectedService.key;
-                  setSelectedService(null);
-                  await run({ name: 'restart_service', params: { service_name: name } });
-                  setToast(`Restart triggered for ${name}`);
-                  setTimeout(() => setToast(null), 4000);
-                }}
-                disabled={running !== null}
-                className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-semibold disabled:opacity-50"
-              >
-                Restart Service
-              </button>
-            </div>
-          </div>
-        </div>
+        <ServiceDetailModal
+          service={selectedService}
+          actionBusy={running !== null}
+          onClose={() => setSelectedService(null)}
+          onRestart={async (serviceKey) => {
+            setSelectedService(null);
+            // v2.4.25: params key 'service_name' -> '-ServiceName' via
+            // actionRunner's snake->Pascal transform (v2.4.16). The PS
+            // script's $ServiceName param matches.
+            await handleAction('restart_service', { service_name: serviceKey });
+          }}
+        />
+      )}
+
+      {selectedSmartDrive && (
+        <DiskSmartDetailModal
+          entry={selectedSmartDrive}
+          onClose={() => setSelectedSmartDrive(null)}
+          onRunSmartCheck={async () => {
+            setSelectedSmartDrive(null);
+            await handleAction('run_smart_check');
+            await refreshSecurity();
+          }}
+        />
       )}
 
       {resultModal && (
