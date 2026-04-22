@@ -3,6 +3,7 @@ import { createWriteStream, existsSync, mkdirSync, statSync, unlinkSync } from '
 import https from 'node:https';
 import { URL } from 'node:url';
 import path from 'node:path';
+import { shell } from 'electron';
 import type { ToolStatus } from '@shared/types.js';
 import { TOOLS } from '@shared/tools.js';
 
@@ -118,6 +119,22 @@ export async function launchTool(toolId: string, modeId: string): Promise<{ ok: 
     child.unref();
     return { ok: true, pid: child.pid };
   } catch (e: any) {
+    // v2.4.33: winget's per-user scoop installs (e.g. LibreHardwareMonitor
+    // under %LOCALAPPDATA%\Microsoft\WinGet\Packages\...) have Mark-of-the-
+    // Web attributes that cause CreateProcessW (what spawn uses) to return
+    // EACCES. shell.openPath routes through ShellExecuteW which handles
+    // MoTW + SmartScreen + user-scope execution correctly. Arguments are
+    // dropped - acceptable because the EACCES tools are all GUI launches
+    // that don't rely on CLI args for the primary launch mode.
+    if (mode.args.length === 0 && (e?.code === 'EACCES' || e?.code === 'UNKNOWN')) {
+      try {
+        const errMsg = await shell.openPath(status.resolved_path);
+        if (!errMsg) return { ok: true };
+        return { ok: false, error: `shell.openPath failed: ${errMsg}` };
+      } catch (e2: any) {
+        return { ok: false, error: e2?.message ?? 'Shell launch failed' };
+      }
+    }
     return { ok: false, error: e?.message ?? 'Launch failed' };
   }
 }
