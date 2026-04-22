@@ -30,6 +30,33 @@ function safeWeekDelta(category: string, metric: string, label?: string): { week
   catch { return { week_ago: null, now: null }; }
 }
 
+/**
+ * v2.4.29: fetch current temperature readings for trend recording.
+ * Returns { cpu_temp_c, gpu_temp_c } where each may be undefined when
+ * the live path is unavailable (CPU needs admin + no cache yet; no
+ * NVIDIA GPU). The function never throws - all failures degrade to
+ * undefined so the scanner's other metrics still record.
+ */
+async function readTemperaturesBestEffort(): Promise<{ cpu_temp_c?: number; gpu_temp_c?: number } | null> {
+  try {
+    const { runPowerShellScript } = await import('./scriptRunner.js');
+    const r = await runPowerShellScript<any>('Get-Temperatures.ps1', ['-JsonOutput'], { timeoutMs: 10_000 });
+    const cpuZones: Array<{ temp_c: number }> = Array.isArray(r?.cpu?.zones) ? r.cpu.zones : [];
+    // Use the hottest zone as the CPU temp metric - matches what
+    // the UI shows in the summary line.
+    const cpuTemp = cpuZones.length > 0
+      ? Math.max(...cpuZones.map((z) => z.temp_c))
+      : undefined;
+    const gpuList: Array<{ temp_c: number | null }> = Array.isArray(r?.gpu) ? r.gpu : [];
+    const gpuTemp = gpuList.length > 0 && typeof gpuList[0].temp_c === 'number'
+      ? gpuList[0].temp_c
+      : undefined;
+    return { cpu_temp_c: cpuTemp, gpu_temp_c: gpuTemp };
+  } catch {
+    return null;
+  }
+}
+
 export class PCDoctorBridgeError extends Error {
   code: string;
   constructor(code: string, message: string) {
@@ -63,12 +90,21 @@ export async function getStatus(): Promise<SystemStatus> {
   // Persist snapshot for trend tracking (best-effort, non-fatal)
   try {
     const m = parsed.metrics ?? {};
+    // v2.4.29: fetch current CPU + GPU temps alongside the status map.
+    // Get-Temperatures is cheap (~200ms): nvidia-smi + SMART cache read
+    // + WMI or cache-fallback for CPU. The metric rows feed the 7-day
+    // trend charts on the Dashboard. We `.catch()` so a temp-read
+    // failure doesn't block trend tracking for the other metrics.
+    const tempsPromise = readTemperaturesBestEffort();
+    const temps = await tempsPromise;
     recordStatusSnapshot({
       cpu_load_pct: typeof m.cpu_load_pct === 'number' ? m.cpu_load_pct : undefined,
       ram_used_pct: typeof m.ram_used_pct === 'number' ? m.ram_used_pct : undefined,
       disks: Array.isArray(m.disks) ? m.disks.map((d: any) => ({ drive: d.drive, free_pct: d.free_pct })) : undefined,
       event_errors_system: m?.event_errors_7d?.system_count,
       event_errors_application: m?.event_errors_7d?.application_count,
+      cpu_temp_c: temps?.cpu_temp_c,
+      gpu_temp_c: temps?.gpu_temp_c,
     });
   } catch {}
   // Fire notifications for any new critical/warning findings (non-blocking)

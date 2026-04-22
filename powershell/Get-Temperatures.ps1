@@ -197,6 +197,32 @@ if ($diskWithTemp.Count -gt 0) {
 }
 $summary = if ($msgParts.Count -gt 0) { ($msgParts -join ', ') } else { 'no sensor data' }
 
+# v2.4.29: write the CPU zones out to a cache file when we got real
+# live data (not just when we echoed the cache back). The non-admin
+# path then reads this cache on subsequent scans so the temp trend
+# fills in without repeated UAC prompts. Cache TTL check is in the
+# read branch at the top of the script.
+if ($cpuZones.Count -gt 0 -and -not $cpuCacheUsed) {
+    $cachePath = 'C:\ProgramData\PCDoctor\reports\temperature-cache.json'
+    $cacheDir  = Split-Path $cachePath -Parent
+    try {
+        if (-not (Test-Path $cacheDir)) {
+            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+        }
+        $cache = [ordered]@{
+            generated_at = [int64](([DateTimeOffset](Get-Date)).ToUnixTimeSeconds())
+            cpu = [ordered]@{
+                zones = $cpuZones
+            }
+        }
+        $cache | ConvertTo-Json -Depth 5 | Set-Content -Path $cachePath -Encoding UTF8 -Force
+    } catch {
+        # Non-fatal. Scanner will just not find a cache next time,
+        # and the CPU row will stay admin-gated until the next
+        # successful elevated run.
+    }
+}
+
 $payload = [ordered]@{
     success      = $true
     duration_ms  = $sw.ElapsedMilliseconds

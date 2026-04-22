@@ -21,7 +21,11 @@ describe('ACTIONS catalog', () => {
 
   it('every action has a ps_script path', () => {
     for (const [name, def] of Object.entries(ACTIONS)) {
-      expect(def.ps_script, `${name} missing ps_script`).toMatch(/^actions\/.+\.ps1$/i);
+      // v2.4.29: allow root-level scripts (Get-Temperatures.ps1 is shared
+      // between the action pipeline AND pcdoctorBridge's per-scan read,
+      // so putting it under actions/ would imply action-only use) OR
+      // traditional subfolder paths (actions/, security/).
+      expect(def.ps_script, `${name} missing ps_script`).toMatch(/^([a-z]+\/)?[\w-]+\.ps1$/i);
     }
   });
 

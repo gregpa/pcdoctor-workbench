@@ -30,7 +30,6 @@ import { ActionResultModal } from '@renderer/components/dashboard/ActionResultMo
 import { StartupPickerModal } from '@renderer/components/dashboard/StartupPickerModal.js';
 import { RamPressurePanel } from '@renderer/components/dashboard/RamPressurePanel.js';
 import { NasRecycleBinPanel } from '@renderer/components/dashboard/NasRecycleBinPanel.js';
-import { TemperaturePanel } from '@renderer/components/dashboard/TemperaturePanel.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionDefinition } from '@shared/actions.js';
 import { recommendAction, getTopRecommendations } from '@shared/recommendations.js';
@@ -110,6 +109,10 @@ export function Dashboard() {
   });
   const { trend: cpuTrend } = useTrend('cpu', 'load_pct', 7);
   const { trend: eventsTrend } = useTrend('events', 'system_count', 7);
+  // v2.4.29: temperature trends - populated once temperatures metric
+  // rows are recorded via pcdoctorBridge's readTemperaturesBestEffort.
+  const { trend: cpuTempTrend } = useTrend('cpu', 'temp_c', 7);
+  const { trend: gpuTempTrend } = useTrend('gpu', 'temp_c', 7);
   const { data: security, refresh: refreshSecurity } = useSecurityPosture();
   const { review: weeklyReview } = useWeeklyReview();
   const navigate = useNavigate();
@@ -291,10 +294,10 @@ export function Dashboard() {
           ? status.gauges.filter(g => !g.label.toLowerCase().includes('ram')).slice(0, 2)
           : status.gauges.slice(0, 3);
         return (
-          <div className="grid grid-cols-4 gap-2.5 mb-3">
+          <div className="grid grid-cols-3 gap-2.5 mb-3">
             {gaugesToShow.map((g) => {
               // v2.4.6: click-to-expand on the CPU gauge opens the same
-              // 7-day trend modal the panel below uses. RAM/Disk gauges
+              // 7-day trend modal the row below uses. RAM/Disk gauges
               // stay non-clickable until we wire per-metric trends —
               // RAM already flips to the pressure panel at >75%, and
               // disk trend is per-drive (needs a label filter on the
@@ -318,34 +321,68 @@ export function Dashboard() {
             {showPanel && (
               <RamPressurePanel status={status} onKillProcess={(name) => handleAction('kill_process', { target: name })} />
             )}
-            {cpuTrend ? (
-              <TrendLine
-                title="CPU Load - 7 Day Trend"
-                trend={cpuTrend}
-                severity="info"
-                yDomain={[0, 100]}
-                onExpand={() => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', unit: '%', yDomain: [0, 100] })}
-              />
-            ) : (
-              <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering trend data…</div>
-            )}
           </div>
         );
       })()}
 
-      {/* v2.4.28: CPU / GPU / NVMe temperature readings. Data sources:
-         GPU via nvidia-smi, NVMe via SMART cache, CPU via WMI (admin).
-         Collapsible, auto-refresh 60s. When CPU needs_admin a Refresh
-         button appears that UAC-elevates via run_smart_check. */}
-      <TemperaturePanel
-        onRefreshAdmin={async () => {
-          // Re-run the elevated SMART check which also refreshes temps
-          // on admin-accessible surfaces; future v2.4.29 can get a
-          // dedicated refresh_temperatures action if needed.
-          await handleAction('run_smart_check');
-          await refreshSecurity();
-        }}
-      />
+      {/* v2.4.29: three trend charts in their own row - CPU load, CPU
+         temp, GPU temp. Replaces the v2.4.28 TemperaturePanel per user
+         request ("make them trends just like the CPU load. fill out
+         that row"). Drive temps removed here - they're already in the
+         Disk SMART Health section. */}
+      <div className="mb-1.5 flex justify-between items-center">
+        <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold">7-day trends</div>
+        <button
+          onClick={() => void handleAction('refresh_temperatures')}
+          className="text-[10px] text-text-secondary hover:text-text-primary underline-offset-2 hover:underline"
+          title="Run Get-Temperatures elevated. CPU thermal-zone WMI needs admin; this caches the read so subsequent scans populate the CPU temp trend without UAC."
+        >
+          🌡 Refresh CPU Temp (admin)
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2.5 mb-3">
+        {cpuTrend ? (
+          <TrendLine
+            title="CPU Load - 7 Day Trend"
+            trend={cpuTrend}
+            severity="info"
+            yDomain={[0, 100]}
+            onExpand={() => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', unit: '%', yDomain: [0, 100] })}
+          />
+        ) : (
+          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering CPU load trend…</div>
+        )}
+        {cpuTempTrend ? (
+          <TrendLine
+            title="CPU Temp - 7 Day Trend"
+            trend={cpuTempTrend}
+            severity="info"
+            yDomain={[30, 100]}
+            onExpand={() => setExpandedTrend({ title: 'CPU Temp - 7 Day Trend', unit: '°C', yDomain: [30, 100] })}
+          />
+        ) : (
+          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex flex-col items-center justify-center text-text-secondary text-xs gap-2">
+            <div>CPU temp trend</div>
+            <div className="text-[10px] italic">admin required to seed - click Refresh above</div>
+          </div>
+        )}
+        {gpuTempTrend ? (
+          <TrendLine
+            title="GPU Temp - 7 Day Trend"
+            trend={gpuTempTrend}
+            severity="info"
+            yDomain={[30, 100]}
+            onExpand={() => setExpandedTrend({ title: 'GPU Temp - 7 Day Trend', unit: '°C', yDomain: [30, 100] })}
+          />
+        ) : (
+          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering GPU temp trend…</div>
+        )}
+      </div>
+
+      {/* v2.4.29: the v2.4.28 TemperaturePanel was replaced by three
+         trend charts above (CPU load + CPU temp + GPU temp). Drive
+         temps removed entirely - they already live in the Disk SMART
+         Health section, keeping that data non-duplicated. */}
 
       {/* v2.4.13: NAS drive storage + per-drive @Recycle empty. Auto-discovers
          mapped network drives via Get-NasDrives.ps1; shows offline ones

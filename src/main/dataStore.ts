@@ -373,6 +373,11 @@ export function recordStatusSnapshot(s: {
   disks?: Array<{ drive: string; free_pct: number }>;
   event_errors_system?: number;
   event_errors_application?: number;
+  // v2.4.29: temperature metrics - category='cpu' metric='temp_c' +
+  // category='gpu' metric='temp_c'. Populated by pcdoctorBridge after
+  // Get-Temperatures.ps1 runs.
+  cpu_temp_c?: number;
+  gpu_temp_c?: number;
 }): void {
   const db = openDb();
   const ts = Date.now();
@@ -391,6 +396,8 @@ export function recordStatusSnapshot(s: {
     }
     if (typeof s.event_errors_system === 'number') stmt.run(ts, 'events', 'system_count', s.event_errors_system, null);
     if (typeof s.event_errors_application === 'number') stmt.run(ts, 'events', 'application_count', s.event_errors_application, null);
+    if (typeof s.cpu_temp_c === 'number') stmt.run(ts, 'cpu', 'temp_c', s.cpu_temp_c, null);
+    if (typeof s.gpu_temp_c === 'number') stmt.run(ts, 'gpu', 'temp_c', s.gpu_temp_c, null);
   });
   tx();
 }
