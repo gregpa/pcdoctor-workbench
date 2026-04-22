@@ -110,24 +110,48 @@ Write-Host "[phase 1b] Corrupted $corruptCount files."
 Write-Host ""
 Write-Host "[phase 2] Running installer ACL sequence (via Apply-TieredAcl.ps1)..."
 
+# v2.4.12 (E-19 fix): invoke Apply-TieredAcl via `powershell.exe -File`
+# subprocess to MATCH the installer's NSIS ExecWait form exactly. The prior
+# harness invoked via PowerShell's direct `& $applyScript` operator, which
+# has different parameter-binding semantics than `-File` subprocess calls.
+# v2.4.11's installer silently dropped the -NonRecursive switch under
+# ExecWait while the direct-& harness saw it bind - harness passed, install
+# broke. Mirroring invocation form makes that class of drift impossible by
+# construction.
+function Invoke-ApplyTieredAcl {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][ValidateSet('A','B')][string]$Tier,
+        [ValidateSet('root','recurse')][string]$Mode = 'recurse'
+    )
+    $psArgs = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $applyScript,
+        '-Path', $Path,
+        '-Tier', $Tier,
+        '-Mode', $Mode
+    )
+    & powershell.exe @psArgs
+}
+
 Write-Host "  [step 1] takeown /r /d y"
 & takeown /f $Sandbox /r /d y 2>&1 | Out-Null
 
 Write-Host "  [step 2] /reset /T (clear corruption)"
 & icacls $Sandbox /reset /T /C /Q 2>&1 | Out-Null
 
-Write-Host "  [step 3] tier-A on root (non-recursive — dir + immediate files)"
-# Root container + root-level files. Apply-TieredAcl -Recursive:false covers both.
-& $applyScript -Path $Sandbox -Tier A -NonRecursive
+Write-Host "  [step 3] tier-A on root (Mode root - dir + immediate files + SQLite grant)"
+Invoke-ApplyTieredAcl -Path $Sandbox -Tier A -Mode root
 
-Write-Host "  [step 4] tier-A on script subdirs (recursive)"
+Write-Host "  [step 4] tier-A on script subdirs (recurse)"
 foreach ($sd in $scriptSubdirs) {
-    & $applyScript -Path (Join-Path $Sandbox $sd) -Tier A
+    Invoke-ApplyTieredAcl -Path (Join-Path $Sandbox $sd) -Tier A -Mode recurse
 }
 
-Write-Host "  [step 5] tier-B on data subdirs (recursive)"
+Write-Host "  [step 5] tier-B on data subdirs (recurse)"
 foreach ($sd in $dataSubdirs) {
-    & $applyScript -Path (Join-Path $Sandbox $sd) -Tier B
+    Invoke-ApplyTieredAcl -Path (Join-Path $Sandbox $sd) -Tier B -Mode recurse
 }
 
 Write-Host "  [step 6] workbench.db Users:M"
@@ -143,10 +167,10 @@ $wrongTier = @()    # Non-empty DACL but wrong permission tier
 $tierAFiles = 0
 $tierBFiles = 0
 # v2.4.10: tier-correctness check. Prior version only rejected zero-ACE
-# files — but if Apply-TieredAcl silently no-op'd (e.g. $Args automatic-
+# files - but if Apply-TieredAcl silently no-op'd (e.g. $Args automatic-
 # variable clash issuing icacls with no args), files would retain their
 # default inherited Users:M ACE from ProgramData. That passes a non-empty
-# check while leaving script dirs with writable Users access — a security
+# check while leaving script dirs with writable Users access - a security
 # regression the harness would miss. Explicit tier verification closes it.
 #
 # Expected Users permission per tier:
@@ -172,7 +196,7 @@ Get-ChildItem $Sandbox -Recurse -File -Force | ForEach-Object {
     # Tier-A must have ReadAndExecute-class rights WITHOUT Write or Modify or FullControl.
     # Tier-B must have Modify (which includes Write).
     # workbench.db is a tier-A-neighbour root file but gets a specific Users:M
-    # grant — whitelist it.
+    # grant - whitelist it.
     $isWorkbenchDb = $rel -match '^(workbench\.db(-wal|-shm)?)$'
     $hasWriteAccess = $rightsStr -match 'Modify|Write|FullControl'
 
@@ -200,7 +224,7 @@ Get-ChildItem $Sandbox -Recurse -File -Force | ForEach-Object {
     }
 }
 
-# ========== Phase 4: functional check — SQLite sibling creation ==========
+# ========== Phase 4: functional check - SQLite sibling creation ==========
 # v2.4.11: tier-A ACL correctness wasn't enough. The v2.4.10 installer passed
 # all tier checks but broke SQLite because root directory was Users:RX (no
 # add-file). workbench.db at root needs Users:(WD,AD,DC) on the PARENT dir
@@ -251,7 +275,7 @@ if ($wrongTier.Count -gt 0) {
     Write-Host "[FAIL] $($wrongTier.Count) files have WRONG TIER (non-empty DACL but permissions mismatch):" -ForegroundColor Red
     $wrongTier | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
     Write-Host ""
-    Write-Host "This typically means Apply-TieredAcl.ps1 silently no-op'd — check for"
+    Write-Host "This typically means Apply-TieredAcl.ps1 silently no-op'd - check for"
     Write-Host "icacls help-text in the phase 2 output above, or add -Verbose."
 }
 if (-not $sqliteGrant) {
@@ -259,7 +283,7 @@ if (-not $sqliteGrant) {
     Write-Host "  SQLite cannot create workbench.db-wal / workbench.db-shm at runtime."
     Write-Host "  App will fail with 'unable to open database file' on first DB access."
     Write-Host "  Expected: Users:(WD,AD,DC) ACE on the root directory object."
-    Write-Host "  Fix: Apply-TieredAcl.ps1 tier-A / NonRecursive branch must add this grant."
+    Write-Host "  Fix: Apply-TieredAcl.ps1 tier-A / Mode=root branch must add this grant."
 }
 Write-Host ""
 Write-Host "Sandbox preserved at: $Sandbox"

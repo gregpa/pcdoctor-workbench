@@ -19,7 +19,7 @@
     and applying the right flags to each:
       - DIRECTORIES get (OI)(CI) inheritance flags so the ACE propagates
         to their children.
-      - FILES get the same permissions WITHOUT (OI)(CI) — the flags are
+      - FILES get the same permissions WITHOUT (OI)(CI) - the flags are
         meaningless on leaf nodes anyway.
 
     The result is deterministic and reproducible: every file and folder
@@ -30,34 +30,57 @@
     Root of the subtree to lock down.
 
 .PARAMETER Tier
-    'A' = script-only (Users:RX, read-only) — used for root, actions/, security/
-    'B' = data (Users:M, writable) — used for logs/, reports/, snapshots/, etc.
+    'A' = script-only (Users:RX, read-only) - used for root, actions/, security/
+    'B' = data (Users:M, writable) - used for logs/, reports/, snapshots/, etc.
 
-.PARAMETER NonRecursive
-    Switch. If present, applies tier to the directory + its immediate files only;
-    does NOT descend into subdirectories. Used for the root container where
-    subdirs each get their own invocation. Default behavior (switch absent) is
-    fully recursive.
+.PARAMETER Mode
+    'recurse' (default): fully recursive - tier applied to this dir + all
+        subdirs + all files underneath.
+    'root': applies tier to the target directory + its IMMEDIATE files only,
+        and ALSO adds the tier-A SQLite sibling-creation grant on the dir
+        object. Does NOT descend into subdirectories. Use this for the top
+        container (C:\ProgramData\PCDoctor) where the subdirs each get their
+        own invocation with their own tier.
 
 .EXAMPLE
     Apply-TieredAcl.ps1 -Path "C:\ProgramData\PCDoctor\actions" -Tier A
-    # Locks actions/ + all children to Users:RX
+    # Locks actions/ + all children to Users:RX (default Mode=recurse)
 
     Apply-TieredAcl.ps1 -Path "C:\ProgramData\PCDoctor\reports" -Tier B
     # Locks reports/ + all children to tier-B (SYSTEM:F, Admins:F, Users:M)
 
-    Apply-TieredAcl.ps1 -Path "C:\ProgramData\PCDoctor" -Tier A -NonRecursive
-    # Locks root dir + root-level files only. Subdirs get their own calls.
+    Apply-TieredAcl.ps1 -Path "C:\ProgramData\PCDoctor" -Tier A -Mode root
+    # Locks root dir + root-level files only; adds SQLite grant. Subdirs get
+    # their own calls.
 
 .NOTES
     Requires elevated context (caller is responsible for admin privilege).
-    Using a [switch] rather than [bool]$Recursive avoids NSIS string-to-bool
-    coercion ambiguity when invoked via `powershell -File` from installer.nsh.
+
+    WHY -Mode IS A STRING, NOT A [switch]:
+    v2.4.11's installer shipped with a [switch]$NonRecursive param. The
+    pre-ship harness (invoking via PowerShell `& $script -NonRecursive`)
+    saw the switch bind and the SQLite grant applied. The real installer
+    (invoking via NSIS `ExecWait 'powershell.exe -File ... -NonRecursive'`)
+    did NOT apply the grant on Greg's box - the installed C:\ProgramData\
+    PCDoctor root lacked Users:(WD,AD,DC) after a clean install. Required a
+    manual icacls hotfix.
+
+    Exact NSIS-side mechanism was never reproduced in isolation, but the
+    fix closes two independent holes regardless:
+
+      1. String param with ValidateSet is unambiguous across every
+         invocation form (direct `&`, subprocess `-File`, NSIS ExecWait,
+         Start-Process -ArgumentList). A [switch] requires the caller to
+         emit the literal token with no value; misquoting by any
+         intermediate tokenizer drops the switch silently.
+      2. The harness now invokes Apply-TieredAcl via the same
+         `powershell -File` subprocess form the installer uses, so drift
+         between test and ship is impossible by construction (E-19).
 #>
 param(
     [Parameter(Mandatory=$true)][string]$Path,
     [Parameter(Mandatory=$true)][ValidateSet('A','B')][string]$Tier,
-    [switch]$NonRecursive
+    [ValidateSet('root','recurse')][string]$Mode = 'recurse'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -86,7 +109,7 @@ $script:anyFailed = $false
 
 .DESCRIPTION
     Prior to v2.4.10 the icacls invocations were piped `2>&1 | Out-Null`
-    which swallowed BOTH the error output AND the exit signal — a failed
+    which swallowed BOTH the error output AND the exit signal - a failed
     grant looked identical to a successful one. Debugging was blind.
 
     This wrapper runs icacls with splat, checks $LASTEXITCODE, emits a
@@ -143,7 +166,7 @@ Invoke-IcaclsChecked -Description "root dir $Path" -IcaclsArgs @(
 # v2.4.11: on tier-A root ONLY, add dir-level WD+AD+DC grant for Users.
 #
 # Why: tier-A = Users:RX blocks users from modifying existing files
-# (intentional — prevents "bring-your-own-elevator" malware swapping a
+# (intentional - prevents "bring-your-own-elevator" malware swapping a
 # script), but also blocks SQLite from creating `workbench.db-wal` and
 # `workbench.db-shm` journal files at startup, breaking every IPC that
 # touches workbench.db. Manifested on v2.4.10 install as "unable to
@@ -152,15 +175,15 @@ Invoke-IcaclsChecked -Description "root dir $Path" -IcaclsArgs @(
 # Granular WD (write data = add file) + AD (append data = add subdir) +
 # DC (delete child) without (OI)(CI) inheritance flags applies to the
 # root directory object ONLY. Existing children keep their propagated
-# (OI)(CI)RX from the previous grant — non-admin users still can't
+# (OI)(CI)RX from the previous grant - non-admin users still can't
 # overwrite scripts. The hole is 'can create NEW files in root', which
 # is what SQLite needs and is not a meaningful escalation path (any
 # new file the user creates runs with their existing user token).
 #
-# Applied only on tier-A and only on $NonRecursive (root) calls —
+# Applied only on tier-A and only on Mode=root calls -
 # script subdirs (actions/, security/) don't host a database and data
 # subdirs (tier-B) already have Users:M which includes WD+AD+DC.
-if ($Tier -eq 'A' -and $NonRecursive) {
+if ($Tier -eq 'A' -and $Mode -eq 'root') {
     Invoke-IcaclsChecked -Description "root dir SQLite sibling-creation grant" -IcaclsArgs @(
         $Path,
         '/grant', "$($sidUsers):(WD,AD,DC)",
@@ -168,10 +191,10 @@ if ($Tier -eq 'A' -and $NonRecursive) {
     )
 }
 
-if ($NonRecursive) {
-    # Non-recursive mode: lock the immediate FILES in this directory too,
+if ($Mode -eq 'root') {
+    # Root mode: lock the immediate FILES in this directory too,
     # but don't descend into subdirectories. This is used for the root
-    # container — root-level .ps1 files and event-allowlist.json need
+    # container - root-level .ps1 files and event-allowlist.json need
     # tier-A, but subdirectories (actions/, security/, data dirs) get
     # their own Apply-TieredAcl invocation with their own tier.
     Get-ChildItem -Path $Path -File -Force -EA SilentlyContinue | ForEach-Object {

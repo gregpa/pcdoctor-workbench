@@ -31,8 +31,8 @@
     Requires admin. Runs the same sequence as installer steps 2-7:
       takeown /r /d y
       icacls /reset /T
-      Apply-TieredAcl -Tier A -NonRecursive  (root + root-level files)
-      Apply-TieredAcl -Tier A                (actions/, security/)
+      Apply-TieredAcl -Tier A -Mode root     (root + root-level files + SQLite grant)
+      Apply-TieredAcl -Tier A                (actions/, security/ - Mode defaults to recurse)
       Apply-TieredAcl -Tier B                (data subdirs)
       icacls workbench.db /grant Users:M
 #>
@@ -52,7 +52,7 @@ $applyAcl = Join-Path $root 'Apply-TieredAcl.ps1'
 
 # Prerequisite: Apply-TieredAcl must be deployed
 if (-not (Test-Path $applyAcl)) {
-    $e = @{ code='E_MISSING_HELPER'; message="Apply-TieredAcl.ps1 not found at $applyAcl — reinstall required" } | ConvertTo-Json -Compress
+    $e = @{ code='E_MISSING_HELPER'; message="Apply-TieredAcl.ps1 not found at $applyAcl - reinstall required" } | ConvertTo-Json -Compress
     Write-Host "PCDOCTOR_ERROR:$e"
     exit 1
 }
@@ -72,8 +72,10 @@ if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Adm
 # Step 2: reset the tree to default inherited (clears explicit corruption)
 & icacls $root /reset /T /C /Q 2>&1 | Out-Null
 
-# Step 3: tier-A on root + root-level files (non-recursive)
-& $applyAcl -Path $root -Tier A -NonRecursive
+# Step 3: tier-A on root + root-level files (root mode, adds SQLite grant).
+# v2.4.12: -Mode root replaces v2.4.11's -NonRecursive [switch] - see
+# Apply-TieredAcl.ps1 notes for E-19 context.
+& $applyAcl -Path $root -Tier A -Mode root
 
 # Step 4: tier-A on script subdirectories
 foreach ($sd in @('actions', 'security')) {
@@ -82,7 +84,7 @@ foreach ($sd in @('actions', 'security')) {
 }
 
 # Step 5: tier-B on data subdirectories
-# v2.4.10: added `settings` — covers nasConfig.ts's `settings\nas.json`
+# v2.4.10: added `settings` - covers nasConfig.ts's `settings\nas.json`
 # which would otherwise inherit tier-A (Users:RX) and block writes.
 foreach ($sd in @('logs', 'reports', 'snapshots', 'exports', 'claude-bridge', 'history', 'baseline', 'settings')) {
     $p = Join-Path $root $sd
@@ -111,9 +113,9 @@ $result = [ordered]@{
     duration_ms        = $sw.ElapsedMilliseconds
     remaining_bad_acls = $bad
     message            = if ($bad -eq 0) {
-        "ACL heal complete — 0 zero-ACE files remain"
+        "ACL heal complete - 0 zero-ACE files remain"
     } else {
-        "Partial heal — $bad files still have zero ACEs (manual investigation required)"
+        "Partial heal - $bad files still have zero ACEs (manual investigation required)"
     }
 }
 

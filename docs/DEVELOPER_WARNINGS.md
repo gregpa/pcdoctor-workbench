@@ -156,7 +156,63 @@ next UAC-elevated action run the replacement.
 Fixed in v2.4.9: scope `/inheritance:e` to just the newly-copied files inside
 the Sync-ScriptsFromBundle copy loop. Never run tree-wide `/inheritance:e`.
 
-## 6. Defender races icacls — exclusion + sleep, don't optimise away
+## 6. `[switch]` params cross NSIS ExecWait are unsafe - use `-Mode` strings
+
+### The bug (E-19, v2.4.11)
+
+`powershell/Apply-TieredAcl.ps1` originally took a `[switch]$NonRecursive` param.
+The pre-ship harness (invoking via PowerShell's direct `& $script -NonRecursive`
+operator) saw the switch bind and its `if ($NonRecursive)` branch fire - tier-A
+root gained the `Users:(WD,AD,DC)` SQLite sibling-creation grant. Harness passed.
+
+The real installer (invoking via NSIS `ExecWait 'powershell.exe -File ...
+-NonRecursive'`) did NOT apply that grant on Greg's box after a clean install.
+The root ACL lacked the grant entirely; SQLite fell back to rollback-journal
+mode using only the file-specific `Users:M` on `workbench.db`. Required a
+manual icacls hotfix.
+
+Exact NSIS-side mechanism was never reproduced in isolation, but two
+independent holes stood out:
+
+1. `[switch]` param binding depends on the literal token surviving every
+   tokenizer between the NSIS string and PowerShell's param parser.
+   `powershell.exe -File script.ps1 -NonRecursive` SHOULD bind the switch
+   the same way `& script.ps1 -NonRecursive` does, but the harness and
+   install disagreed in production. Empirically unsafe.
+2. The harness invoked the helper via direct `&` while the installer used
+   `-File` subprocess. Even if the param binding matched, other things
+   (`$PSScriptRoot`, exit-code capture, transcript behaviour) differ.
+
+### The fix (v2.4.12)
+
+Two layers of defense:
+
+- **String param with `ValidateSet`** - replaced `[switch]$NonRecursive` with
+  `[ValidateSet('root','recurse')][string]$Mode = 'recurse'`. A string value
+  binds unambiguously across every invocation form; there's no "switch
+  present vs absent" state to lose in tokenization.
+
+- **Harness mirrors installer form** - `scripts/test-installer-acl.ps1` now
+  invokes `Apply-TieredAcl.ps1` via `powershell.exe -File` subprocess (the
+  same form `ExecWait` uses in installer.nsh). What we test is byte-for-byte
+  what we ship.
+
+Plus a post-install verification script (`Verify-InstalledAcl.ps1`) run by
+the installer against the REAL install state, writing a log to
+`C:\ProgramData\PCDoctor\logs\install-verify-*.log`. Harness catches design
+bugs; verify catches install-time drift.
+
+### Rules
+
+- **Do not** add a new `[switch]` param to any helper script that's invoked
+  via `powershell -File` or NSIS `ExecWait`. Use `ValidateSet` strings.
+- **Do not** change the harness's invocation form. It MUST stay
+  `powershell.exe -File $applyScript ...` matching the installer.
+- If you rename the `-Mode` values or add a new mode, update BOTH the
+  harness and the installer in the same commit, and re-run the harness
+  before rebuilding.
+
+## 7. Defender races icacls — exclusion + sleep, don't optimise away
 
 Windows Defender's real-time scan holds files open briefly during scan. If
 `icacls` hits a file that Defender has locked, the grant silently fails while
@@ -177,6 +233,7 @@ second to cut. Keep the Defender pause.
 - [`scripts/test-installer-acl.ps1`](../scripts/test-installer-acl.ps1) — pre-ship gate
 - [`powershell/Apply-TieredAcl.ps1`](../powershell/Apply-TieredAcl.ps1) — shared ACL logic
 - [`powershell/Heal-InstallAcls.ps1`](../powershell/Heal-InstallAcls.ps1) — runtime self-heal
+- [`powershell/Verify-InstalledAcl.ps1`](../powershell/Verify-InstalledAcl.ps1) — post-install verification (v2.4.12)
 - [`powershell/Repair-ScriptAcls.ps1`](../powershell/Repair-ScriptAcls.ps1) — zero-ACE safety net
 - [`src/main/scriptRunner.ts`](../src/main/scriptRunner.ts) — elevated arg-emission logic
 - [`src/main/main.ts`](../src/main/main.ts) — startup self-heal hook (line ~231)

@@ -43,11 +43,19 @@
   ; from prior installs. Transient intermediate state.
   ExecWait 'icacls.exe "C:\ProgramData\PCDoctor" /reset /T /C /Q'
 
-  ; Step 4: tier-A on root container + root-level files (non-recursive).
-  ; Apply-TieredAcl's -NonRecursive flag handles dir + immediate files
-  ; only. Subdirs (actions/, security/, data subdirs) get their own
-  ; invocations below with their own tier.
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor" -Tier A -NonRecursive'
+  ; Step 4: tier-A on root container + root-level files (root mode).
+  ; Apply-TieredAcl's -Mode root handles the dir + immediate files ONLY and
+  ; also adds the SQLite sibling-creation grant (Users:(WD,AD,DC)) on the
+  ; root dir object so SQLite can create workbench.db-wal / workbench.db-shm
+  ; journals at startup. Subdirs (actions/, security/, data subdirs) get
+  ; their own invocations below with their own tier.
+  ;
+  ; v2.4.12 E-19 fix: -Mode is a ValidateSet string param instead of a
+  ; [switch]. v2.4.11's installer shipped with [switch]$NonRecursive; the
+  ; harness saw it bind but this ExecWait form did not, so the SQLite grant
+  ; never made it onto the real install. String params are unambiguous
+  ; across every caller form (direct `&`, -File subprocess, NSIS ExecWait).
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor" -Tier A -Mode root'
 
   ; Step 5: tier-A on script subdirs (recursive — all files inside get Users:RX).
   ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\actions" -Tier A'
@@ -86,7 +94,7 @@
   ; Step 8: remove Defender exclusion now ACL work is done.
   ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-MpPreference -ExclusionPath C:\ProgramData\PCDoctor -ErrorAction SilentlyContinue"'
 
-  ; Step 9: safety net — Repair-ScriptAcls.ps1 -Elevated scans for any
+  ; Step 9: safety net - Repair-ScriptAcls.ps1 -Elevated scans for any
   ; remaining zero-ACE files. With Apply-TieredAcl's dir/file separation
   ; this should be a no-op, but it costs nothing to keep as a final check.
   ; v2.4.10: guard with IfFileExists. NSIS ExecWait ignores exit codes, so
@@ -94,6 +102,20 @@
   ; safety net rather than seeing a clear error. Test-Path equivalent.
   IfFileExists "C:\ProgramData\PCDoctor\Repair-ScriptAcls.ps1" 0 +2
     ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Repair-ScriptAcls.ps1" -Elevated'
+
+  ; Step 10 (v2.4.12 E-19 fix): post-install ACL verification.
+  ; Reads the INSTALLED DACL state on C:\ProgramData\PCDoctor and confirms
+  ; it matches the expected tier configuration. Writes a timestamped log
+  ; to C:\ProgramData\PCDoctor\logs\install-verify-*.log.
+  ;
+  ; Why this exists as a separate script from the pre-ship harness:
+  ; the harness runs in a SANDBOX. v2.4.11 passed the harness but the
+  ; real install silently dropped the SQLite grant. This script catches
+  ; drift on the REAL install state. NSIS ExecWait ignores the exit
+  ; code, but a failing install leaves a log file at a known location
+  ; that tells the user exactly what went wrong.
+  IfFileExists "C:\ProgramData\PCDoctor\Verify-InstalledAcl.ps1" 0 +2
+    ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Verify-InstalledAcl.ps1" -Quiet'
 
   ; =============================================================
   ; Scheduled task for autostart (unchanged from v2.4.6)
