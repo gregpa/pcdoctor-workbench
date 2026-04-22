@@ -170,7 +170,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
       aria-label="Disable startup items"
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-3xl p-5 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-6xl p-5 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-1 flex items-center gap-2">

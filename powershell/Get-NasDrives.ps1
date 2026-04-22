@@ -71,71 +71,93 @@ function Test-NasHostReachable {
     }
 }
 
-# DriveType=4 is "Network Drive" per Win32_LogicalDisk. This never hits
-# the remote share; it reads the OS drive letter table from the SMB client.
-$netDrives = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=4' -ErrorAction SilentlyContinue)
+# v2.4.14: enumerate ALL Win32_LogicalDisk drive types that make sense to
+# show in a storage panel:
+#   DriveType=2 Removable (USB flash, GoldKey-style tokens)
+#   DriveType=3 Local fixed (internal SSD/HDD, Google Drive File Stream)
+#   DriveType=4 Network (SMB mounts)
+# Skip 5 (CD-ROM) and 6 (RAM drive) - neither is actionable here.
+#
+# TCP reachability probe only applies to network drives. Local + removable
+# drives that Win32_LogicalDisk sees are by definition already reachable
+# (Size > 0) - if they weren't, the OS wouldn't list them. No need to pay
+# the 2s probe cost or `Test-Path` round-trip for them.
+$allDrives = @(Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue |
+    Where-Object { $_.DriveType -in 2, 3, 4 })
 
 $result = @()
 
-foreach ($d in $netDrives) {
+foreach ($d in $allDrives) {
     $letter = ($d.DeviceID -replace ':$', '').ToUpper()
     $root   = "$letter`:\"
+    $isNetwork = ($d.DriveType -eq 4)
+    $kind = switch ($d.DriveType) {
+        2 { 'removable' }
+        3 { 'local' }
+        4 { 'network' }
+        default { 'local' }
+    }
 
-    # Parse the server hostname from the provider UNC path
-    # (\\server-or-ip\share). Fall back to no-host if unparseable.
+    # Parse the server hostname from the provider UNC path - network only.
     $hostName = $null
-    if ($d.ProviderName -and $d.ProviderName -match '^\\\\([^\\]+)\\') {
+    if ($isNetwork -and $d.ProviderName -and $d.ProviderName -match '^\\\\([^\\]+)\\') {
         $hostName = $Matches[1]
     }
 
     # Layered reachability:
-    #   1. CIM Size must be populated (OS has a live mount record).
-    #   2. TCP :445 on the host responds within 2s (SMB port open).
-    #   3. Test-Path on the drive root succeeds (share still mounted).
-    # Only when all three pass do we consider the drive reachable for
-    # the purpose of measuring @Recycle size. Any earlier step failing
-    # short-circuits the expensive Test-Path + Get-ChildItem calls.
+    #   Network:  CIM Size populated + TCP :445 within 2s + Test-Path works.
+    #   Local:    CIM Size populated is enough (no remote round-trip).
     $reachable = $false
-    if ($null -ne $d.Size -and [int64]$d.Size -gt 0 -and $hostName) {
-        if (Test-NasHostReachable -HostName $hostName -TimeoutMs 2000) {
-            try {
-                $reachable = Test-Path $root -ErrorAction SilentlyContinue
-            } catch { $reachable = $false }
+    if ($null -ne $d.Size -and [int64]$d.Size -gt 0) {
+        if ($isNetwork) {
+            if ($hostName -and (Test-NasHostReachable -HostName $hostName -TimeoutMs 2000)) {
+                try { $reachable = Test-Path $root -ErrorAction SilentlyContinue }
+                catch { $reachable = $false }
+            }
+        } else {
+            $reachable = $true
         }
     }
 
-    $usedBytes = $null
-    $freeBytes = $null
-    $totalBytes = $null
+    $usedBytes    = $null
+    $freeBytes    = $null
+    $totalBytes   = $null
     $recycleBytes = $null
 
     if ($reachable) {
         try {
-            $usedBytes = [int64]($d.Size - $d.FreeSpace)
-            $freeBytes = [int64]$d.FreeSpace
+            $usedBytes  = [int64]($d.Size - $d.FreeSpace)
+            $freeBytes  = [int64]$d.FreeSpace
             $totalBytes = [int64]$d.Size
         } catch { }
 
-        # @Recycle sizing. Missing folder = 0 bytes (not null). Access errors
-        # during the walk are tolerated; we'd rather report a possibly-stale
-        # low number than fail the whole tile.
-        $recyclePath = Join-Path $root '@Recycle'
-        if (Test-Path $recyclePath -ErrorAction SilentlyContinue) {
-            try {
-                $sum = (Get-ChildItem -Path $recyclePath -Recurse -Force -File -ErrorAction SilentlyContinue |
-                        Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
-                $recycleBytes = if ($null -eq $sum) { [int64]0 } else { [int64]$sum }
-            } catch {
-                $recycleBytes = $null
+        if ($isNetwork) {
+            # @Recycle sizing. Missing folder = 0 bytes (not null). Access
+            # errors during the walk are tolerated; a stale low number is
+            # better than failing the whole tile.
+            $recyclePath = Join-Path $root '@Recycle'
+            if (Test-Path $recyclePath -ErrorAction SilentlyContinue) {
+                try {
+                    $sum = (Get-ChildItem -Path $recyclePath -Recurse -Force -File -ErrorAction SilentlyContinue |
+                            Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+                    $recycleBytes = if ($null -eq $sum) { [int64]0 } else { [int64]$sum }
+                } catch {
+                    $recycleBytes = $null
+                }
+            } else {
+                $recycleBytes = [int64]0
             }
-        } else {
-            $recycleBytes = [int64]0
         }
+        # Local + removable drives leave $recycleBytes = $null. The UI uses
+        # this to hide the @Recycle trash button (local $Recycle.Bin is
+        # handled by the existing empty_recycle_bins Quick Action).
     }
 
     $result += [ordered]@{
         letter        = "$letter`:"
-        unc           = if ($d.ProviderName) { "$($d.ProviderName)" } else { $null }
+        unc           = if ($isNetwork -and $d.ProviderName) { "$($d.ProviderName)" } else { $null }
+        volume_name   = if ($d.VolumeName) { "$($d.VolumeName)" } else { $null }
+        kind          = $kind
         used_bytes    = $usedBytes
         free_bytes    = $freeBytes
         total_bytes   = $totalBytes

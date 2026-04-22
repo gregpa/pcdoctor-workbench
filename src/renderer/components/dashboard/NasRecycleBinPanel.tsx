@@ -1,13 +1,19 @@
 /**
- * NasRecycleBinPanel (v2.4.13)
+ * NasRecycleBinPanel (v2.4.13; v2.4.14 expanded to all drives)
  *
- * Dashboard tile showing per-NAS-drive storage (used / free) plus a
- * one-click "Empty @Recycle" button per drive. Auto-discovers drives
- * from Win32_LogicalDisk DriveType=4 (network), so any letter mapped
- * outside the app's Settings page still appears here.
+ * Dashboard tile showing per-drive storage (used / free) plus a
+ * one-click "Empty @Recycle" button on NAS drives. Auto-discovers every
+ * Win32_LogicalDisk with DriveType in {2, 3, 4}:
+ *   - 3 (local fixed): C:, D:, E:(Google Drive File Stream), J:(Elements)
+ *   - 2 (removable):   F:(GoldKey), G:(portable USB)
+ *   - 4 (network):     B:, M:, U:, V:, W:, Z: (QNAP shares)
  *
- * Placement: under the gauge row, same column width as the CPU+RAM+Disk
- * gauges, so it picks up the "drive storage" visual theme Greg asked for.
+ * Placement: under the gauge row, so it sits in the "drive storage"
+ * visual region of the dashboard.
+ *
+ * Trash button is NAS-only (unc populated + recycle_bytes > 0). Local
+ * drives show a "local" badge instead - the existing empty_recycle_bins
+ * Quick Action handles $Recycle.Bin on fixed drives in bulk.
  *
  * Actions are destructive and routed through the standard confirm flow
  * (ActionResultModal via the parent Dashboard's handleAction). We do NOT
@@ -19,12 +25,20 @@ import type { ActionResult, IpcResult } from '@shared/types.js';
 
 export interface NasDrive {
   letter: string;              // "M:"
-  unc: string | null;          // "\\\\server\\share" or null
+  unc: string | null;          // "\\\\server\\share" for network; null for local
   used_bytes: number | null;
   free_bytes: number | null;
   total_bytes: number | null;
+  /** For network drives: size of {L}:\@Recycle. For local: always null
+   *  (the trash button is NAS-only; local $Recycle.Bin is handled via
+   *  the existing empty_recycle_bins action). */
   recycle_bytes: number | null;
   reachable: boolean;
+  /** v2.4.14: volume label for local drives (e.g. "OS", "Elements").
+   *  Optional + always null for network drives. */
+  volume_name?: string | null;
+  /** v2.4.14: 'network' | 'local' | 'removable'. Drives the UI badge. */
+  kind?: 'network' | 'local' | 'removable';
 }
 
 interface NasApi {
@@ -56,9 +70,13 @@ function pctUsed(d: NasDrive): number | null {
 }
 
 function severityClass(pct: number | null): string {
+  // v2.4.14: Tailwind config names this color 'status-crit' (not -critical).
+  // Previous 'bg-status-critical' class was missing, which silently rendered
+  // no bar for 95%+ drives (M:/U:/Z: on Greg's box showed blank).
+  // Thresholds: <80 info (blue), 80-94 warn (yellow), >=95 crit (red).
   if (pct === null) return 'bg-surface-600';
-  if (pct >= 95) return 'bg-status-critical';
-  if (pct >= 85) return 'bg-status-warn';
+  if (pct >= 95) return 'bg-status-crit';
+  if (pct >= 80) return 'bg-status-warn';
   return 'bg-status-info';
 }
 
@@ -143,12 +161,12 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
     <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 mb-3">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
-          <span>🖧</span><span>NAS Drives</span>
+          <span>🖧</span><span>Drives &amp; Storage</span>
         </div>
         <button
           onClick={() => void load()}
           className="text-[10px] text-text-secondary hover:text-text-primary underline-offset-2 hover:underline"
-          aria-label="Refresh NAS drive list"
+          aria-label="Refresh drive list"
         >
           Refresh
         </button>
@@ -157,36 +175,58 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
       <div className="space-y-1.5">
         {(drives ?? []).map((d) => {
           const pct = pctUsed(d);
-          const isOffline = !d.reachable;
+          // v2.4.14: network drives have a unc; local drives don't. Only
+          // network drives carry the @Recycle trash button - local drives
+          // use $Recycle.Bin via the existing empty_recycle_bins action.
+          const isNetwork = d.kind === 'network' || (d.unc !== null && d.unc !== undefined);
+          const isOffline = isNetwork && !d.reachable;
+          const displayPath = d.unc ?? d.volume_name ?? null;
+          const kindLabel = isNetwork ? 'NAS' : d.kind === 'removable' ? 'USB' : 'Local';
+          const kindBadgeClass = isNetwork
+            ? 'bg-status-info/20 text-status-info border-status-info/40'
+            : d.kind === 'removable'
+              ? 'bg-surface-700 text-text-secondary border-surface-600'
+              : 'bg-surface-700 text-text-secondary border-surface-600';
+
           return (
             <div
               key={d.letter}
               className={`border border-surface-700 rounded-md p-2 ${isOffline ? 'opacity-50' : ''}`}
-              title={d.unc ?? undefined}
+              title={displayPath ?? undefined}
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-mono text-[12px] font-semibold w-10">{d.letter}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wide border ${kindBadgeClass}`}>
+                  {kindLabel}
+                </span>
                 <span className="text-[10px] text-text-secondary flex-1 truncate">
-                  {d.unc ?? (isOffline ? '(unreachable)' : 'local reference only')}
+                  {displayPath ?? (isOffline ? '(unreachable)' : '(no label)')}
                 </span>
                 <span className="text-[10px] text-text-secondary whitespace-nowrap">
                   {isOffline
                     ? 'offline'
                     : `${fmtBytes(d.used_bytes)} / ${fmtBytes(d.total_bytes)}`}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => void handleEmpty(d)}
-                  disabled={isOffline || busy === d.letter || (d.recycle_bytes ?? 0) === 0}
-                  title={isOffline
-                    ? 'Drive offline'
-                    : (d.recycle_bytes ?? 0) === 0
-                      ? '@Recycle is empty or missing'
-                      : `Empty ${d.letter}\\@Recycle (${fmtBytes(d.recycle_bytes)})`}
-                  className="px-2 py-1 rounded-md text-[10px] bg-status-warn/20 border border-status-warn/50 text-status-warn hover:bg-status-warn/30 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  {busy === d.letter ? '...' : `🗑 ${fmtBytes(d.recycle_bytes)}`}
-                </button>
+                {isNetwork ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleEmpty(d)}
+                    disabled={isOffline || busy === d.letter || (d.recycle_bytes ?? 0) === 0}
+                    title={isOffline
+                      ? 'Drive offline'
+                      : (d.recycle_bytes ?? 0) === 0
+                        ? '@Recycle is empty or missing'
+                        : `Empty ${d.letter}\\@Recycle (${fmtBytes(d.recycle_bytes)})`}
+                    className="px-2 py-1 rounded-md text-[10px] bg-status-warn/20 border border-status-warn/50 text-status-warn hover:bg-status-warn/30 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    {busy === d.letter ? '...' : `🗑 ${fmtBytes(d.recycle_bytes)}`}
+                  </button>
+                ) : (
+                  // Placeholder keeps row heights aligned when mixing local
+                  // + network drives. The existing "Empty All Recycle Bins"
+                  // Quick Action is where local $Recycle.Bin cleanup lives.
+                  <span className="text-[10px] text-text-secondary italic whitespace-nowrap w-[72px] text-right">-</span>
+                )}
               </div>
               <div className="relative h-1 w-full rounded bg-surface-700 overflow-hidden">
                 <div
@@ -200,7 +240,9 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
       </div>
 
       <div className="mt-2 text-[9.5px] text-text-secondary italic">
-        @Recycle is the QNAP/Synology per-share recycle bin. Emptying is irreversible.
+        Used-pct bar: blue under 80%, yellow 80-94%, red 95%+. @Recycle empty
+        targets NAS drives only (QNAP/Synology per-share bin); use "Empty All
+        Recycle Bins" in Quick Actions for local $Recycle.Bin. Irreversible.
       </div>
     </div>
   );

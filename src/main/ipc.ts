@@ -1067,13 +1067,13 @@ export function registerIpcHandlers() {
   // Returns [{letter, unc, used/free/total/recycle bytes, reachable}] per
   // DriveType=4 logical disk. Offline shares come back with reachable=false
   // and null numeric fields so the UI can render them grayed out.
-  ipcMain.handle('api:getNasDrives', async (): Promise<IpcResult<Array<{ letter: string; unc: string | null; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> => {
+  ipcMain.handle('api:getNasDrives', async (): Promise<IpcResult<Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> => {
     try {
       const { runPowerShellScript } = await import('./scriptRunner.js');
-      const r = await runPowerShellScript<{ drives?: Array<{ letter: string; unc: string | null; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }> }>('Get-NasDrives.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      const r = await runPowerShellScript<{ drives?: Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }> }>('Get-NasDrives.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
       return { ok: true, data: r?.drives ?? [] };
     } catch (e: any) {
-      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to enumerate NAS drives' } };
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to enumerate drives' } };
     }
   });
 

@@ -89,8 +89,10 @@ const api = {
     ipcRenderer.invoke('api:getStartupConfig'),
   setStartupConfig: (payload: { threshold: number; allowlist: string[] }): Promise<IpcResult<{}>> =>
     ipcRenderer.invoke('api:setStartupConfig', payload),
-  // v2.4.13: NAS drive enumeration for Dashboard NasRecycleBinPanel.
-  getNasDrives: (): Promise<IpcResult<Array<{ letter: string; unc: string | null; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> =>
+  // v2.4.13 (v2.4.14 expanded): all-drive enumeration for Dashboard
+  // NasRecycleBinPanel. kind='network'|'local'|'removable'. Local +
+  // removable drives leave unc=null + recycle_bytes=null (UI hides trash).
+  getNasDrives: (): Promise<IpcResult<Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> =>
     ipcRenderer.invoke('api:getNasDrives'),
   // v2.4.6: on-demand Event Log breakdown for the chart click-to-expand.
   getEventLogBreakdown: (opts?: { days?: number; topN?: number; level?: string }): Promise<IpcResult<any>> =>
