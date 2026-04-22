@@ -463,6 +463,38 @@ export const DEFAULT_NOTIFICATION_EVENTS = [
 
 export type NotificationEvent = typeof DEFAULT_NOTIFICATION_EVENTS[number];
 
+// --- Temperatures (v2.4.28) ---
+export interface TemperatureReport {
+  generated_at: number;
+  cpu: {
+    zones: Array<{ name: string; temp_c: number }>;
+    /** True when WMI thermal-zone query needs elevation (typical for
+     *  non-admin Dashboard scans). UI shows "admin required" + a
+     *  Refresh button that elevates. */
+    needs_admin: boolean;
+    /** True when cpu.zones came from a stale-tolerant cache file
+     *  (previous elevated run) rather than a fresh WMI read. */
+    from_cache: boolean;
+  };
+  gpu: Array<{
+    vendor: string;
+    name: string;
+    temp_c: number | null;
+    memory_temp_c: number | null;
+    fan_pct: number | null;
+    utilization_pct: number | null;
+  }>;
+  disks: Array<{
+    drive: string;
+    model: string;
+    temp_c: number | null;
+    kind: string;
+    source: string;
+    needs_admin: boolean;
+  }>;
+  message: string;
+}
+
 // --- Scheduled tasks ---
 export interface ScheduledTaskInfo {
   name: string;

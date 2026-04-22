@@ -94,6 +94,9 @@ const api = {
   // removable drives leave unc=null + recycle_bytes=null (UI hides trash).
   getNasDrives: (): Promise<IpcResult<Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> =>
     ipcRenderer.invoke('api:getNasDrives'),
+  // v2.4.28: CPU + GPU + NVMe temperature aggregation.
+  getTemperatures: (): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:getTemperatures'),
   // v2.4.6: on-demand Event Log breakdown for the chart click-to-expand.
   getEventLogBreakdown: (opts?: { days?: number; topN?: number; level?: string }): Promise<IpcResult<any>> =>
     ipcRenderer.invoke('api:getEventLogBreakdown', opts ?? {}),

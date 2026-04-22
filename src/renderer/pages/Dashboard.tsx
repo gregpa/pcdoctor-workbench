@@ -30,6 +30,7 @@ import { ActionResultModal } from '@renderer/components/dashboard/ActionResultMo
 import { StartupPickerModal } from '@renderer/components/dashboard/StartupPickerModal.js';
 import { RamPressurePanel } from '@renderer/components/dashboard/RamPressurePanel.js';
 import { NasRecycleBinPanel } from '@renderer/components/dashboard/NasRecycleBinPanel.js';
+import { TemperaturePanel } from '@renderer/components/dashboard/TemperaturePanel.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionDefinition } from '@shared/actions.js';
 import { recommendAction, getTopRecommendations } from '@shared/recommendations.js';
@@ -331,6 +332,20 @@ export function Dashboard() {
           </div>
         );
       })()}
+
+      {/* v2.4.28: CPU / GPU / NVMe temperature readings. Data sources:
+         GPU via nvidia-smi, NVMe via SMART cache, CPU via WMI (admin).
+         Collapsible, auto-refresh 60s. When CPU needs_admin a Refresh
+         button appears that UAC-elevates via run_smart_check. */}
+      <TemperaturePanel
+        onRefreshAdmin={async () => {
+          // Re-run the elevated SMART check which also refreshes temps
+          // on admin-accessible surfaces; future v2.4.29 can get a
+          // dedicated refresh_temperatures action if needed.
+          await handleAction('run_smart_check');
+          await refreshSecurity();
+        }}
+      />
 
       {/* v2.4.13: NAS drive storage + per-drive @Recycle empty. Auto-discovers
          mapped network drives via Get-NasDrives.ps1; shows offline ones

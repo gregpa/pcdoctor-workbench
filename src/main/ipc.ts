@@ -1073,6 +1073,19 @@ export function registerIpcHandlers() {
   // Returns [{letter, unc, used/free/total/recycle bytes, reachable}] per
   // DriveType=4 logical disk. Offline shares come back with reachable=false
   // and null numeric fields so the UI can render them grayed out.
+  // v2.4.28: aggregated CPU + GPU + NVMe temperature reading for the
+  // Dashboard TemperaturePanel. Non-admin: GPU via nvidia-smi works,
+  // NVMe via SMART cache works, CPU needs admin (marked needs_admin).
+  ipcMain.handle('api:getTemperatures', async (): Promise<IpcResult<any>> => {
+    try {
+      const { runPowerShellScript } = await import('./scriptRunner.js');
+      const r = await runPowerShellScript<any>('Get-Temperatures.ps1', ['-JsonOutput'], { timeoutMs: 15_000 });
+      return { ok: true, data: r };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to read temperatures' } };
+    }
+  });
+
   ipcMain.handle('api:getNasDrives', async (): Promise<IpcResult<Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> => {
     try {
       const { runPowerShellScript } = await import('./scriptRunner.js');
