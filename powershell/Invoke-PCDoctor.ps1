@@ -464,6 +464,29 @@ try {
     # needing another IPC round-trip. Essential apps are marked is_essential=true
     # and get pre-unchecked by the UI.
     $essentialRegex = '^(SecurityHealth|Windows Security|OneDrive|Microsoft Teams|MicrosoftEdgeAutoLaunch|GoogleDriveFS|Notifiarr|LGHUB|PrivateVpnAutoLaunch|RtkAudUService|GoldKey|Docker Desktop|Plex)'
+
+    # v2.4.13: read user-configured startup threshold + allowlist from the
+    # sidecar JSON written by main.ts's syncStartupConfigToDisk(). Missing
+    # or malformed file -> defaults (threshold=20, empty allowlist). The
+    # allowlist is a HashSet of "<kind>::<name>" keys matching how the UI
+    # identifies items in StartupPickerModal.
+    $startupThreshold = 20
+    $startupAllowlist = New-Object System.Collections.Generic.HashSet[string]
+    try {
+        $startupConfigPath = 'C:\ProgramData\PCDoctor\settings\startup.json'
+        if (Test-Path $startupConfigPath) {
+            $scfg = Get-Content $startupConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($scfg.threshold -is [int] -and $scfg.threshold -ge 5 -and $scfg.threshold -le 200) {
+                $startupThreshold = [int]$scfg.threshold
+            }
+            if ($scfg.allowlist -is [System.Array]) {
+                foreach ($k in $scfg.allowlist) {
+                    if ($k -is [string] -and $k) { [void]$startupAllowlist.Add($k) }
+                }
+            }
+        }
+    } catch { Log "startup config read error: $_" }
+
     $report.metrics.startup_items = @(
         foreach ($e in $startupEnabled) {
             $loc = "$($e.Location)"
@@ -483,6 +506,7 @@ try {
                     }
                 }
             } catch {}
+            $itemKey = "$kind::$($e.Name)"
             @{
                 name = "$($e.Name)"
                 location = $loc
@@ -492,11 +516,31 @@ try {
                 publisher = "$($e.User)"
                 path = $path
                 size_bytes = $sizeBytes
+                # v2.4.13: surface allowlist state to the UI so the picker
+                # can render the "Never warn" toggle in the right state.
+                allowlisted = $startupAllowlist.Contains($itemKey)
             }
         }
     )
 
-    if ($startup.Count -gt 25) {
+    # v2.4.13: count used for the warn check excludes allowlisted items.
+    # Display count ($startup.Count) is unchanged - we still show "32 real
+    # entries" in the message so the user sees the true count.
+    $countForWarning = 0
+    foreach ($e in $startupEnabled) {
+        $loc = "$($e.Location)"
+        $kind = if ($loc -match 'HKCU.*Run') { 'Run' }
+                elseif ($loc -match 'HKLM.*Run') { 'HKLM_Run' }
+                elseif ($loc -match 'Startup') { 'StartupFolder' }
+                else { 'Run' }
+        if (-not $startupAllowlist.Contains("$kind::$($e.Name)")) {
+            $countForWarning++
+        }
+    }
+    $report.metrics.startup_threshold = $startupThreshold
+    $report.metrics.startup_allowlist_count = $startupAllowlist.Count
+
+    if ($countForWarning -gt $startupThreshold) {
         # Pick a top candidate to disable: favor HKCU Run entries (user-writable,
         # safest to disable) and skip items whose name looks load-bearing.
         # User-specific keeps (Greg): Notifiarr routes phone alerts, LGHUB drives
@@ -519,6 +563,9 @@ try {
 
         $detail = [ordered]@{
             count             = $startup.Count
+            count_for_warning = $countForWarning
+            threshold         = $startupThreshold
+            allowlist_count   = $startupAllowlist.Count
             phantom_filtered  = $rawStartup.Count - $startup.Count
             raw_count         = $rawStartup.Count
             samples           = $sampleList
@@ -526,12 +573,13 @@ try {
             suggested_target_location = if ($candidate) { $candidate.Location } else { $null }
         }
         $phantomNote = if ($rawStartup.Count -ne $startup.Count) { " (filtered $($rawStartup.Count - $startup.Count) phantom entries from service-account hives)" } else { "" }
+        $allowNote = if ($startupAllowlist.Count -gt 0) { " ($($startupAllowlist.Count) allowlisted, $countForWarning counted)" } else { "" }
         $msg = if ($itemName) {
-            "$($startup.Count) real auto-start entries$phantomNote (healthy: under 20). Fix button disables '$itemName' as a starting point; use Autoruns for the rest."
+            "$($startup.Count) real auto-start entries$phantomNote$allowNote (healthy: under $startupThreshold). Fix button disables '$itemName' as a starting point; use Autoruns for the rest."
         } else {
-            "$($startup.Count) real auto-start entries$phantomNote (healthy: under 20). Boot time and idle RAM suffer."
+            "$($startup.Count) real auto-start entries$phantomNote$allowNote (healthy: under $startupThreshold). Boot time and idle RAM suffer."
         }
-        Add-Finding warning 'Startup' $msg $detail $false -Why "Windows auto-starts programs from ~15 different registry and folder locations at every boot. Each entry adds startup time plus background memory. Healthy is under 20 real entries (phantom service-account rows are filtered out and don't count). The Fix button opens a picker so you explicitly choose what to disable; nothing gets auto-disabled without confirmation (v2.3.14 changed this after the nzbget-auto-disable incident). For bulk cleanup, Sysinternals Autoruns remains the gold standard."
+        Add-Finding warning 'Startup' $msg $detail $false -Why "Windows auto-starts programs from ~15 different registry and folder locations at every boot. Each entry adds startup time plus background memory. Healthy is under the threshold you configure (default 20; phantom service-account rows are filtered out and do not count). You can raise the threshold or mark specific entries as 'Never warn' from the Fix button's picker - v2.4.13 replaces the old hardcoded 20/25 split. For bulk cleanup, Sysinternals Autoruns remains the gold standard."
     }
 } catch { Log "Startup error: $_" }
 

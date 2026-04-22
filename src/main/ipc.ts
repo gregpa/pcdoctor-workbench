@@ -1040,6 +1040,43 @@ export function registerIpcHandlers() {
     }
   });
 
+  // v2.4.13: Startup config (threshold + allowlist). Read returns current
+  // settings or defaults. Write validates and syncs the sidecar JSON so
+  // the next scan picks up changes without app restart.
+  ipcMain.handle('api:getStartupConfig', async (): Promise<IpcResult<{ threshold: number; allowlist: string[] }>> => {
+    try {
+      const { readStartupConfig } = await import('./startupConfig.js');
+      const cfg = readStartupConfig();
+      return { ok: true, data: { threshold: cfg.threshold, allowlist: cfg.allowlist } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to read startup config' } };
+    }
+  });
+
+  ipcMain.handle('api:setStartupConfig', async (_evt, payload: { threshold: number; allowlist: string[] }): Promise<IpcResult<{}>> => {
+    try {
+      const { writeStartupConfig } = await import('./startupConfig.js');
+      writeStartupConfig(payload.threshold, payload.allowlist);
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_VALIDATION', message: e?.message ?? 'Invalid startup config' } };
+    }
+  });
+
+  // v2.4.13: NAS drive enumeration. Backs the Dashboard NasRecycleBinPanel.
+  // Returns [{letter, unc, used/free/total/recycle bytes, reachable}] per
+  // DriveType=4 logical disk. Offline shares come back with reachable=false
+  // and null numeric fields so the UI can render them grayed out.
+  ipcMain.handle('api:getNasDrives', async (): Promise<IpcResult<Array<{ letter: string; unc: string | null; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> => {
+    try {
+      const { runPowerShellScript } = await import('./scriptRunner.js');
+      const r = await runPowerShellScript<{ drives?: Array<{ letter: string; unc: string | null; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }> }>('Get-NasDrives.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      return { ok: true, data: r?.drives ?? [] };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to enumerate NAS drives' } };
+    }
+  });
+
   // v2.4.6: Event Log errors chart click-to-expand fetches this breakdown
   // on demand (not part of the scheduled scan — cheap enough to run
   // interactively, stale data in the main scan report was misleading

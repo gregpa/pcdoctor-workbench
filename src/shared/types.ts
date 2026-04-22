@@ -102,6 +102,10 @@ export interface StartupItemMetric {
   publisher?: string;
   size_bytes?: number;
   path?: string;
+  /** v2.4.13: true when this item appears in the user's startup_allowlist
+   * (set via StartupPickerModal's "Never warn" toggle). Allowlisted items
+   * are still listed in the scan but excluded from the warn-threshold count. */
+  allowlisted?: boolean;
 }
 
 export interface SystemMetrics {
@@ -112,6 +116,10 @@ export interface SystemMetrics {
   pending_reboot?: string[];
   /** v2.4.6: uptime in hours, surfaced for "do I really need to reboot" UX */
   uptime_hours?: number;
+  /** v2.4.13: current startup threshold (echoed from settings for UI). */
+  startup_threshold?: number;
+  /** v2.4.13: count of items currently on the startup allowlist. */
+  startup_allowlist_count?: number;
 }
 
 export interface SystemStatus {
@@ -194,6 +202,8 @@ export type ActionName =
   | 'parse_hwinfo_delta'
   // v2.3.0 - Batch startup disable
   | 'disable_startup_items_batch'
+  // v2.4.13 - Per-NAS-drive @Recycle empty (QNAP/Synology convention)
+  | 'empty_nas_recycle_bin'
   // Internal (not shown in UI)
   | 'create_restore_point';
 

@@ -534,6 +534,18 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'disk', icon: '🗑',
     tooltip: 'Empties the Recycle Bin on every fixed drive. Reports freed bytes per drive. Irreversible.',
   },
+  empty_nas_recycle_bin: {
+    name: 'empty_nas_recycle_bin', label: 'Empty NAS Recycle Bin',
+    ps_script: 'actions/Empty-NasRecycleBin.ps1',
+    confirm_level: 'destructive', rollback_tier: 'C',
+    estimated_duration_s: 15,
+    timeout_ms: 15 * 60 * 1000,  // 15 min - large @Recycle trees on slow NAS
+    category: 'disk', icon: '🗑',
+    tooltip: 'Deletes contents of {letter}:\\@Recycle on ONE network drive (QNAP/Synology convention). Per-drive only; invoked from the Dashboard NAS panel. Irreversible.',
+    params_schema: {
+      drive_letter: { type: 'string', required: true, description: 'Single uppercase drive letter, e.g. "M" (no colon).' },
+    },
+  },
 
   // ============== v2.1.4 - HARDEN ==============
   enable_pua_protection: {

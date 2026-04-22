@@ -1,15 +1,21 @@
 /**
- * StartupPickerModal (v2.3.0 - C1)
+ * StartupPickerModal (v2.3.0 - C1; v2.4.13 - threshold + allowlist)
  *
  * Multi-select UI for disabling Windows startup entries. Pulls the list from
  * status.metrics.startup_items (emitted by Invoke-PCDoctor.ps1). Pre-checks any
  * entry NOT flagged is_essential, pre-unchecks the essential/protected ones.
  *
- * Emits the final picks via onDisable — caller wires that into the
+ * Emits the final picks via onDisable - caller wires that into the
  * `disable_startup_items_batch` action (params { items_json }).
+ *
+ * v2.4.13 adds two controls:
+ *   - A healthy-threshold number input (stores startup_threshold setting).
+ *   - A per-row "Never warn" toggle (stores startup_allowlist setting).
+ * Settings changes persist immediately via api.setStartupConfig so the next
+ * scan honors them without restart.
  */
-import { useMemo, useState } from 'react';
-import type { StartupItemMetric } from '@shared/types.js';
+import { useEffect, useMemo, useState } from 'react';
+import type { StartupItemMetric, IpcResult } from '@shared/types.js';
 
 export interface StartupPick {
   kind: StartupItemMetric['kind'];
@@ -24,8 +30,13 @@ export interface StartupPickerModalProps {
   threshold?: number;
 }
 
+interface StartupConfigApi {
+  getStartupConfig?: () => Promise<IpcResult<{ threshold: number; allowlist: string[] }>>;
+  setStartupConfig?: (payload: { threshold: number; allowlist: string[] }) => Promise<IpcResult<{}>>;
+}
+
 function fmtSize(n?: number): string {
-  if (!n || !Number.isFinite(n)) return '—';
+  if (!n || !Number.isFinite(n)) return '-';
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${n} B`;
@@ -39,6 +50,9 @@ function locationLabel(kind: StartupItemMetric['kind']): string {
     default: return String(kind);
   }
 }
+
+const MIN_THRESHOLD = 5;
+const MAX_THRESHOLD = 200;
 
 export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }: StartupPickerModalProps) {
   // Filter to entries not yet disabled in the registry.
@@ -54,13 +68,90 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
   }, [enabled]);
   const [picks, setPicks] = useState<Record<string, boolean>>(initialPicks);
 
+  // v2.4.13: threshold input + per-row allowlist state. Seeded from the
+  // prop threshold + the allowlisted flags on each item, then swapped in
+  // with the authoritative backend config once getStartupConfig resolves.
+  //
+  // W3 fix: state is a string so the user can clear the input without it
+  // snapping to 0 on every keystroke. Coerced to a number on save via
+  // Number(thresholdInput); empty string yields NaN and fails the validator
+  // cleanly.
+  const [thresholdInput, setThresholdInput] = useState<string>(String(threshold));
+  const [allowlist, setAllowlist] = useState<Record<string, boolean>>(() => {
+    const out: Record<string, boolean> = {};
+    for (const it of enabled) {
+      if (it.allowlisted) out[`${it.kind}::${it.name}`] = true;
+    }
+    return out;
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const api = (window as unknown as { api?: StartupConfigApi }).api;
+    if (!api?.getStartupConfig) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.getStartupConfig!();
+        if (cancelled || !r.ok) return;
+        setThresholdInput(String(r.data.threshold));
+        const nextAllow: Record<string, boolean> = {};
+        for (const k of r.data.allowlist) nextAllow[k] = true;
+        setAllowlist(nextAllow);
+      } catch { /* keep prop-seeded values */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const toggleKey = (key: string) => setPicks(p => ({ ...p, [key]: !p[key] }));
+  const toggleAllow = (key: string) => setAllowlist(a => {
+    const next = { ...a };
+    if (next[key]) delete next[key]; else next[key] = true;
+    return next;
+  });
 
   const selectedCount = Object.values(picks).filter(Boolean).length;
   const remaining = enabled.length - selectedCount;
-  const thresholdNote = remaining <= threshold
-    ? `brings startup count to ${remaining} (under ${threshold} threshold ✓)`
-    : `brings startup count to ${remaining} (still above ${threshold})`;
+  const remainingAfterAllowlist = Math.max(0, remaining - Object.keys(allowlist).filter(k => !picks[k]).length);
+  // W3: thresholdInput is a string; coerce for arithmetic comparison only.
+  // Empty / NaN renders the "still above" branch, which is the safer
+  // default until the user types a real number.
+  const thresholdNum = Number(thresholdInput);
+  const thresholdValid = Number.isFinite(thresholdNum) && thresholdNum > 0;
+  const thresholdNote = thresholdValid && remainingAfterAllowlist <= thresholdNum
+    ? `brings warn-counted startup to ${remainingAfterAllowlist} (under ${thresholdNum} threshold, OK)`
+    : `brings warn-counted startup to ${remainingAfterAllowlist} (still above ${thresholdValid ? thresholdNum : 'threshold'})`;
+
+  const allowlistCount = Object.keys(allowlist).length;
+
+  async function handleSaveSettings() {
+    const api = (window as unknown as { api?: StartupConfigApi }).api;
+    if (!api?.setStartupConfig) { setSaveMsg('Settings API unavailable'); return; }
+    // W3: thresholdInput is a string; empty / NaN / non-integer all fail
+    // this guard cleanly. Number("") === 0 triggers the <MIN_THRESHOLD
+    // branch rather than silently saving 0.
+    const trimmed = thresholdInput.trim();
+    const t = Number(trimmed);
+    if (trimmed.length === 0 || !Number.isInteger(t) || t < MIN_THRESHOLD || t > MAX_THRESHOLD) {
+      setSaveMsg(`Threshold must be ${MIN_THRESHOLD}-${MAX_THRESHOLD}`);
+      return;
+    }
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const r = await api.setStartupConfig({ threshold: t, allowlist: Object.keys(allowlist) });
+      if (r.ok) {
+        setSaveMsg(`Saved. Next scan uses threshold=${t}, allowlist=${allowlistCount}.`);
+      } else {
+        setSaveMsg(`Save failed: ${r.error?.message ?? 'unknown error'}`);
+      }
+    } catch (e) {
+      setSaveMsg(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleDisable() {
     const selected: StartupPick[] = enabled
@@ -79,7 +170,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
       aria-label="Disable startup items"
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-3xl p-5 shadow-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-3xl p-5 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-1 flex items-center gap-2">
@@ -88,6 +179,42 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
         <div className="text-[11px] text-text-secondary mb-3">
           {enabled.length} enabled entries. Protected/essential apps are pre-unchecked;
           everything else is pre-checked. Review before disabling.
+        </div>
+
+        {/* v2.4.13: settings block - threshold + allowlist summary. */}
+        <div className="mb-3 border border-surface-600 rounded-lg p-3 bg-surface-900/40">
+          <div className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold mb-2">
+            Alert settings
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="text-[11px] flex items-center gap-2">
+              <span>Healthy threshold:</span>
+              <input
+                type="number"
+                min={MIN_THRESHOLD}
+                max={MAX_THRESHOLD}
+                value={thresholdInput}
+                onChange={(e) => setThresholdInput(e.target.value)}
+                className="w-16 px-2 py-1 rounded bg-surface-700 border border-surface-600 text-text-primary text-[11px]"
+                aria-label="Healthy startup threshold"
+              />
+              <span className="text-text-secondary">items ({MIN_THRESHOLD}-{MAX_THRESHOLD})</span>
+            </label>
+            <span className="text-[11px] text-text-secondary">
+              Allowlisted: <span className="font-semibold text-text-primary">{allowlistCount}</span>
+              {' '}(tick the star on a row to add).
+            </span>
+            <button
+              onClick={handleSaveSettings}
+              disabled={saving}
+              className="px-2 py-1 rounded-md text-[11px] bg-status-info/20 border border-status-info/50 text-status-info disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save settings'}
+            </button>
+            {saveMsg && (
+              <span className="text-[10px] text-text-secondary italic">{saveMsg}</span>
+            )}
+          </div>
         </div>
 
         <div className="overflow-auto border border-surface-700 rounded-lg flex-1">
@@ -101,12 +228,13 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
                 <th className="text-left px-2 py-1.5">Publisher</th>
                 <th className="text-right px-2 py-1.5">Size</th>
                 <th className="text-left px-2 py-1.5 w-20">Role</th>
+                <th className="text-center px-2 py-1.5 w-16" title="Never warn about this item">Never warn</th>
               </tr>
             </thead>
             <tbody>
               {enabled.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-text-secondary">
+                  <td colSpan={8} className="px-3 py-6 text-center text-text-secondary">
                     No enabled startup items found in the current scan. Run a scan first.
                   </td>
                 </tr>
@@ -133,7 +261,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
                     </td>
                     <td className="px-2 py-1.5 font-mono">{it.name}</td>
                     <td className="px-2 py-1.5 text-text-secondary">{locationLabel(it.kind)}</td>
-                    <td className="px-2 py-1.5 text-text-secondary truncate max-w-[160px]">{it.publisher ?? '—'}</td>
+                    <td className="px-2 py-1.5 text-text-secondary truncate max-w-[160px]">{it.publisher ?? '-'}</td>
                     <td className="px-2 py-1.5 text-right text-text-secondary">{fmtSize(it.size_bytes)}</td>
                     <td className="px-2 py-1.5">
                       {it.is_essential ? (
@@ -141,6 +269,25 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
                       ) : (
                         <span className="text-[10px] text-text-secondary">optional</span>
                       )}
+                    </td>
+                    <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => toggleAllow(key)}
+                        title={allowlist[key]
+                          ? 'Allowlisted - excluded from the alert count'
+                          : 'Click to stop warning about this item'}
+                        aria-label={allowlist[key]
+                          ? `Remove ${it.name} from allowlist`
+                          : `Add ${it.name} to allowlist`}
+                        className={
+                          allowlist[key]
+                            ? 'text-status-warn text-sm'
+                            : 'text-text-secondary text-sm hover:text-status-warn'
+                        }
+                      >
+                        {allowlist[key] ? '★' : '☆'}
+                      </button>
                     </td>
                   </tr>
                 );
@@ -151,7 +298,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
 
         <div className="mt-3 text-[11px] text-text-secondary">
           Disabling <span className="font-semibold text-text-primary">{selectedCount}</span> of
-          {' '}<span className="font-semibold text-text-primary">{enabled.length}</span> {thresholdNote}
+          {' '}<span className="font-semibold text-text-primary">{enabled.length}</span>; {thresholdNote}
         </div>
 
         <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-surface-700">

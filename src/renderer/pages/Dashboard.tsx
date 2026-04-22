@@ -26,6 +26,7 @@ import { TodaysActionsWidget } from '@renderer/components/dashboard/TodaysAction
 import { ActionResultModal } from '@renderer/components/dashboard/ActionResultModal.js';
 import { StartupPickerModal } from '@renderer/components/dashboard/StartupPickerModal.js';
 import { RamPressurePanel } from '@renderer/components/dashboard/RamPressurePanel.js';
+import { NasRecycleBinPanel } from '@renderer/components/dashboard/NasRecycleBinPanel.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionDefinition } from '@shared/actions.js';
 import { recommendAction, getTopRecommendations } from '@shared/recommendations.js';
@@ -88,6 +89,8 @@ export function Dashboard() {
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
   const [expandedTrend, setExpandedTrend] = useState<null | { title: string; unit: string; yDomain?: [number, number] }>(null);
+  // v2.4.13: bump after a NAS @Recycle empty so the panel re-fetches sizes.
+  const [nasRefreshToken, setNasRefreshToken] = useState(0);
   // v2.4.6: Event Log chart click-to-expand. Opens a modal that fetches
   // Get-EventLogBreakdown.ps1 on demand and lists the top providers/IDs.
   const [showEventLogDetail, setShowEventLogDetail] = useState(false);
@@ -294,6 +297,18 @@ export function Dashboard() {
           </div>
         );
       })()}
+
+      {/* v2.4.13: NAS drive storage + per-drive @Recycle empty. Auto-discovers
+         mapped network drives via Get-NasDrives.ps1; shows offline ones
+         grayed out with a reachable=false flag. Per-drive confirm button
+         only (no "empty all" to avoid misclicks across 14 TB shares). */}
+      <NasRecycleBinPanel
+        refreshToken={nasRefreshToken}
+        onEmptyDrive={async (letter) => {
+          await handleAction('empty_nas_recycle_bin', { drive_letter: letter });
+          setNasRefreshToken((t) => t + 1);
+        }}
+      />
 
       <TodaysActionsWidget status={status} />
 

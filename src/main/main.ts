@@ -153,6 +153,18 @@ app.whenReady().then(() => {
     } catch { /* non-fatal */ }
   })();
 
+  // v2.4.13: sync Startup config (threshold + allowlist) to sidecar JSON.
+  // Invoke-PCDoctor.ps1 reads this file to decide whether to emit the
+  // startup-count warning. Default threshold 20 matches the user-facing
+  // "healthy under 20" language. Empty allowlist is the pre-v2.4.13
+  // baseline.
+  (async () => {
+    try {
+      const { syncStartupConfigToDisk } = await import('./startupConfig.js');
+      syncStartupConfigToDisk();
+    } catch { /* non-fatal */ }
+  })();
+
   // Auto-register PCDoctor scheduled tasks (best-effort, once per session).
   // v2.3.0 B2: on the first launch of 2.3.0, force-recreate existing tasks so
   // the user/SYSTEM context split applies. This rewrites /RU for tasks that
