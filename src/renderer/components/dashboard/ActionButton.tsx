@@ -68,6 +68,13 @@ export function ActionButton({ action, onRun, disabled, recommendation }: Action
     }
 
     if (action.confirm_level !== 'none') {
+      // v2.4.23: map each confirm_level 1:1 to the ConfirmModal tier.
+      // Previously 'info' collapsed to 'risky' which showed an amber
+      // warning for actions that aren't actually risky (Flush DNS etc).
+      const tier: 'info' | 'risky' | 'destructive' =
+        action.confirm_level === 'destructive' ? 'destructive'
+        : action.confirm_level === 'risky'     ? 'risky'
+        :                                         'info';
       const ok = await confirm({
         title: action.label,
         body: (
@@ -76,7 +83,7 @@ export function ActionButton({ action, onRun, disabled, recommendation }: Action
             <p className="text-xs">Estimated duration: ~{action.estimated_duration_s}s · Rollback: Tier {action.rollback_tier}</p>
           </div>
         ),
-        tier: action.confirm_level === 'destructive' ? 'destructive' : 'risky',
+        tier,
         confirmLabel: 'Run',
       });
       if (!ok) return;

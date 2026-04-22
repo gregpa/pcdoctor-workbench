@@ -1,6 +1,10 @@
 import type { ActionName, ActionCategory } from './types.js';
 
-export type ConfirmLevel = 'none' | 'risky' | 'destructive';
+// v2.4.23: 'info' tier. Renders a neutral (blue) pre-click modal with an
+// ℹ icon instead of the 'risky' amber warn or 'destructive' red warn.
+// Use for safe actions that still benefit from "read before running"
+// UX - e.g. Flush DNS, Flush ARP Cache, Trim SSDs, Generate Report.
+export type ConfirmLevel = 'none' | 'info' | 'risky' | 'destructive';
 export type RollbackTier = 'A' | 'B' | 'C' | 'none';
 
 export interface ActionDefinition {
@@ -42,7 +46,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   // ============== CLEANUP ==============
   flush_dns: {
     name: 'flush_dns', label: 'Flush DNS', ps_script: 'actions/Flush-DNS.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 2,
     category: 'network', icon: '🔄', informational: true,
     tooltip: 'Clears the Windows DNS resolver cache (ipconfig /flushdns). Fixes stale domain lookups after VPN changes or DNS outages. Instant.',
   },
@@ -130,7 +134,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   },
   trim_ssd: {
     name: 'trim_ssd', label: 'TRIM SSDs', ps_script: 'actions/Trim-SSD.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 60,
     timeout_ms: 15 * 60 * 1000,
     needs_admin: true,
     category: 'repair', icon: '💿',
@@ -139,14 +143,14 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   generate_system_report: {
     name: 'generate_system_report', label: 'Generate System Report',
     ps_script: 'actions/Generate-System-Report.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 60,
     category: 'repair', icon: '📄',
     tooltip: 'Runs msinfo32 /report + Get-ComputerInfo + driver list. Produces a .txt/.nfo bundle for support tickets.',
   },
   import_hwinfo_csv: {
     name: 'import_hwinfo_csv', label: 'Import HWiNFO CSV',
     ps_script: 'actions/Import-HWiNFO-CSV.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 60,
     category: 'repair', icon: '📊',
     tooltip: 'Parse an HWiNFO sensor-log CSV into CPU/GPU/RAM temperature statistics.',
     params_schema: { csv_path: { type: 'string', required: true, description: 'Full path to CSV file' } },
@@ -216,7 +220,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   flush_arp_cache: {
     name: 'flush_arp_cache', label: 'Flush ARP Cache',
     ps_script: 'actions/Flush-ARP-Cache.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 2,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 2,
     category: 'network', icon: '🔀', informational: true,
     tooltip: 'arp -d *. Clears the ARP table so LAN addresses resolve fresh. Use after router/switch changes.',
   },
@@ -356,7 +360,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   update_defender_defs: {
     name: 'update_defender_defs', label: 'Update Defender Definitions',
     ps_script: 'actions/Update-DefenderDefs.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 60,
     timeout_ms: 5 * 60 * 1000,
     needs_admin: true,
     category: 'security', icon: '📥',
@@ -460,7 +464,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   analyze_minidump: {
     name: 'analyze_minidump', label: 'Analyze Latest Minidump',
     ps_script: 'actions/Analyze-Minidump.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 60,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 60,
     category: 'repair', icon: '💥', informational: true,
     tooltip: 'Runs WinDbg cdb !analyze -v on the most recent BSOD minidump. Requires Windows Debugging Tools installed.',
     params_schema: { dump_path: { type: 'string', required: false, description: 'Optional explicit dump path (default: latest C:\\Windows\\Minidump)' } },
@@ -468,7 +472,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   run_mbam_scan: {
     name: 'run_mbam_scan', label: 'Run Malwarebytes Scan',
     ps_script: 'actions/Run-MalwarebytesScan.ps1',
-    confirm_level: 'none', rollback_tier: 'C', estimated_duration_s: 1800,
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 1800,
     timeout_ms: 2 * 60 * 60 * 1000,
     needs_admin: true,
     category: 'security', icon: '🧪',

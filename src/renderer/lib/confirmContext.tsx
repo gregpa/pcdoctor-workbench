@@ -4,7 +4,9 @@ import { ConfirmModal } from '../components/layout/ConfirmModal.js';
 interface ConfirmOptions {
   title: string;
   body: ReactNode;
-  tier: 'risky' | 'destructive';
+  // v2.4.23: 'info' tier added for safe actions that still benefit from
+  // a read-before-run pre-click modal. See ConfirmModal.tsx for styling.
+  tier: 'info' | 'risky' | 'destructive';
   confirmLabel?: string;
 }
 

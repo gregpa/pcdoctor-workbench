@@ -5,18 +5,29 @@ interface ConfirmModalProps {
   body: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
-  tier: 'risky' | 'destructive';
+  // v2.4.23: 'info' tier for neutral "read-before-run" pre-click modals.
+  // 'risky' signals "double check before proceeding" (amber). 'destructive'
+  // signals "might break something" (red). 'info' is for safe actions that
+  // still benefit from a brief description before firing.
+  tier: 'info' | 'risky' | 'destructive';
   onConfirm: () => void;
   onCancel: () => void;
 }
 
 export function ConfirmModal({ title, body, confirmLabel = 'Run', cancelLabel = 'Cancel', tier, onConfirm, onCancel }: ConfirmModalProps) {
-  const confirmColor = tier === 'destructive' ? 'bg-status-crit text-white' : 'bg-status-warn text-black';
+  const confirmColor =
+    tier === 'destructive' ? 'bg-status-crit text-white'
+    : tier === 'risky'     ? 'bg-status-warn text-black'
+    :                         'bg-status-info text-white';
+  const icon =
+    tier === 'destructive' ? '⚠'
+    : tier === 'risky'     ? '▶'
+    :                         'ℹ';
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-md p-5 shadow-2xl">
         <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
-          <span>{tier === 'destructive' ? '⚠' : '▶'}</span>{title}
+          <span>{icon}</span>{title}
         </h2>
         <div className="text-sm text-text-secondary leading-relaxed mb-4">
           {body}

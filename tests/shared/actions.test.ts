@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { ACTIONS, QUICK_ACTIONS, type ConfirmLevel, type RollbackTier } from '../../src/shared/actions.js';
 import type { ActionCategory } from '../../src/shared/types.js';
 
-const VALID_CONFIRM_LEVELS: ConfirmLevel[] = ['none', 'risky', 'destructive'];
+// v2.4.23: 'info' tier added - neutral pre-click modal for safe actions.
+const VALID_CONFIRM_LEVELS: ConfirmLevel[] = ['none', 'info', 'risky', 'destructive'];
 const VALID_ROLLBACK_TIERS: RollbackTier[] = ['A', 'B', 'C', 'none'];
 const VALID_CATEGORIES: ActionCategory[] = ['cleanup', 'repair', 'network', 'service', 'perf', 'security', 'update', 'hardening', 'disk', 'diagnostic', 'internal'];
 
