@@ -23,6 +23,7 @@ import { BsodPanel } from '@renderer/components/dashboard/BsodPanel.js';
 import { ServicePill } from '@renderer/components/dashboard/ServicePill.js';
 import { ServiceDetailModal } from '@renderer/components/dashboard/ServiceDetailModal.js';
 import { DiskSmartDetailModal } from '@renderer/components/dashboard/DiskSmartDetailModal.js';
+import { SecurityDetailModal, type SecurityDetailKind } from '@renderer/components/dashboard/SecurityDetailModal.js';
 import { CleanMyPC } from '@renderer/components/dashboard/CleanMyPC.js';
 import { TodaysActionsWidget } from '@renderer/components/dashboard/TodaysActionsWidget.js';
 import { ActionResultModal } from '@renderer/components/dashboard/ActionResultModal.js';
@@ -59,11 +60,38 @@ const HARDEN_ACTIONS: ActionName[] = [
   'open_windows_security',
 ];
 
-function SecRow({ label, tone, right }: { label: string; tone?: 'good' | 'warn' | 'crit' | 'info'; right: string }) {
+// v2.4.26: SecRow is now clickable. When onClick is provided the row
+// becomes a button with hover styling; otherwise it stays static for
+// back-compat with any places SecRow might be rendered without interaction.
+function SecRow({
+  label, tone, right, onClick,
+}: {
+  label: string;
+  tone?: 'good' | 'warn' | 'crit' | 'info';
+  right: string;
+  onClick?: () => void;
+}) {
   const toneClass = tone === 'crit' ? 'text-status-crit' : tone === 'warn' ? 'text-status-warn' : tone === 'good' ? 'text-status-good' : 'text-text-secondary';
   const dot = tone === 'crit' ? 'bg-status-crit' : tone === 'warn' ? 'bg-status-warn' : 'bg-status-good';
+  const baseClasses = 'flex items-center justify-between gap-2 w-full text-left';
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${baseClasses} py-0.5 rounded hover:bg-surface-700/40 hover:translate-x-0.5 transition`}
+        title={`Open ${label} detail`}
+      >
+        <div className="flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
+          <span>{label}</span>
+        </div>
+        <span className={`text-[10px] ${toneClass}`}>{right}</span>
+      </button>
+    );
+  }
   return (
-    <div className="flex items-center justify-between gap-2">
+    <div className={baseClasses}>
       <div className="flex items-center gap-1.5">
         <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
         <span>{label}</span>
@@ -89,6 +117,8 @@ export function Dashboard() {
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
   // v2.4.25: click a Disk SMART Health row for the detail modal.
   const [selectedSmartDrive, setSelectedSmartDrive] = useState<SmartEntry | null>(null);
+  // v2.4.26: click any Security & Updates row for its detail modal.
+  const [selectedSecurityKind, setSelectedSecurityKind] = useState<SecurityDetailKind | null>(null);
   const [scanning, setScanning] = useState(false);
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
@@ -500,13 +530,13 @@ export function Dashboard() {
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Security & Updates</div>
           {security ? (
             <div className="space-y-1.5 text-[11px]">
-              <SecRow label="Windows Defender" tone={security.defender?.severity} right={security.defender?.realtime_protection ? `Active · Defs ${security.defender.defs_age_hours}h` : 'Disabled'} />
-              <SecRow label="Windows Firewall" tone={security.firewall?.severity} right={security.firewall && security.firewall.domain_enabled && security.firewall.private_enabled && security.firewall.public_enabled ? 'All profiles enabled' : 'Partial'} />
-              <SecRow label="Windows Update" tone={security.windows_update?.severity} right={security.windows_update ? `${security.windows_update.pending_count} pending${security.windows_update.pending_security_count > 0 ? ` (${security.windows_update.pending_security_count} security)` : ''}` : '-'} />
-              <SecRow label={`Failed Logins (7d)`} tone={security.failed_logins?.severity} right={`${security.failed_logins?.total_7d ?? 0} events`} />
-              <SecRow label="BitLocker" tone={security.bitlocker.some(b => b.protection_on) ? 'good' : 'warn'} right={security.bitlocker.some(b => b.protection_on) ? `${security.bitlocker.filter(b => b.protection_on).length} protected` : 'Off - drives unencrypted'} />
-              <SecRow label="UAC" tone={security.uac?.severity} right={security.uac?.enabled ? (security.uac.level === 'Disabled' ? 'Disabled' : 'Enabled') : 'DISABLED'} />
-              <SecRow label="GPU Driver" tone={security.gpu_driver?.severity} right={security.gpu_driver ? `${security.gpu_driver.gpu_current_version}${security.gpu_driver.age_days !== null ? ` - ${security.gpu_driver.age_days}d old` : ''}` : '-'} />
+              <SecRow label="Windows Defender" tone={security.defender?.severity} right={security.defender?.realtime_protection ? `Active · Defs ${security.defender.defs_age_hours}h` : 'Disabled'} onClick={() => setSelectedSecurityKind('defender')} />
+              <SecRow label="Windows Firewall" tone={security.firewall?.severity} right={security.firewall && security.firewall.domain_enabled && security.firewall.private_enabled && security.firewall.public_enabled ? 'All profiles enabled' : 'Partial'} onClick={() => setSelectedSecurityKind('firewall')} />
+              <SecRow label="Windows Update" tone={security.windows_update?.severity} right={security.windows_update ? `${security.windows_update.pending_count} pending${security.windows_update.pending_security_count > 0 ? ` (${security.windows_update.pending_security_count} security)` : ''}` : '-'} onClick={() => setSelectedSecurityKind('windows_update')} />
+              <SecRow label={`Failed Logins (7d)`} tone={security.failed_logins?.severity} right={`${security.failed_logins?.total_7d ?? 0} events`} onClick={() => setSelectedSecurityKind('failed_logins')} />
+              <SecRow label="BitLocker" tone={security.bitlocker.some(b => b.protection_on) ? 'good' : 'warn'} right={security.bitlocker.some(b => b.protection_on) ? `${security.bitlocker.filter(b => b.protection_on).length} protected` : 'Off - drives unencrypted'} onClick={() => setSelectedSecurityKind('bitlocker')} />
+              <SecRow label="UAC" tone={security.uac?.severity} right={security.uac?.enabled ? (security.uac.level === 'Disabled' ? 'Disabled' : 'Enabled') : 'DISABLED'} onClick={() => setSelectedSecurityKind('uac')} />
+              <SecRow label="GPU Driver" tone={security.gpu_driver?.severity} right={security.gpu_driver ? `${security.gpu_driver.gpu_current_version}${security.gpu_driver.age_days !== null ? ` - ${security.gpu_driver.age_days}d old` : ''}` : '-'} onClick={() => setSelectedSecurityKind('gpu_driver')} />
               {security.persistence_new_count > 0 && (
                 <div className="pt-2 mt-2 border-t border-surface-700 text-[10px] text-status-warn">
                   ⚠ {security.persistence_new_count} new persistence item{security.persistence_new_count === 1 ? '' : 's'} - review in Security page
@@ -546,6 +576,40 @@ export function Dashboard() {
           onRunSmartCheck={async () => {
             setSelectedSmartDrive(null);
             await handleAction('run_smart_check');
+            await refreshSecurity();
+          }}
+        />
+      )}
+
+      {selectedSecurityKind && security && (
+        <SecurityDetailModal
+          kind={selectedSecurityKind}
+          posture={security}
+          onClose={() => setSelectedSecurityKind(null)}
+          onDefenderQuickScan={async () => {
+            setSelectedSecurityKind(null);
+            await handleAction('defender_quick_scan');
+            await refreshSecurity();
+          }}
+          onUpdateDefenderDefs={async () => {
+            setSelectedSecurityKind(null);
+            await handleAction('update_defender_defs');
+            await refreshSecurity();
+          }}
+          onOpenWindowsSecurity={async () => {
+            setSelectedSecurityKind(null);
+            await handleAction('open_windows_security');
+          }}
+          onOpenFirewallConsole={async () => {
+            setSelectedSecurityKind(null);
+            await handleAction('open_firewall_console');
+          }}
+          onOpenUpdatesPage={() => {
+            setSelectedSecurityKind(null);
+            navigate('/updates');
+          }}
+          onUnblockIP={async (ip) => {
+            await handleAction('unblock_ip', { ip });
             await refreshSecurity();
           }}
         />
