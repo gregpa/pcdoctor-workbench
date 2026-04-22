@@ -20,9 +20,14 @@ export function App() {
     <ConfirmProvider>
       <ClaudeApprovalListener />
       <HashRouter>
-        <div className="flex min-h-screen">
+        {/* v2.4.24: outer container is fixed to viewport height + hides
+          * overflow so the Sidebar stays pinned regardless of main-area
+          * scroll. Previously min-h-screen let the whole div grow with
+          * page content, making the document-level scroll bar take over
+          * and carry the sidebar off-screen. */}
+        <div className="flex h-screen overflow-hidden">
           <Sidebar />
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-y-auto">
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/history" element={<History />} />
