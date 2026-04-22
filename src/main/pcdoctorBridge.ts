@@ -30,6 +30,32 @@ function safeWeekDelta(category: string, metric: string, label?: string): { week
   catch { return { week_ago: null, now: null }; }
 }
 
+// v2.4.30: cache the most recent temperature read for 30s so repeated
+// getStatus calls (e.g. useStatus polling re-fires during window
+// resize) don't stampede Get-Temperatures PS spawns. One PS spawn per
+// 30s is plenty for trend resolution - CPU and GPU temps don't change
+// meaningfully faster than that.
+let _tempsCache: { ts: number; value: { cpu_temp_c?: number; gpu_temp_c?: number } | null } | null = null;
+let _tempsInFlight: Promise<{ cpu_temp_c?: number; gpu_temp_c?: number } | null> | null = null;
+const TEMPS_CACHE_MS = 30_000;
+
+async function readTemperaturesCached(): Promise<{ cpu_temp_c?: number; gpu_temp_c?: number } | null> {
+  const now = Date.now();
+  if (_tempsCache && (now - _tempsCache.ts) < TEMPS_CACHE_MS) {
+    return _tempsCache.value;
+  }
+  if (_tempsInFlight) return _tempsInFlight;
+  _tempsInFlight = readTemperaturesBestEffort().then((v) => {
+    _tempsCache = { ts: Date.now(), value: v };
+    _tempsInFlight = null;
+    return v;
+  }).catch(() => {
+    _tempsInFlight = null;
+    return null;
+  });
+  return _tempsInFlight;
+}
+
 /**
  * v2.4.29: fetch current temperature readings for trend recording.
  * Returns { cpu_temp_c, gpu_temp_c } where each may be undefined when
@@ -90,22 +116,33 @@ export async function getStatus(): Promise<SystemStatus> {
   // Persist snapshot for trend tracking (best-effort, non-fatal)
   try {
     const m = parsed.metrics ?? {};
-    // v2.4.29: fetch current CPU + GPU temps alongside the status map.
-    // Get-Temperatures is cheap (~200ms): nvidia-smi + SMART cache read
-    // + WMI or cache-fallback for CPU. The metric rows feed the 7-day
-    // trend charts on the Dashboard. We `.catch()` so a temp-read
-    // failure doesn't block trend tracking for the other metrics.
-    const tempsPromise = readTemperaturesBestEffort();
-    const temps = await tempsPromise;
+    // v2.4.29: record non-temp metrics synchronously - these are free
+    // (pure in-memory reads) and the sync insert is wrapped in a
+    // single SQLite txn.
     recordStatusSnapshot({
       cpu_load_pct: typeof m.cpu_load_pct === 'number' ? m.cpu_load_pct : undefined,
       ram_used_pct: typeof m.ram_used_pct === 'number' ? m.ram_used_pct : undefined,
       disks: Array.isArray(m.disks) ? m.disks.map((d: any) => ({ drive: d.drive, free_pct: d.free_pct })) : undefined,
       event_errors_system: m?.event_errors_7d?.system_count,
       event_errors_application: m?.event_errors_7d?.application_count,
-      cpu_temp_c: temps?.cpu_temp_c,
-      gpu_temp_c: temps?.gpu_temp_c,
     });
+    // v2.4.30: temperature read is fire-and-forget with a 30s cache.
+    // v2.4.29 awaited the PS spawn (~200ms) inside getStatus, which on
+    // Greg's high-RAM-pressure box (91% used, constant paging) was
+    // enough to produce a 30-second UI freeze during window resize
+    // (resize -> useStatus re-fire -> PS spawn stampede -> RAM swap).
+    // Recording temps async lets getStatus return instantly; caching
+    // keeps the PS spawn down to at most one every 30s even when the
+    // UI polls more frequently during resize.
+    void readTemperaturesCached().then((temps) => {
+      if (!temps) return;
+      try {
+        recordStatusSnapshot({
+          cpu_temp_c: temps.cpu_temp_c,
+          gpu_temp_c: temps.gpu_temp_c,
+        });
+      } catch { /* non-fatal */ }
+    }).catch(() => {});
   } catch {}
   // Fire notifications for any new critical/warning findings (non-blocking)
   try { emitNewFindingNotifications(status.findings).catch(() => {}); } catch {}

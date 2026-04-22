@@ -88,7 +88,13 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
   const tip = advice(status);
 
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 col-span-2">
+    // v2.4.30: dropped col-span-2. v2.4.29 moved the gauges row to
+    // grid-cols-3 (CPU gauge + Disk gauge + RAM panel), but the
+    // lingering col-span-2 made RAM panel 2 cols wide, pushing the
+    // total to 4 cols in a 3-col grid which wrapped RAM onto its own
+    // row below the gauges. Single col is slightly denser but
+    // matches the requested CPU | Disk | RAM layout.
+    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
       <div className="flex items-baseline justify-between">
         <div>
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold">RAM Pressure</div>
