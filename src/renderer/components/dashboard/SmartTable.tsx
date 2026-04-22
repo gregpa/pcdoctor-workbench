@@ -17,18 +17,29 @@ export function SmartTable({ entries, onRunSmartCheck }: SmartTableProps) {
   // v2.3.14: if any row came from the non-admin Get-PhysicalDisk fallback,
   // show a banner offering to elevate + re-query. Wear / temp / media errors
   // are unavailable in the fallback path.
+  // v2.4.20: always surface the Run SMART Check button, even when every row
+  // has cache data. Users need a way to force-refresh when the cache is
+  // stale or when a new scanner version (e.g. v2.4.19's smartctl NVMe
+  // fallback) shipped since the cache was last written. When no rows need
+  // admin, the button goes to a subtler styling so it isn't alarming.
   const anyNeedsAdmin = entries.some(e => e.needs_admin);
+  const buttonClass = anyNeedsAdmin
+    ? 'px-2 py-0.5 rounded text-[10px] bg-status-warn/15 border border-status-warn/40 text-status-warn hover:bg-status-warn/25'
+    : 'px-2 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 text-text-secondary hover:text-text-primary hover:border-surface-500';
+  const buttonLabel = anyNeedsAdmin ? '💾 Run SMART Check (admin)' : '🔄 Refresh SMART (admin)';
   return (
     <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary">Disk SMART Health</div>
-        {anyNeedsAdmin && onRunSmartCheck && (
+        {onRunSmartCheck && (
           <button
             onClick={onRunSmartCheck}
-            className="px-2 py-0.5 rounded text-[10px] bg-status-warn/15 border border-status-warn/40 text-status-warn hover:bg-status-warn/25"
-            title="Wear%, temp, and media-error counts need admin-level ATA pass-through. Click to UAC-elevate and re-query."
+            className={buttonClass}
+            title={anyNeedsAdmin
+              ? 'Wear%, temp, and media-error counts need admin-level ATA pass-through. Click to UAC-elevate and re-query.'
+              : 'Force a fresh elevated SMART scan. Useful if cached values look stale or the scanner was updated.'}
           >
-            💾 Run SMART Check (admin)
+            {buttonLabel}
           </button>
         )}
       </div>
