@@ -14,7 +14,7 @@
  * Settings changes persist immediately via api.setStartupConfig so the next
  * scan honors them without restart.
  */
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { StartupItemMetric, IpcResult } from '@shared/types.js';
 
 export interface StartupPick {
@@ -107,6 +107,17 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
   const toggleKey = (key: string) => setPicks(p => ({ ...p, [key]: !p[key] }));
   const toggleAllow = (key: string) => setAllowlist(a => {
     const next = { ...a };
+    if (next[key]) delete next[key]; else next[key] = true;
+    return next;
+  });
+
+  // v2.4.15: per-row "expand to see details" state. Rows collapsed by
+  // default; clicking the chevron toggles an inline details row showing
+  // the full location path, executable path, publisher, + a web-search
+  // link so the user can research unfamiliar startup entries.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggleExpand = (key: string) => setExpanded(e => {
+    const next = { ...e };
     if (next[key]) delete next[key]; else next[key] = true;
     return next;
   });
@@ -221,6 +232,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
           <table className="w-full text-[11px]">
             <thead className="bg-surface-700 text-text-secondary text-[10px] uppercase tracking-wider sticky top-0">
               <tr>
+                <th className="text-left px-2 py-1.5 w-6" title="Expand for details"></th>
                 <th className="text-left px-2 py-1.5 w-8"></th>
                 <th className="text-left px-2 py-1.5 w-6"></th>
                 <th className="text-left px-2 py-1.5">Name</th>
@@ -234,62 +246,128 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
             <tbody>
               {enabled.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-text-secondary">
+                  <td colSpan={9} className="px-3 py-6 text-center text-text-secondary">
                     No enabled startup items found in the current scan. Run a scan first.
                   </td>
                 </tr>
               )}
               {enabled.map((it) => {
                 const key = `${it.kind}::${it.name}`;
+                const isOpen = !!expanded[key];
+                const searchQuery = encodeURIComponent(`${it.name} startup windows`);
                 return (
-                  <tr
-                    key={key}
-                    className="border-t border-surface-700 hover:bg-surface-700/40 cursor-pointer"
-                    onClick={() => toggleKey(key)}
-                  >
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="checkbox"
-                        aria-label={`Disable ${it.name}`}
-                        checked={!!picks[key]}
-                        onChange={() => toggleKey(key)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5 text-text-secondary">
-                      {it.is_essential ? '🛡' : '•'}
-                    </td>
-                    <td className="px-2 py-1.5 font-mono">{it.name}</td>
-                    <td className="px-2 py-1.5 text-text-secondary">{locationLabel(it.kind)}</td>
-                    <td className="px-2 py-1.5 text-text-secondary truncate max-w-[160px]">{it.publisher ?? '-'}</td>
-                    <td className="px-2 py-1.5 text-right text-text-secondary">{fmtSize(it.size_bytes)}</td>
-                    <td className="px-2 py-1.5">
-                      {it.is_essential ? (
-                        <span className="text-[10px] text-status-good">protected</span>
-                      ) : (
-                        <span className="text-[10px] text-text-secondary">optional</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => toggleAllow(key)}
-                        title={allowlist[key]
-                          ? 'Allowlisted - excluded from the alert count'
-                          : 'Click to stop warning about this item'}
-                        aria-label={allowlist[key]
-                          ? `Remove ${it.name} from allowlist`
-                          : `Add ${it.name} to allowlist`}
-                        className={
-                          allowlist[key]
-                            ? 'text-status-warn text-sm'
-                            : 'text-text-secondary text-sm hover:text-status-warn'
-                        }
-                      >
-                        {allowlist[key] ? '★' : '☆'}
-                      </button>
-                    </td>
-                  </tr>
+                  <React.Fragment key={key}>
+                    <tr
+                      className="border-t border-surface-700 hover:bg-surface-700/40 cursor-pointer"
+                      onClick={() => toggleKey(key)}
+                    >
+                      <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(key)}
+                          title={isOpen ? 'Hide details' : 'Show details about this startup item'}
+                          aria-label={isOpen ? `Collapse ${it.name} details` : `Expand ${it.name} details`}
+                          aria-expanded={isOpen}
+                          className="text-text-secondary hover:text-text-primary text-xs w-4"
+                        >
+                          {isOpen ? '▾' : '▸'}
+                        </button>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="checkbox"
+                          aria-label={`Disable ${it.name}`}
+                          checked={!!picks[key]}
+                          onChange={() => toggleKey(key)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5 text-text-secondary">
+                        {it.is_essential ? '🛡' : '•'}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono">{it.name}</td>
+                      <td className="px-2 py-1.5 text-text-secondary">{locationLabel(it.kind)}</td>
+                      <td className="px-2 py-1.5 text-text-secondary truncate max-w-[160px]">{it.publisher ?? '-'}</td>
+                      <td className="px-2 py-1.5 text-right text-text-secondary">{fmtSize(it.size_bytes)}</td>
+                      <td className="px-2 py-1.5">
+                        {it.is_essential ? (
+                          <span className="text-[10px] text-status-good">protected</span>
+                        ) : (
+                          <span className="text-[10px] text-text-secondary">optional</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => toggleAllow(key)}
+                          title={allowlist[key]
+                            ? 'Allowlisted - excluded from the alert count'
+                            : 'Click to stop warning about this item'}
+                          aria-label={allowlist[key]
+                            ? `Remove ${it.name} from allowlist`
+                            : `Add ${it.name} to allowlist`}
+                          className={
+                            allowlist[key]
+                              ? 'text-status-warn text-sm'
+                              : 'text-text-secondary text-sm hover:text-status-warn'
+                          }
+                        >
+                          {allowlist[key] ? '★' : '☆'}
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-t border-surface-700 bg-surface-900/30">
+                        <td colSpan={9} className="px-4 py-3">
+                          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11px]">
+                            <span className="text-text-secondary">Name</span>
+                            <span className="font-mono break-all">{it.name}</span>
+
+                            <span className="text-text-secondary">Kind</span>
+                            <span>{locationLabel(it.kind)}</span>
+
+                            <span className="text-text-secondary">Full location</span>
+                            <span className="font-mono break-all">{it.location}</span>
+
+                            <span className="text-text-secondary">Path / command</span>
+                            <span className="font-mono break-all">{it.path ?? '(not captured)'}</span>
+
+                            <span className="text-text-secondary">Publisher</span>
+                            <span>{it.publisher ?? '(unknown)'}</span>
+
+                            <span className="text-text-secondary">Size</span>
+                            <span>{fmtSize(it.size_bytes)}</span>
+
+                            <span className="text-text-secondary">Role</span>
+                            <span>
+                              {it.is_essential ? (
+                                <>🛡 <span className="text-status-good">protected</span> - pre-unchecked because this app has been flagged as load-bearing (Greg's essentials list: SecurityHealth, OneDrive, Teams, LGHUB, Notifiarr, PrivateVpn, GoogleDriveFS, GoldKey, Docker, Plex).</>
+                              ) : (
+                                <>• <span className="text-text-secondary">optional</span> - no known dependency on this running at boot.</>
+                              )}
+                            </span>
+
+                            <span className="text-text-secondary">Allowlist</span>
+                            <span>{allowlist[key] ? '★ pinned (warn count excludes this)' : '☆ not pinned'}</span>
+
+                            <span className="text-text-secondary">Research</span>
+                            <span>
+                              <a
+                                href={`https://www.google.com/search?q=${searchQuery}`}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="text-status-info hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Search the web for "{it.name}"
+                              </a>
+                              <span className="text-text-secondary"> - what it does, whether it's safe to disable</span>
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>

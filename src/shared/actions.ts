@@ -543,7 +543,11 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'disk', icon: '🗑',
     tooltip: 'Deletes contents of {letter}:\\@Recycle on ONE network drive (QNAP/Synology convention). Per-drive only; invoked from the Dashboard NAS panel. Irreversible.',
     params_schema: {
-      drive_letter: { type: 'string', required: true, description: 'Single uppercase drive letter, e.g. "M" (no colon).' },
+      // NOTE: single-word key is intentional. actionRunner converts
+      // params_schema keys to PS flags by uppercasing char 0 only:
+      // "drive_letter" -> "-Drive_letter" which PS rejects because our
+      // param is $Drive (no underscore). Keep this single-word.
+      drive: { type: 'string', required: true, description: 'Single uppercase drive letter, e.g. "M" (no colon).' },
     },
   },
 

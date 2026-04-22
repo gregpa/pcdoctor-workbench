@@ -18,9 +18,11 @@
     (actionRunner routes this through the confirm-modal flow via the
     `confirm_level: 'destructive'` registration in src/shared/actions.ts).
 
-.PARAMETER DriveLetter
+.PARAMETER Drive
     Single uppercase letter - "M", "Z", "U", etc. No colon, no backslash.
-    Validated against ^[A-Za-z]$.
+    Validated against ^[A-Za-z]$. Single-word name (not "DriveLetter")
+    because actionRunner uppercases char-0 only of the params_schema key
+    and PS rejects the resulting -Drive_letter flag - see v2.4.15 notes.
 
 .PARAMETER DryRun
     Skip the deletion phase. Still measures before-size and reports what
@@ -36,7 +38,7 @@
     E_NAS_RECYCLE_BLOCKED; caller should show the per-entry error list.
 #>
 param(
-    [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z]$')][string]$DriveLetter,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z]$')][string]$Drive,
     [switch]$DryRun,
     [switch]$JsonOutput
 )
@@ -56,7 +58,7 @@ trap {
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$letter = $DriveLetter.ToUpper()
+$letter = $Drive.ToUpper()
 
 # Safety: refuse to run on anything that isn't a network drive. Catches
 # the case where a caller passes a local drive letter - Clear-RecycleBin

@@ -305,7 +305,10 @@ export function Dashboard() {
       <NasRecycleBinPanel
         refreshToken={nasRefreshToken}
         onEmptyDrive={async (letter) => {
-          await handleAction('empty_nas_recycle_bin', { drive_letter: letter });
+          // v2.4.15: single-word key 'drive' matches actionRunner's naive
+          // -{Capitalized} flag generation. 'drive_letter' became
+          // -Drive_letter which PS rejected -> "Script exited with code 1".
+          await handleAction('empty_nas_recycle_bin', { drive: letter });
           setNasRefreshToken((t) => t + 1);
         }}
       />

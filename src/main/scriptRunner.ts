@@ -86,8 +86,14 @@ export async function runPowerShellScript<T = unknown>(
     });
   }
 
-  // Check for PCDOCTOR_ERROR sentinel anywhere in stdout
-  const sentinelMatch = stdout.match(/PCDOCTOR_ERROR:(.+)$/m);
+  // v2.4.15: check BOTH stdout and stderr for the PCDOCTOR_ERROR sentinel.
+  // The elevated path (below) already combines both; the non-elevated path
+  // used to only check stdout, which missed errors when PS's trap fired
+  // before any Write-Host reached stdout (e.g. parameter-binding failures
+  // like -Drive_letter against $Drive - PS emits a parse error on stderr
+  // and exits 1 with no stdout at all).
+  const combined = stdout + '\n' + stderr;
+  const sentinelMatch = combined.match(/PCDOCTOR_ERROR:(.+)$/m);
   if (sentinelMatch) {
     try {
       const parsed = JSON.parse(sentinelMatch[1]);
@@ -103,7 +109,16 @@ export async function runPowerShellScript<T = unknown>(
   }
 
   if (exitCode !== 0) {
-    throw new PCDoctorScriptError('E_PS_NONZERO_EXIT', `Script exited with code ${exitCode}`, { exitCode, stdout, stderr });
+    // v2.4.15: include a stderr snippet in the user-facing message so
+    // param-binding errors + other pre-trap failures surface directly
+    // instead of the opaque "Script exited with code 1" toast. stderr
+    // from PS often contains "A parameter cannot be found that matches
+    // parameter name 'X'" or similar one-line diagnostics.
+    const stderrHint = stderr.trim().replace(/\s+/g, ' ').slice(0, 300);
+    const msg = stderrHint
+      ? `Script exited with code ${exitCode}: ${stderrHint}`
+      : `Script exited with code ${exitCode}`;
+    throw new PCDoctorScriptError('E_PS_NONZERO_EXIT', msg, { exitCode, stdout, stderr });
   }
 
   // Strip any lines that look like informational logs; last non-empty line should be JSON
