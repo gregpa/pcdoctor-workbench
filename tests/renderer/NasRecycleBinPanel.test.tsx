@@ -48,7 +48,9 @@ describe('<NasRecycleBinPanel>', () => {
       getNasDrives: vi.fn().mockReturnValue(new Promise(() => {})),
     });
     render(<NasRecycleBinPanel onEmptyDrive={noop} />);
-    expect(screen.getByText(/Enumerating network drives/)).toBeTruthy();
+    // v2.4.14: renamed from "Enumerating network drives" to match the
+    // all-drive-types expansion.
+    expect(screen.getByText(/Enumerating drives/)).toBeTruthy();
   });
 
   it('renders error state when API is unavailable (no window.api)', async () => {
@@ -76,7 +78,8 @@ describe('<NasRecycleBinPanel>', () => {
     vi.stubGlobal('api', makeApi([]));
     render(<NasRecycleBinPanel onEmptyDrive={noop} />);
     await waitFor(() =>
-      expect(screen.getByText(/No network drives mapped/)).toBeTruthy()
+      // v2.4.14: renamed from "No network drives mapped".
+      expect(screen.getByText(/No drives detected/)).toBeTruthy()
     );
   });
 
