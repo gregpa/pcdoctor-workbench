@@ -42,7 +42,8 @@ const QUICK_ACTIONS: ActionName[] = [
   'run_dism', 'remap_nas',
   'compact_docker', 'trim_ssd',
   'apply_wsl_cap', 'restart_explorer',
-  'flush_arp_cache', 'kill_process',
+  'flush_arp_cache', 'clear_stale_pending_renames',
+  'kill_process',
 ];
 
 const DEEP_CLEAN_ACTIONS: ActionName[] = [

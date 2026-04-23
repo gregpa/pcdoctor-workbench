@@ -285,7 +285,7 @@ function mapToSystemStatus(r: any): SystemStatus {
       message: f.message ?? '',
       detail: f.detail,
       auto_fixed: !!f.auto_fixed,
-      suggested_action: mapAreaToAction(f.area),
+      suggested_action: mapAreaToAction(f),
     };
   }) : [];
 
@@ -388,8 +388,25 @@ function mapToSystemStatus(r: any): SystemStatus {
   };
 }
 
-function mapAreaToAction(area: string | undefined): ActionName | undefined {
-  if (!area) return undefined;
+/**
+ * Map a scanner finding to the action that should surface as its
+ * one-click fix on the AlertCard (and in Telegram alert inline keyboards).
+ *
+ * v2.4.35: signature widened from (area) to (finding) so the Reboot case
+ * can inspect `detail.flags`. PendingFileRename alone is scrubbable via
+ * `clear_stale_pending_renames`; CBS / WU flags require a real reboot and
+ * have no one-click fix, so we return undefined in that case.
+ *
+ * Exported for direct testing.
+ */
+export function mapAreaToAction(f: { area?: string; detail?: unknown }): ActionName | undefined {
+  if (!f.area) return undefined;
+  if (f.area === 'Reboot') {
+    const d = f.detail as { flags?: unknown } | null | undefined;
+    const flags = Array.isArray(d?.flags) ? d!.flags : [];
+    if (flags.includes('PendingFileRename')) return 'clear_stale_pending_renames';
+    return undefined;
+  }
   const map: Record<string, ActionName> = {
     'Memory': 'apply_wsl_cap',
     'Search': 'rebuild_search_index',
@@ -409,7 +426,7 @@ function mapAreaToAction(area: string | undefined): ActionName | undefined {
     'WSL': 'apply_wsl_cap',
     'Overlays': 'fix_shell_overlays',
   };
-  return map[area];
+  return map[f.area];
 }
 
 function mapOverall(v: unknown): Severity {

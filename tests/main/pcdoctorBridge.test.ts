@@ -10,7 +10,7 @@ vi.mock('node:fs/promises', async () => {
 
 // Import AFTER vi.mock so the module under test sees the mocked readFile.
 import { readFile } from 'node:fs/promises';
-import { getStatus } from '../../src/main/pcdoctorBridge.js';
+import { getStatus, mapAreaToAction } from '../../src/main/pcdoctorBridge.js';
 
 // Resolve fixture path without relying on __dirname (ESM-safe)
 const fixturePath = path.join(process.cwd(), 'tests', 'fixtures', 'latest.sample.json');
@@ -59,5 +59,61 @@ describe('pcdoctorBridge.getStatus', () => {
     const status = await getStatus();
     expect(status.overall_severity).toBe('warn');
     expect(status.host).toBe('ALIENWARE-R11');
+  });
+});
+
+/**
+ * v2.4.35: mapAreaToAction was widened from (area) to (finding) so the Reboot
+ * case could gate on detail.flags. PendingFileRename is the only flag with a
+ * one-click fix; CBS / WU require a real reboot. These tests lock in:
+ *   1. Reboot + PendingFileRename -> clear_stale_pending_renames
+ *   2. Reboot + CBS/WU only -> undefined (no misleading button)
+ *   3. Existing area mappings still work
+ */
+describe('mapAreaToAction (v2.4.35 widened signature)', () => {
+  it('Reboot with PendingFileRename flag -> clear_stale_pending_renames', () => {
+    expect(mapAreaToAction({
+      area: 'Reboot',
+      detail: { flags: ['PendingFileRename'], uptime_hours: 18.4 },
+    })).toBe('clear_stale_pending_renames');
+  });
+
+  it('Reboot with PendingFileRename alongside others still suggests the action', () => {
+    expect(mapAreaToAction({
+      area: 'Reboot',
+      detail: { flags: ['CBS', 'PendingFileRename'], uptime_hours: 50 },
+    })).toBe('clear_stale_pending_renames');
+  });
+
+  it('Reboot with CBS only -> undefined (no one-click fix, real reboot needed)', () => {
+    expect(mapAreaToAction({
+      area: 'Reboot',
+      detail: { flags: ['CBS'], uptime_hours: 200 },
+    })).toBeUndefined();
+  });
+
+  it('Reboot with WU only -> undefined', () => {
+    expect(mapAreaToAction({
+      area: 'Reboot',
+      detail: { flags: ['WU'], uptime_hours: 30 },
+    })).toBeUndefined();
+  });
+
+  it('Reboot with malformed or missing detail -> undefined', () => {
+    expect(mapAreaToAction({ area: 'Reboot' })).toBeUndefined();
+    expect(mapAreaToAction({ area: 'Reboot', detail: null })).toBeUndefined();
+    expect(mapAreaToAction({ area: 'Reboot', detail: {} })).toBeUndefined();
+    expect(mapAreaToAction({ area: 'Reboot', detail: { flags: 'not-an-array' } })).toBeUndefined();
+  });
+
+  it('existing area -> action mappings still resolve', () => {
+    expect(mapAreaToAction({ area: 'Memory' })).toBe('apply_wsl_cap');
+    expect(mapAreaToAction({ area: 'DNS' })).toBe('flush_dns');
+    expect(mapAreaToAction({ area: 'NAS' })).toBe('remap_nas');
+  });
+
+  it('unknown area -> undefined', () => {
+    expect(mapAreaToAction({ area: 'Nonsense' })).toBeUndefined();
+    expect(mapAreaToAction({})).toBeUndefined();
   });
 });

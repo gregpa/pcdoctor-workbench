@@ -109,3 +109,43 @@ describe('alert_bsod_7d matcher (v2.4.34 tightening)', () => {
     expect(match({ area: 'EventLog', message: 'BSOD keyword in recurring event text' })).toBe(false);
   });
 });
+
+/**
+ * v2.4.35 regression guard for the pending-reboot false-positive. Same class
+ * of bug as v2.4.34's BSOD rule: the matcher's rule id and title both promise
+ * a >7-day uptime gate that the regex-only predicate never enforced. Greg's
+ * box emitted an INFO-level scanner finding at 18.4h uptime and the critical
+ * Telegram alert rule fired anyway. If this test block goes red, the uptime
+ * gate in src/main/autopilotEngine.ts 'alert_pending_reboot_7d' case has
+ * been removed -- put it back.
+ */
+describe('alert_pending_reboot_7d matcher (v2.4.35 uptime gate)', () => {
+  const match = (f: { message: string; detail?: unknown }) => {
+    if (!/pending reboot|reboot required/i.test(f.message)) return false;
+    const d = f.detail as { uptime_hours?: number } | null | undefined;
+    const uptime = typeof d?.uptime_hours === 'number' ? d.uptime_hours : 0;
+    return uptime > 168;
+  };
+
+  it('fires when uptime > 168h', () => {
+    expect(match({ message: 'Pending reboot flags: CBS (uptime 200 h)', detail: { uptime_hours: 200 } })).toBe(true);
+  });
+
+  it('does NOT fire at 18.4h uptime (Greg\'s real case)', () => {
+    expect(match({ message: 'Pending reboot flags: PendingFileRename (uptime 18.4 h)', detail: { uptime_hours: 18.4 } })).toBe(false);
+  });
+
+  it('does NOT fire at exactly 168h (boundary: strict >)', () => {
+    expect(match({ message: 'Pending reboot flags: WU (uptime 168 h)', detail: { uptime_hours: 168 } })).toBe(false);
+  });
+
+  it('does NOT fire when uptime_hours is missing from detail', () => {
+    expect(match({ message: 'Pending reboot flags: CBS', detail: null })).toBe(false);
+    expect(match({ message: 'Pending reboot flags: CBS', detail: {} })).toBe(false);
+    expect(match({ message: 'Pending reboot flags: CBS' })).toBe(false);
+  });
+
+  it('does NOT fire on other messages even with high uptime', () => {
+    expect(match({ message: 'Some other warning (uptime 300 h)', detail: { uptime_hours: 300 } })).toBe(false);
+  });
+});

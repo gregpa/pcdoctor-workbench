@@ -231,7 +231,18 @@ export function evaluateRule(
     }
 
     case 'alert_pending_reboot_7d': {
-      const hit = status.findings.find(f => /pending reboot|reboot required/i.test(f.message));
+      // v2.4.35: rule is titled "Pending reboot >7 days" -- gate on actual
+      // uptime so the matcher matches the promise. Pre-v2.4.35 this fired
+      // on any pending-reboot finding regardless of uptime, which meant the
+      // scanner's INFO-level finding at 18h uptime still triggered a
+      // critical Telegram alert (same false-positive class as v2.4.34 BSOD).
+      // Scanner emits detail = { flags: [...], uptime_hours: N }.
+      const hit = status.findings.find(f => {
+        if (!/pending reboot|reboot required/i.test(f.message)) return false;
+        const d = f.detail as { uptime_hours?: number } | null | undefined;
+        const uptime = typeof d?.uptime_hours === 'number' ? d.uptime_hours : 0;
+        return uptime > 168;
+      });
       if (hit) return { ...base, alert, reason: hit.message };
       return null;
     }
