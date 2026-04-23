@@ -320,23 +320,15 @@ export function Dashboard() {
           // v2.4.39 (B45): gauges stack vertically below md, 2-up at md, 3-up at lg.
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 mb-3">
             {gaugesToShow.map((g) => {
-              // v2.4.6: click-to-expand on the CPU gauge opens the same
-              // 7-day trend modal the row below uses. RAM/Disk gauges
-              // stay non-clickable until we wire per-metric trends —
-              // RAM already flips to the pressure panel at >75%, and
-              // disk trend is per-drive (needs a label filter on the
-              // useTrend hook that we don't have yet).
-              const isCpu = g.label?.toLowerCase().includes('cpu');
-              const clickable = isCpu && !!cpuTrend;
-              const onClick = clickable && cpuTrend
-                ? () => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', trend: cpuTrend, unit: '%', yDomain: [0, 100] })
-                : undefined;
+              // v2.4.40 (B52): CPU gauge click-to-expand removed. The CPU
+              // Load 7-day trend chart is literally the next tile in the
+              // row below; opening the same modal from the gauge was
+              // redundant UI clutter. Gauges are now all non-clickable
+              // data displays.
               return (
                 <div
                   key={g.label}
-                  className={`bg-surface-800 border border-surface-600 rounded-lg p-3 ${clickable ? 'cursor-pointer hover:border-status-info/60 transition-colors' : ''}`}
-                  onClick={onClick}
-                  title={clickable ? 'Click to open 7-day trend' : undefined}
+                  className="bg-surface-800 border border-surface-600 rounded-lg p-3"
                 >
                   <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
                 </div>

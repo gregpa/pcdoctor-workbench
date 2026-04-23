@@ -36,18 +36,16 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 980,
-    // v2.4.39: resize unlocked after v2.4.39 responsive layout rebuild
-    // (B45) + v2.4.38 renderer-perf instrumentation is in place.
-    // minWidth/minHeight keep the window above the threshold where
-    // panels stop fitting even with responsive stacking. If a resize
-    // freeze recurs, v2.4.38's render-perf-YYYYMMDD.log has the data
-    // to diagnose it -- re-lock as a ship-blocker while we fix.
-    resizable: true,
-    minWidth: 900,
-    minHeight: 640,
-    // v2.4.39 (code-reviewer): preserve explicit intent carried from the
-    // v2.4.37 lock -- Electron defaults both to true on Windows, but
-    // spelling it out keeps the options block self-describing.
+    // v2.4.40 RE-LOCK (B43 / B51): v2.4.39 unlock captured perf-log data
+    // showing the real freeze cause -- NOT render thrash -- concurrent
+    // getStatus() calls piling up on a locked latest.json readFile
+    // (observed 3x 48.9s-blocked reads during a resize stampede).
+    // v2.4.40 fixes the backing concurrency issue in pcdoctorBridge
+    // (single-flight + 2s cache + 3s readFile timeout + cache fallback).
+    // Window stays locked this release so regression is unambiguous; if
+    // v2.4.40 test passes cleanly, v2.4.41 re-unlocks with the fix in
+    // place. Maximize still works.
+    resizable: false,
     maximizable: true,
     minimizable: true,
     show: !startHidden,

@@ -124,19 +124,140 @@ export class PCDoctorBridgeError extends Error {
   }
 }
 
+// v2.4.40: empirical fix for B51 resize freeze.
+//
+// v2.4.39 unlock exposed the real cause (captured in perf log):
+// multiple concurrent getStatus() calls (poll + focus + useAction) all
+// hit readFile('latest.json') independently. When something else held
+// the file locked -- Defender real-time scan, OneDrive sync, in-flight
+// scanner write -- the calls queued for ~49 seconds then resolved
+// together. Main-process await storm blocked IPC; compositor stalled;
+// other apps felt sluggish.
+//
+// Three protections layered here:
+//   1. STATUS_CACHE_MS (2s) -- repeated callers within the window share
+//      the same parsed SystemStatus. Resize storm collapses to 1 read.
+//   2. _getStatusInFlight -- single shared Promise when no cache hit.
+//      N concurrent callers share ONE in-flight readFile, not N of them.
+//   3. readFileWithTimeout (3s) -- if the file is genuinely stuck, fail
+//      fast and fall back to the last-good cached SystemStatus. UI
+//      shows slightly stale data for up to 3s instead of freezing.
+const STATUS_CACHE_MS = 2_000;
+const READ_TIMEOUT_MS = 3_000;
+let _statusCache: { ts: number; status: SystemStatus } | null = null;
+let _getStatusInFlight: Promise<SystemStatus> | null = null;
+
+/**
+ * readFile with a hard timeout. Uses AbortSignal so a stuck syscall
+ * actually cancels (vs Promise.race which leaves the syscall hanging).
+ */
+async function readFileWithTimeout(filePath: string, timeoutMs: number): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await readFile(filePath, { encoding: 'utf8', signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError' || e?.code === 'ABORT_ERR') {
+      throw Object.assign(
+        new Error(`readFile timed out after ${timeoutMs}ms: ${filePath}`),
+        { code: 'E_BRIDGE_READ_TIMEOUT' },
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getStatus(): Promise<SystemStatus> {
+  const now = Date.now();
+  // 1. Fresh cache hit -- return immediately.
+  if (_statusCache && (now - _statusCache.ts) < STATUS_CACHE_MS) {
+    void writePerfLine('getStatus.cached', 0, {
+      age_ms: now - _statusCache.ts,
+      findings: _statusCache.status.findings.length,
+    });
+    return _statusCache.status;
+  }
+  // 2. In-flight read -- share the same Promise.
+  if (_getStatusInFlight) {
+    void writePerfLine('getStatus.shared', 0);
+    return _getStatusInFlight;
+  }
+  // 3. Kick off a new read. All side effects happen inside getStatusInner.
+  _getStatusInFlight = getStatusInner()
+    .then((status) => {
+      _statusCache = { ts: Date.now(), status };
+      _getStatusInFlight = null;
+      return status;
+    })
+    .catch((err) => {
+      _getStatusInFlight = null;
+      // If the read timed out / file was busy AND we have a cached
+      // last-good status, fall back to it rather than throwing. UI sees
+      // slightly stale data for a beat; freeze avoided.
+      //
+      // Stale-tolerance note: during sustained failure (e.g. Defender
+      // locks latest.json for 30 min) we will keep serving the SAME
+      // cached object indefinitely -- every 2s window triggers a new
+      // fetch attempt, which times out at 3s, which falls back to the
+      // same stale cache. This is the intentional tradeoff: "slightly
+      // stale data" > "freeze". If you ever need a max-staleness guard
+      // (e.g. error after 5 min stale), track `_statusCache.ts` against
+      // a wall-clock threshold here before returning.
+      if (_statusCache && isTransientReadError(err)) {
+        void writePerfLine('getStatus.fallback', 0, {
+          code: err?.code,
+          cache_age_ms: Date.now() - _statusCache.ts,
+        });
+        return _statusCache.status;
+      }
+      throw err;
+    });
+  return _getStatusInFlight;
+}
+
+/** Test hook: clear the in-memory cache + in-flight promise between tests. */
+export function _resetStatusCacheForTests(): void {
+  _statusCache = null;
+  _getStatusInFlight = null;
+}
+
+// Parse errors (E_BRIDGE_PARSE_FAILED) and missing-file errors
+// (E_BRIDGE_FILE_MISSING / ENOENT) are intentionally excluded: corrupt
+// JSON is a write-corruption signal that should surface loudly, and
+// "no report exists" is a first-boot / reset condition the UI needs
+// to handle directly rather than hiding behind an old cache.
+function isTransientReadError(e: any): boolean {
+  const code = e?.code;
+  return code === 'E_BRIDGE_READ_TIMEOUT'
+      || code === 'EBUSY'
+      || code === 'EPERM'
+      || code === 'EACCES'
+      || code === 'E_BRIDGE_READ_FAILED';
+}
+
+async function getStatusInner(): Promise<SystemStatus> {
   const tStart = performance.now();
   let tRead = 0, tParse = 0, tMap = 0, tSnapshot = 0;
 
   let raw: string;
   try {
     const t0 = performance.now();
-    raw = await readFile(LATEST_JSON_PATH, 'utf8');
+    raw = await readFileWithTimeout(LATEST_JSON_PATH, READ_TIMEOUT_MS);
     tRead = performance.now() - t0;
   } catch (e: any) {
     void writePerfLine('getStatus.error', performance.now() - tStart, { code: e?.code, at: 'readFile' });
     if (e?.code === 'ENOENT') {
       throw new PCDoctorBridgeError('E_BRIDGE_FILE_MISSING', `No report at ${LATEST_JSON_PATH}`);
+    }
+    if (e?.code === 'E_BRIDGE_READ_TIMEOUT') {
+      // PCDoctorBridgeError's constructor sets `.code` -- no Object.assign
+      // needed. isTransientReadError downstream reads `.code` to decide
+      // whether to fall back to cache, so this error MUST carry the code
+      // exactly as written here; don't rename the string without
+      // updating isTransientReadError in lock-step.
+      throw new PCDoctorBridgeError('E_BRIDGE_READ_TIMEOUT', e.message);
     }
     throw new PCDoctorBridgeError('E_BRIDGE_READ_FAILED', `Could not read ${LATEST_JSON_PATH}: ${e?.message}`);
   }
