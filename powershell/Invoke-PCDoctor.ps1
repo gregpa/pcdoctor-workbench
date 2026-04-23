@@ -243,9 +243,23 @@ try {
     $report.metrics.event_errors_7d.recurring  = $recurring
     $report.metrics.event_errors_7d.suppressed = $suppressed
 
-    # Specific problem signatures
-    if ($sysErrors | Where-Object { $_.Id -in 41, 1001 -and $_.ProviderName -match 'Kernel-Power|BugCheck' }) {
-        Add-Finding warning 'Stability' 'Unexpected shutdowns or BSODs detected in last 7 days' $null $false -Why "Unexpected shutdowns or BSODs within a 7-day rolling window usually point to one of three things: a recently updated/broken driver, failing memory (run MemTest86), or thermal issues under load. Analyze Latest Minidump runs WinDbg's !analyze -v against C:\Windows\Minidump\*.dmp to identify the faulting module. If the analyzer returns empty fields, WinDbg couldn't load symbols -- the raw output is still shown so Claude can interpret it."
+    # Specific problem signatures (v2.4.34: split BSOD from unexpected shutdown).
+    # Event 41 Kernel-Power alone is NOT a BSOD -- it fires on ANY unclean boot
+    # (power loss, forced reset, system hang, PSU cutoff). Prior logic treated
+    # 41 + 1001 the same, which produced false-positive BSOD alerts every time
+    # Windows booted after any unclean event. Fix: require BugCheck event 1001
+    # OR a minidump file < 7 days old to call it a BSOD.
+    $bugCheckEvents     = @($sysErrors | Where-Object { $_.Id -eq 1001 -and $_.ProviderName -match 'BugCheck' })
+    $minidumps          = @(Get-ChildItem 'C:\Windows\Minidump\*.dmp' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $since })
+    $unexpectedShutdown = @($sysErrors | Where-Object { $_.Id -eq 41 -and $_.ProviderName -match 'Kernel-Power' })
+
+    if ($bugCheckEvents.Count -gt 0 -or $minidumps.Count -gt 0) {
+        $bsodCount = [Math]::Max($bugCheckEvents.Count, $minidumps.Count)
+        Add-Finding warning 'Stability' "BSOD detected in last 7 days (count: $bsodCount)" $null $false -Why "A true BSOD writes a BugCheck event (ID 1001) and a minidump file to C:\Windows\Minidump. Analyze Latest Minidump runs WinDbg's !analyze -v against those .dmp files to identify the faulting module. If the analyzer returns empty fields, WinDbg couldn't load symbols -- the raw output is still shown so Claude can interpret it."
+    }
+
+    if ($unexpectedShutdown.Count -gt 0 -and $bugCheckEvents.Count -eq 0 -and $minidumps.Count -eq 0) {
+        Add-Finding info 'Stability' "Unexpected shutdown(s) in last 7 days: $($unexpectedShutdown.Count) (Event 41; no BSOD evidence)" $null $false -Why "Event 41 'Kernel-Power' fires whenever Windows boots without a clean prior shutdown. Causes include power loss, forced reset, PSU cutoff, or holding the power button through a hang. Without a matching BugCheck event 1001 or a file in C:\Windows\Minidump, this is not a BSOD -- it's logged here for visibility only and does not trigger an alert."
     }
 } catch { Log "Event log error: $_" }
 

@@ -35,7 +35,7 @@ export const DEFAULT_RULES_SPEC: RuleSpec[] = [
   { id: 'update_hosts_stevenblack_monthly', tier: 2, description: 'Refresh StevenBlack hosts monthly',       trigger: 'schedule', cadence: 'monthly:1sun:04:00', action_name: 'update_hosts_stevenblack' },
 
   // Tier 3
-  { id: 'alert_bsod_24h',                 tier: 3, description: 'BSOD detected in last 24h',   trigger: 'threshold', alert: { title: 'BSOD in last 24h', severity: 'critical',  fix_actions: ['analyze_minidump'] } },
+  { id: 'alert_bsod_7d',                  tier: 3, description: 'BSOD detected in last 7 days', trigger: 'threshold', alert: { title: 'BSOD in last 7 days', severity: 'critical',  fix_actions: ['analyze_minidump'] } },
   { id: 'alert_smart_warning',            tier: 3, description: 'SMART pre-fail/warning',       trigger: 'threshold', alert: { title: 'SMART warning on a drive', severity: 'critical',  fix_actions: ['run_smart_check'] } },
   { id: 'alert_pending_reboot_7d',        tier: 3, description: 'Pending reboot older than 7d', trigger: 'threshold', alert: { title: 'Pending reboot >7 days',   severity: 'important', fix_actions: [] } },
   { id: 'alert_defender_defs_stale',      tier: 3, description: 'Defender defs >48h old',        trigger: 'threshold', alert: { title: 'Defender defs stale',     severity: 'important', fix_actions: ['update_defender_defs'] } },

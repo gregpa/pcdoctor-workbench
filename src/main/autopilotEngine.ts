@@ -27,6 +27,7 @@ import {
   getLastAutopilotActivity,
   countAutopilotFailures,
   queryMetricTrend,
+  deleteAutopilotRule,
   type AutopilotRuleRow,
 } from './dataStore.js';
 import { sendTelegramMessage, makeCallbackData, type InlineButton } from './telegramBridge.js';
@@ -76,7 +77,7 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { id: 'update_hosts_stevenblack_monthly', tier: 2, description: 'Refresh StevenBlack hosts monthly',     trigger: 'schedule', cadence: 'monthly:1sun:04:00', action_name: 'update_hosts_stevenblack' },
 
   // ---- Tier 3: alert only ----
-  { id: 'alert_bsod_24h',                 tier: 3, description: 'BSOD detected in last 24h',   trigger: 'threshold', alert: { title: 'BSOD in last 24h',                severity: 'critical',  fix_actions: ['analyze_minidump'] } },
+  { id: 'alert_bsod_7d',                  tier: 3, description: 'BSOD detected in last 7 days', trigger: 'threshold', alert: { title: 'BSOD in last 7 days',              severity: 'critical',  fix_actions: ['analyze_minidump'] } },
   { id: 'alert_smart_warning',            tier: 3, description: 'SMART pre-fail/warning',       trigger: 'threshold', alert: { title: 'SMART warning on a drive',         severity: 'critical',  fix_actions: ['run_smart_check'] } },
   { id: 'alert_pending_reboot_7d',        tier: 3, description: 'Pending reboot older than 7d', trigger: 'threshold', alert: { title: 'Pending reboot >7 days',           severity: 'important', fix_actions: [] } },
   { id: 'alert_defender_defs_stale',      tier: 3, description: 'Defender defs >48h old',        trigger: 'threshold', alert: { title: 'Defender definitions stale (>48h)', severity: 'important', fix_actions: ['update_defender_defs'] } },
@@ -90,8 +91,14 @@ export const DEFAULT_RULES: DefaultRule[] = [
 
 let rulesSeeded = false;
 
+// v2.4.34: rules renamed or removed in past versions. Deleted on seed so the
+// Autopilot UI stops showing stale entries. Keep this list forever -- dropping
+// an id here will let it resurrect on boxes still carrying the old row.
+const OBSOLETE_RULE_IDS = ['alert_bsod_24h'];
+
 export function seedDefaultRulesOnce(): void {
   if (rulesSeeded) return;
+  for (const id of OBSOLETE_RULE_IDS) deleteAutopilotRule(id);
   for (const r of DEFAULT_RULES) {
     upsertAutopilotRule({
       id: r.id,
@@ -201,8 +208,18 @@ export function evaluateRule(
       return null;
     }
 
-    case 'alert_bsod_24h': {
-      const hit = status.findings.find(f => /bsod|kernel panic|bugcheck/i.test(f.message) || /bsod|bugcheck/i.test(f.area));
+    case 'alert_bsod_7d': {
+      // v2.4.34: match ONLY the tight BSOD finding. The scanner now emits two
+      // separate Stability findings: "BSOD detected in last 7 days (count: N)"
+      // (warning, gated on BugCheck 1001 or a minidump file) and
+      // "Unexpected shutdown(s) in last 7 days: N" (info, Event 41 only).
+      // Prior loose regex /bsod|kernel panic|bugcheck/i accidentally matched
+      // the combined pre-v2.4.34 message "Unexpected shutdowns or BSODs detected"
+      // when no BSOD had occurred -- Greg's box fired this alert nightly on
+      // Event 41s from unclean boots that had nothing to do with BSODs.
+      const hit = status.findings.find(f =>
+        f.area === 'Stability' && /^BSOD detected/i.test(f.message),
+      );
       if (hit) return { ...base, alert, reason: hit.message };
       return null;
     }

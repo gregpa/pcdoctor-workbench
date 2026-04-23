@@ -227,6 +227,71 @@ before we touch ACLs.
 If you find yourself wanting to speed up the installer, find a different
 second to cut. Keep the Defender pause.
 
+## 8. Event 41 Kernel-Power is not a BSOD
+
+### The bug (v2.4.34)
+
+`powershell/Invoke-PCDoctor.ps1` had:
+
+```powershell
+if ($sysErrors | Where-Object { $_.Id -in 41, 1001 -and $_.ProviderName -match 'Kernel-Power|BugCheck' }) {
+    Add-Finding warning 'Stability' 'Unexpected shutdowns or BSODs detected in last 7 days'
+}
+```
+
+This fired a single combined finding on Event 41 (Kernel-Power, any unclean
+boot) OR Event 1001 (BugCheck, actual BSOD). Downstream the alert rule
+`alert_bsod_24h` matched `/bsod|kernel panic|bugcheck/i` against the
+finding message -- which included the word "BSODs" -- so Event 41 alone
+triggered a critical "BSOD in last 24h" Telegram alert. Greg got one
+every night for weeks.
+
+### Why it's wrong
+
+Event 41 fires on ANY unclean boot:
+
+- Power loss (PSU cutoff, UPS failure, power-strip switched off)
+- Forced reset (reset button)
+- User holds the power button through a hang
+- Sleep / hibernate failures
+- BSOD
+
+Only the last is a BSOD. The rest are environmental or user actions, not
+kernel faults. Treating 41 as a BSOD produces nightly false positives on
+any machine that experiences occasional power hiccups.
+
+### The rule
+
+**Scanner side:**
+- "BSOD" = BugCheck event 1001 OR a file in `C:\Windows\Minidump\*.dmp`
+  newer than the scan window. Never Event 41 alone.
+- "Unexpected shutdown" = Event 41 Kernel-Power with no matching 1001
+  and no minidump. Info severity. Logged for visibility, never an alert.
+
+**Alert side:**
+- Match ONLY the tight finding with an area guard:
+  `f.area === 'Stability' && /^BSOD detected/i.test(f.message)`.
+- Do NOT use loose keyword regex that happens to catch the soft finding.
+- Scan window must match the alert title. If the scanner looks back 7
+  days, the alert must say "7 days", not "24h".
+
+### Rules
+
+- When a finding describes multiple conditions of different severity, split
+  them. One finding = one signal.
+- Alert matchers must be anchored (`^...`) and area-guarded. Loose substring
+  regex on free-form finding text WILL eventually match unrelated content.
+- The `OBSOLETE_RULE_IDS` list in `src/main/autopilotEngine.ts` deletes
+  renamed rule rows on seed. If you rename a rule id, add the old id to
+  that list AND keep it there forever -- dropping an id lets it resurrect
+  on machines still carrying the old row.
+
+### Regression coverage
+
+`tests/main/autopilotEngine.test.ts` has a `describe('alert_bsod_7d matcher')`
+block that locks in positive + three negative cases. If you ever see that
+block go red, **the regex has been loosened** -- re-tighten it.
+
 ## References
 
 - [`scripts/installer.nsh`](../scripts/installer.nsh) — the NSIS install hook

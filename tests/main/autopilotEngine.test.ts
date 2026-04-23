@@ -81,3 +81,31 @@ describe('autopilot threshold predicates (documented semantics)', () => {
     expect(cFreePct < 15).toBe(false);
   });
 });
+
+/**
+ * v2.4.34 regression guard for the BSOD false-positive that fired nightly on
+ * Greg's box. The evaluator must only match the tight "BSOD detected ..."
+ * Stability finding and MUST NOT match the softer unexpected-shutdown finding.
+ * If this ever comes back, the regex in autopilotEngine.ts 'alert_bsod_7d' case
+ * has been loosened -- re-tighten it to `^BSOD detected` with an area guard.
+ */
+describe('alert_bsod_7d matcher (v2.4.34 tightening)', () => {
+  const match = (f: { area: string; message: string }) =>
+    f.area === 'Stability' && /^BSOD detected/i.test(f.message);
+
+  it('fires on the tight BSOD finding', () => {
+    expect(match({ area: 'Stability', message: 'BSOD detected in last 7 days (count: 2)' })).toBe(true);
+  });
+
+  it('does NOT fire on the unexpected-shutdown finding (Event 41 alone)', () => {
+    expect(match({ area: 'Stability', message: 'Unexpected shutdown(s) in last 7 days: 3 (Event 41; no BSOD evidence)' })).toBe(false);
+  });
+
+  it('does NOT fire on the pre-v2.4.34 combined finding text', () => {
+    expect(match({ area: 'Stability', message: 'Unexpected shutdowns or BSODs detected in last 7 days' })).toBe(false);
+  });
+
+  it('does NOT fire on BSOD keywords in other areas', () => {
+    expect(match({ area: 'EventLog', message: 'BSOD keyword in recurring event text' })).toBe(false);
+  });
+});

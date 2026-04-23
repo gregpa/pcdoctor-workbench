@@ -700,6 +700,15 @@ export function getAutopilotRule(ruleId: string): AutopilotRuleRow | null {
   return row ?? null;
 }
 
+/**
+ * v2.4.34: remove obsolete rule rows left behind by earlier seed versions
+ * (e.g. `alert_bsod_24h` renamed to `alert_bsod_7d`). Leaving orphans would
+ * surface as dead entries in the Autopilot UI. Called from seedDefaultRulesOnce.
+ */
+export function deleteAutopilotRule(ruleId: string): void {
+  openDb().prepare(`DELETE FROM autopilot_rules WHERE id = ?`).run(ruleId);
+}
+
 export interface AutopilotActivityRow {
   id: number;
   ts: number;
