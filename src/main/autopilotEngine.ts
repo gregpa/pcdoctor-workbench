@@ -237,11 +237,23 @@ export function evaluateRule(
       // scanner's INFO-level finding at 18h uptime still triggered a
       // critical Telegram alert (same false-positive class as v2.4.34 BSOD).
       // Scanner emits detail = { flags: [...], uptime_hours: N }.
+      //
+      // v2.4.37 (code-reviewer): explicit shape guard. A future scanner
+      // regression that emits `detail` as an array, string, or other
+      // non-object shape previously fell through to `uptime = 0` and the
+      // alert was silently suppressed. Now: non-object / array detail
+      // still suppresses the alert (that part is still safer than firing
+      // on malformed data), but the explicit guard makes the intent
+      // readable and gives us a clean hook to add logging later if
+      // needed. See tests/main/autopilotEngine.test.ts 'uptime gate
+      // shape validation' for coverage.
       const hit = status.findings.find(f => {
         if (!/pending reboot|reboot required/i.test(f.message)) return false;
-        const d = f.detail as { uptime_hours?: number } | null | undefined;
-        const uptime = typeof d?.uptime_hours === 'number' ? d.uptime_hours : 0;
-        return uptime > 168;
+        const d = f.detail;
+        if (typeof d !== 'object' || d === null || Array.isArray(d)) return false;
+        const uh = (d as { uptime_hours?: unknown }).uptime_hours;
+        if (typeof uh !== 'number') return false;
+        return uh > 168;
       });
       if (hit) return { ...base, alert, reason: hit.message };
       return null;

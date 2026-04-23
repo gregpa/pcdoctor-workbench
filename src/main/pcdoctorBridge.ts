@@ -1,8 +1,41 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, appendFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import { LATEST_JSON_PATH } from './constants.js';
 import { recordStatusSnapshot, getMetricWeekDelta } from './dataStore.js';
 import { emitNewFindingNotifications } from './notifier.js';
 import type { SystemStatus, KpiValue, GaugeValue, Severity, Finding, ActionName, ServiceHealth, SmartEntry, SystemMetrics, WslConfigMetric, MemoryPressureMetric, StartupItemMetric } from '@shared/types.js';
+
+// v2.4.37: per-call timing telemetry for getStatus so we can diagnose the
+// resize freeze on Greg's box empirically in v2.4.38. One JSON line per
+// invocation, appended to C:\ProgramData\PCDoctor\logs\perf-YYYYMMDD.log.
+// Fire-and-forget; log write failures are swallowed so they never block
+// or break getStatus itself.
+const PERF_LOG_DIR = 'C:\\ProgramData\\PCDoctor\\logs';
+let _perfLogDirEnsured = false;
+
+function perfLogPath(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return path.join(PERF_LOG_DIR, `perf-${y}${m}${day}.log`);
+}
+
+async function writePerfLine(phase: string, durationMs: number, extra?: Record<string, unknown>): Promise<void> {
+  try {
+    if (!_perfLogDirEnsured) {
+      await mkdir(PERF_LOG_DIR, { recursive: true });
+      _perfLogDirEnsured = true;
+    }
+    const line = JSON.stringify({
+      ts: new Date().toISOString(),
+      phase,
+      duration_ms: Math.round(durationMs * 100) / 100,
+      ...extra,
+    }) + '\n';
+    await appendFile(perfLogPath(), line, 'utf8');
+  } catch { /* telemetry must never throw */ }
+}
 
 let cachedSmart: SmartEntry[] = [];
 export function setCachedSmart(entries: SmartEntry[]) {
@@ -92,10 +125,16 @@ export class PCDoctorBridgeError extends Error {
 }
 
 export async function getStatus(): Promise<SystemStatus> {
+  const tStart = performance.now();
+  let tRead = 0, tParse = 0, tMap = 0, tSnapshot = 0;
+
   let raw: string;
   try {
+    const t0 = performance.now();
     raw = await readFile(LATEST_JSON_PATH, 'utf8');
+    tRead = performance.now() - t0;
   } catch (e: any) {
+    void writePerfLine('getStatus.error', performance.now() - tStart, { code: e?.code, at: 'readFile' });
     if (e?.code === 'ENOENT') {
       throw new PCDoctorBridgeError('E_BRIDGE_FILE_MISSING', `No report at ${LATEST_JSON_PATH}`);
     }
@@ -104,17 +143,23 @@ export async function getStatus(): Promise<SystemStatus> {
 
   let parsed: any;
   try {
+    const t0 = performance.now();
     // Strip UTF-8 BOM if present. PowerShell's Out-File default encoding writes
     // one; JSON.parse can't handle it.
     const trimmed = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
     parsed = JSON.parse(trimmed);
+    tParse = performance.now() - t0;
   } catch (e: any) {
+    void writePerfLine('getStatus.error', performance.now() - tStart, { code: 'E_BRIDGE_PARSE_FAILED', at: 'JSON.parse' });
     throw new PCDoctorBridgeError('E_BRIDGE_PARSE_FAILED', `Invalid JSON: ${e?.message}`);
   }
 
+  const tMapStart = performance.now();
   const status = mapToSystemStatus(parsed);
+  tMap = performance.now() - tMapStart;
   // Persist snapshot for trend tracking (best-effort, non-fatal)
   try {
+    const tSnapStart = performance.now();
     const m = parsed.metrics ?? {};
     // v2.4.29: record non-temp metrics synchronously - these are free
     // (pure in-memory reads) and the sync insert is wrapped in a
@@ -126,6 +171,7 @@ export async function getStatus(): Promise<SystemStatus> {
       event_errors_system: m?.event_errors_7d?.system_count,
       event_errors_application: m?.event_errors_7d?.application_count,
     });
+    tSnapshot = performance.now() - tSnapStart;
     // v2.4.30: temperature read is fire-and-forget with a 30s cache.
     // v2.4.29 awaited the PS spawn (~200ms) inside getStatus, which on
     // Greg's high-RAM-pressure box (91% used, constant paging) was
@@ -146,6 +192,19 @@ export async function getStatus(): Promise<SystemStatus> {
   } catch {}
   // Fire notifications for any new critical/warning findings (non-blocking)
   try { emitNewFindingNotifications(status.findings).catch(() => {}); } catch {}
+
+  // v2.4.37: emit per-phase timing so v2.4.38 can diagnose which phase
+  // (if any) is actually slow during window resize. total, read, parse,
+  // map, snapshot are synchronous-path timings; temp read + notifier
+  // are fire-and-forget and not counted here.
+  const tTotal = performance.now() - tStart;
+  void writePerfLine('getStatus', tTotal, {
+    read_ms: Math.round(tRead * 100) / 100,
+    parse_ms: Math.round(tParse * 100) / 100,
+    map_ms: Math.round(tMap * 100) / 100,
+    snapshot_ms: Math.round(tSnapshot * 100) / 100,
+    findings: status.findings.length,
+  });
   return status;
 }
 

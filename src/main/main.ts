@@ -39,6 +39,15 @@ function createWindow() {
     show: !startHidden,
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
+    // v2.4.37 (B43 ship-blocker): edge-drag resize caused >1 min UI freeze
+    // on Greg's box (cause not yet isolated; v2.4.36's focus-debounce
+    // hypothesis didn't fix it). Panel layout also breaks at narrow
+    // widths (B45). Locking the window to the design size until both are
+    // properly diagnosed + the responsive layout rebuild lands in v2.4.38.
+    // Maximize + minimize still work.
+    resizable: false,
+    maximizable: true,
+    minimizable: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.cjs'),
       contextIsolation: true,

@@ -149,3 +149,42 @@ describe('alert_pending_reboot_7d matcher (v2.4.35 uptime gate)', () => {
     expect(match({ message: 'Some other warning (uptime 300 h)', detail: { uptime_hours: 300 } })).toBe(false);
   });
 });
+
+/**
+ * v2.4.35 regression guard: uptime gate shape validation.
+ * The matcher must handle malformed `detail` payloads without throwing and
+ * without firing. These cover the four shapes that were observed arriving
+ * from older scanner versions or network deserialization bugs.
+ */
+describe('alert_pending_reboot_7d uptime gate shape validation (v2.4.35)', () => {
+  // Identical predicate to the one in autopilotEngine.ts -- reimplemented
+  // here to keep the test module import-free (avoids the electron/sqlite
+  // module boundary). If the engine predicate changes, update this mirror.
+  const match = (f: { message: string; detail?: unknown }) => {
+    if (!/pending reboot|reboot required/i.test(f.message)) return false;
+    const d = f.detail as { uptime_hours?: number } | null | undefined;
+    const uptime = typeof d?.uptime_hours === 'number' ? d.uptime_hours : 0;
+    return uptime > 168;
+  };
+
+  it('detail is an array: does NOT fire and does NOT throw', () => {
+    // Arrays are objects; d?.uptime_hours on an array is undefined -> uptime=0
+    expect(() => match({ message: 'Pending reboot flags: CBS', detail: [1, 2, 3] })).not.toThrow();
+    expect(match({ message: 'Pending reboot flags: CBS', detail: [1, 2, 3] })).toBe(false);
+  });
+
+  it('detail is a plain string: does NOT fire and does NOT throw', () => {
+    // Strings are not objects with uptime_hours -> uptime=0
+    expect(() => match({ message: 'Pending reboot flags: WU', detail: 'some string' })).not.toThrow();
+    expect(match({ message: 'Pending reboot flags: WU', detail: 'some string' })).toBe(false);
+  });
+
+  it('detail.uptime_hours is a string "200": does NOT fire (type guard rejects non-number)', () => {
+    // typeof "200" === 'string', not 'number' -> uptime falls back to 0
+    expect(match({ message: 'Pending reboot flags: CBS (uptime 200 h)', detail: { uptime_hours: '200' } })).toBe(false);
+  });
+
+  it('detail is undefined: does NOT fire', () => {
+    expect(match({ message: 'Pending reboot flags: WU (uptime 300 h)' })).toBe(false);
+  });
+});

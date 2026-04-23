@@ -172,4 +172,104 @@ describe('dataStore round-trips (sqlite on-disk in temp dir)', () => {
       expect(ds.hasSeenFinding('abc123')).toBe(true);
     });
   });
+
+  /**
+   * v2.4.37: deleteAutopilotRule now also purges autopilot_activity rows
+   * for the deleted rule (code-reviewer finding #5). Prior behavior left
+   * dangling rule_id rows that surfaced as "deleted rule" entries in any
+   * UI query against autopilot_activity that didn't filter by the active
+   * rule set. Both deletes run in a single SQLite transaction so either
+   * both succeed or both revert.
+   *
+   * If this block goes red, the atomic rule+activity delete was removed
+   * from src/main/dataStore.ts `deleteAutopilotRule`. Put it back.
+   */
+  describe('deleteAutopilotRule cascades to autopilot_activity (v2.4.37)', () => {
+    it('removes the rule row from autopilot_rules', () => {
+      // Seed a synthetic obsolete rule directly into the DB.
+      ds.upsertAutopilotRule({
+        id: 'alert_bsod_24h',
+        tier: 3,
+        description: 'Legacy 24h BSOD rule (obsolete)',
+        trigger: 'threshold',
+        cadence: null,
+        action_name: null,
+        alert_json: JSON.stringify({ title: 'BSOD 24h', severity: 'critical' }),
+        enabled: true,
+      });
+      expect(ds.getAutopilotRule('alert_bsod_24h')).not.toBeNull();
+
+      ds.deleteAutopilotRule('alert_bsod_24h');
+
+      expect(ds.getAutopilotRule('alert_bsod_24h')).toBeNull();
+    });
+
+    it('also removes autopilot_activity rows referencing the deleted rule', () => {
+      // Seed the obsolete rule so the FK-like relationship exists before we add activity.
+      ds.upsertAutopilotRule({
+        id: 'alert_bsod_24h',
+        tier: 3,
+        description: 'Legacy 24h BSOD rule (obsolete)',
+        trigger: 'threshold',
+        cadence: null,
+        action_name: null,
+        alert_json: null,
+        enabled: true,
+      });
+
+      // Insert an activity row referencing the rule.
+      ds.insertAutopilotActivity({
+        rule_id: 'alert_bsod_24h',
+        tier: 3,
+        action_name: null,
+        outcome: 'alerted',
+        bytes_freed: null,
+        duration_ms: null,
+        message: 'BSOD detected in last 24h (legacy entry)',
+        details_json: null,
+      });
+
+      const before = ds.listAutopilotActivity(30);
+      const matchBefore = before.filter((r: any) => r.rule_id === 'alert_bsod_24h');
+      expect(matchBefore.length).toBeGreaterThanOrEqual(1);
+
+      // Delete the rule.
+      ds.deleteAutopilotRule('alert_bsod_24h');
+      expect(ds.getAutopilotRule('alert_bsod_24h')).toBeNull();
+
+      // v2.4.37 contract: activity rows for the deleted rule are purged
+      // atomically in the same transaction.
+      const after = ds.listAutopilotActivity(30);
+      const matchAfter = after.filter((r: any) => r.rule_id === 'alert_bsod_24h');
+      expect(matchAfter.length).toBe(0);
+    });
+
+    it('does not touch activity rows for OTHER rules', () => {
+      ds.upsertAutopilotRule({
+        id: 'alert_to_keep',
+        tier: 3,
+        description: 'Active rule that should survive',
+        trigger: 'threshold',
+        cadence: null,
+        action_name: null,
+        alert_json: null,
+        enabled: true,
+      });
+      ds.insertAutopilotActivity({
+        rule_id: 'alert_to_keep',
+        tier: 3,
+        action_name: null,
+        outcome: 'alerted',
+        bytes_freed: null,
+        duration_ms: null,
+        message: 'Unrelated activity',
+        details_json: null,
+      });
+
+      ds.deleteAutopilotRule('alert_bsod_24h'); // unrelated rule
+
+      const rows = ds.listAutopilotActivity(30).filter((r: any) => r.rule_id === 'alert_to_keep');
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

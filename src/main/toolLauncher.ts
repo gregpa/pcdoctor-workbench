@@ -142,6 +142,16 @@ export async function launchTool(toolId: string, modeId: string): Promise<{ ok: 
       settle({ ok: false, error: err.message, code: err.code });
     });
     child.once('spawn', () => {
+      // v2.4.37 (code-reviewer): even after 'spawn' fires, child.pid can
+      // be undefined if the OS deferred the failure (anti-virus termination
+      // mid-spawn, for example). Returning ok:true with pid:undefined lies
+      // to the caller -- the UI shows "Launched successfully" while nothing
+      // is actually running. Treat undefined pid as failure regardless of
+      // which event won the race.
+      if (!child.pid) {
+        settle({ ok: false, error: 'Process started but PID unavailable', code: 'E_NO_PID' });
+        return;
+      }
       child.unref();
       settle({ ok: true, pid: child.pid });
     });
@@ -151,6 +161,12 @@ export async function launchTool(toolId: string, modeId: string): Promise<{ ok: 
     // we called unref() and returned ok immediately after spawn()).
     setTimeout(() => {
       if (settled) return;
+      // Same pid guard as the 'spawn' handler. The timeout path is where
+      // AV-kill-before-pid-populate most often lands.
+      if (!child.pid) {
+        settle({ ok: false, error: 'Process started but PID unavailable', code: 'E_NO_PID' });
+        return;
+      }
       try { child.unref(); } catch { /* child already gone */ }
       settle({ ok: true, pid: child.pid });
     }, 500);

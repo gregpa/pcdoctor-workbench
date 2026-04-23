@@ -376,6 +376,75 @@ cases: async EACCES fallback, async UNKNOWN fallback, non-EACCES error
 returns error, args-present skips fallback, shell.openPath failure
 surfaces, sync EACCES with code falls back.
 
+## 10. Backslash escaping in PowerShell single-quoted regex literals
+
+### The bug (shipped v2.4.6 → v2.4.36, fixed v2.4.37)
+
+`powershell/Invoke-PCDoctor.ps1`'s `$pfroBenignPatterns` used
+quadruple-backslash literals to match Windows path separators:
+
+```powershell
+'\\\\Google\\\\Chrome\\\\Temp(?:\\\\|$)'
+```
+
+This pattern NEVER matched any realistic registry input. The bug shipped
+for 30 releases without anyone noticing because every existing test
+asserted structural properties of the pattern array (length, type) but
+no test ran the patterns against realistic input strings.
+
+### Why quadruple-backslash is wrong
+
+PowerShell single-quoted strings pass characters through verbatim:
+
+- `'\\\\'` is the **4-character string** `\\\\`
+- `'\\'` is the **2-character string** `\\`
+
+The .NET regex engine interprets the string it receives:
+
+- `\\\\` → escape + `\` + escape + `\` → matches **TWO consecutive
+  backslashes** in the input
+- `\\` → escape + `\` → matches **ONE backslash** in the input
+
+`PendingFileRenameOperations` registry values use single backslashes
+between path components (e.g. `\Program Files\Common Files\...`). The
+scanner patterns expected double backslashes that never exist in the
+input, so the filter never fired.
+
+The scrub script `Clear-StalePendingRenames.ps1` used correct
+double-backslash literals and worked fine since v2.4.6.
+
+### How to escape a regex path separator in PS single-quoted literals
+
+To match a single `\` in the input: use `'\\'` in the PS source.
+
+| You want the regex to match... | PS source literal |
+| --- | --- |
+| one backslash | `'\\'` |
+| two consecutive backslashes | `'\\\\'` |
+| a literal dot | `'\.'` |
+| literal `\Foo\Bar` | `'\\Foo\\Bar'` |
+| literal `\Foo\Bar\` or end-of-string | `'\\Foo\\Bar(?:\\|$)'` |
+
+### The rule
+
+- **Never** use `\\\\` to match a single path separator. That matches
+  two consecutive separators, which is never what you want for Windows
+  paths read from the registry.
+- When adding a new regex literal to any PowerShell file, write out
+  ONE realistic input string you expect it to match and verify via
+  `-match` BEFORE shipping.
+- Pre-ship gate `scripts/test-pfro-pattern-match.ps1` now validates
+  every scanner and scrub pattern against realistic
+  `PendingFileRenameOperations` inputs. Both lists must exit 0 on
+  every release. If a new pattern is added, add a realistic input
+  line to the harness so the new pattern is actually exercised.
+
+### Regression coverage
+
+- `scripts/test-pfro-pattern-match.ps1` — 42 assertions (14 must-match
+  inputs × 2 lists + 7 must-NOT-match inputs × 2 lists). Part of the
+  pre-ship gate sequence alongside `test-installer-acl.ps1`.
+
 ## References
 
 - [`scripts/installer.nsh`](../scripts/installer.nsh) — the NSIS install hook

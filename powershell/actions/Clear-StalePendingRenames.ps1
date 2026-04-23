@@ -73,6 +73,11 @@ $benignPatterns = @(
     '\\Mozilla Firefox\\[0-9a-f-]+(?:\\|$)',
     'gamingservicesproxy_e\.dll',
     'gamingservices_e\.dll',
+    # v2.4.37 (code-reviewer): parity with scanner's $pfroBenignPatterns.
+    # Scanner classifies any entry containing "InstallerService" as benign
+    # (MSIX stager leftover); scrub must agree or the flag never clears
+    # even after the scrub runs.
+    'InstallerService',
     # v2.4.36 (B42): Office Click-to-Run backup/staging dirs re-queue
     # rename-on-reboot entries every update when files are read-locked
     # at boot. Observed on Greg's box: 17 entries survived a reboot, all

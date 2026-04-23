@@ -704,9 +704,19 @@ export function getAutopilotRule(ruleId: string): AutopilotRuleRow | null {
  * v2.4.34: remove obsolete rule rows left behind by earlier seed versions
  * (e.g. `alert_bsod_24h` renamed to `alert_bsod_7d`). Leaving orphans would
  * surface as dead entries in the Autopilot UI. Called from seedDefaultRulesOnce.
+ *
+ * v2.4.37 (code-reviewer): also purge any `autopilot_activity` rows that
+ * reference this rule. No FK cascade on the schema, so history rows would
+ * otherwise linger with a dangling rule_id and show up in any query that
+ * doesn't filter by the active rule set (e.g. Autopilot history views).
  */
 export function deleteAutopilotRule(ruleId: string): void {
-  openDb().prepare(`DELETE FROM autopilot_rules WHERE id = ?`).run(ruleId);
+  const db = openDb();
+  const tx = db.transaction((id: string) => {
+    db.prepare(`DELETE FROM autopilot_activity WHERE rule_id = ?`).run(id);
+    db.prepare(`DELETE FROM autopilot_rules WHERE id = ?`).run(id);
+  });
+  tx(ruleId);
 }
 
 export interface AutopilotActivityRow {

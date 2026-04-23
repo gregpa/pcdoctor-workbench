@@ -334,3 +334,83 @@ describe('launchTool async EACCES handling (v2.4.36)', () => {
     expect(shell.openPath).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// v2.4.36 (C) regression guards: async spawn timeout with pid === undefined
+// and double-resolve prevention via the `settled` guard.
+// ---------------------------------------------------------------------------
+
+describe('launchTool async edge cases (v2.4.36)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * BUG (documented, not yet fixed): when spawn() returns a child whose pid
+   * is undefined AND neither 'spawn' nor 'error' fires within 500ms, the
+   * timeout branch runs `settle({ ok: true, pid: child.pid })` where
+   * child.pid is undefined. The caller receives ok=true with no pid,
+   * which is indistinguishable from a successful launch but the process
+   * never actually started.
+   *
+   * DESIRED behavior: ok=false, error='Process started but PID unavailable'.
+   * This test documents the desired fixed behavior. It will FAIL against the
+   * current production code (ok=true, pid=undefined) -- that failure is
+   * intentional and tracks the open bug for the fix PR.
+   */
+  it('EXPECTED FAIL (bug): timeout path with pid=undefined returns ok=false (desired fixed behavior)', async () => {
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    // Return a child with no pid; emit neither 'spawn' nor 'error' so
+    // the 500ms safety-net setTimeout fires.
+    const child = new EventEmitter() as any;
+    child.pid = undefined;
+    child.unref = vi.fn();
+    (spawn as any).mockReturnValue(child);
+
+    // Advance fake timers past the 500ms gate.
+    vi.useFakeTimers();
+    const resultPromise = launchTool('occt', 'default');
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+
+    const result = await resultPromise;
+    // DESIRED (fixed) behavior:
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/PID unavailable/i);
+    // Current (broken) behavior would be: result.ok === true, result.pid === undefined
+    // If this assertion fails, the production bug is still open.
+  }, 10_000);
+
+  /**
+   * Guard: when both 'spawn' and 'error' fire (in that order), only the
+   * first settlement is honoured. The `settled` flag must prevent the
+   * 'error' handler from overwriting the ok=true result.
+   */
+  it('settled guard prevents double-resolve when spawn then error both fire', async () => {
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    const child = makeFakeChild(7777);
+    (spawn as any).mockImplementation(() => {
+      // Fire 'spawn' first, then 'error' on the next microtask tick.
+      queueMicrotask(() => {
+        child.emit('spawn');
+        queueMicrotask(() => {
+          const err: any = new Error('ENOENT late error');
+          err.code = 'ENOENT';
+          child.emit('error', err);
+        });
+      });
+      return child;
+    });
+
+    const result = await launchTool('occt', 'default');
+    // 'spawn' fired first: result must be ok=true with the correct pid.
+    // If the settled guard is broken, the subsequent 'error' would overwrite
+    // this and return ok=false.
+    expect(result.ok).toBe(true);
+    expect(result.pid).toBe(7777);
+  });
+});

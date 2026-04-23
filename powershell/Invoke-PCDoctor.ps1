@@ -254,7 +254,14 @@ try {
     $unexpectedShutdown = @($sysErrors | Where-Object { $_.Id -eq 41 -and $_.ProviderName -match 'Kernel-Power' })
 
     if ($bugCheckEvents.Count -gt 0 -or $minidumps.Count -gt 0) {
-        $bsodCount = [Math]::Max($bugCheckEvents.Count, $minidumps.Count)
+        # v2.4.37 (code-reviewer): use BugCheck event count as authoritative.
+        # Minidump files can accumulate from OUTSIDE the 7-day window and
+        # linger (Windows doesn't auto-purge), which overstated the count
+        # with the prior Math::Max. Minidumps remain part of the detection
+        # OR-gate (so a BSOD with no event log entry still fires), but the
+        # displayed count reflects only the events Windows recorded in the
+        # scanned window.
+        $bsodCount = if ($bugCheckEvents.Count -gt 0) { $bugCheckEvents.Count } else { $minidumps.Count }
         Add-Finding warning 'Stability' "BSOD detected in last 7 days (count: $bsodCount)" $null $false -Why "A true BSOD writes a BugCheck event (ID 1001) and a minidump file to C:\Windows\Minidump. Analyze Latest Minidump runs WinDbg's !analyze -v against those .dmp files to identify the faulting module. If the analyzer returns empty fields, WinDbg couldn't load symbols -- the raw output is still shown so Claude can interpret it."
     }
 
@@ -381,18 +388,27 @@ $pfroBenignPatterns = @(
     # bare-dir form (...\Chrome\Temp at end of entry string). Without the
     # end anchor, the bare-dir entry silently slipped past the filter and
     # kept PendingFileRename flagged even after a Clear action ran.
-    '\\\\Google\\\\Chrome\\\\Temp(?:\\\\|$)',
-    '\\\\Microsoft\\\\Edge\\\\Temp(?:\\\\|$)',
-    '\\\\Mozilla Firefox\\\\updated(?:\\\\|$)',
-    # v2.4.36 (B42): Office Click-to-Run update/backup and print-spooler
-    # V4 driver dirs queue rename-on-reboot for files that are still
-    # locked at boot, so the queue never clears. Observed on Greg's
-    # box: 17 entries surviving reboots, all matching these paths.
-    # `Clear Stale Pending Renames` mirrors the same patterns.
-    '\\\\Common Files\\\\microsoft shared\\\\ClickToRun\\\\backup(?:\\\\|$)',
-    '\\\\Common Files\\\\microsoft shared\\\\ClickToRun\\\\Updates(?:\\\\|$)',
-    '\\\\Microsoft Office\\\\Updates\\\\Apply\\\\FilesInUse(?:\\\\|$)',
-    '\\\\System32\\\\spool\\\\V4Dirs(?:\\\\|$)'
+    # v2.4.37 (critical): ALL patterns use DOUBLE backslash (`\\`), not
+    # quadruple. In a PS single-quoted string, `\\` is 2 literal chars,
+    # which .NET regex parses as ONE escape + literal backslash = matches
+    # a single `\` in input. Registry PendingFileRenameOperations strings
+    # have single backslashes between path components, so `\\` matches
+    # correctly. The previous `\\\\` form (4 literal chars → regex
+    # escape-for-\ + escape-for-\ = matches TWO consecutive backslashes)
+    # never matched ANY realistic input. Verified via
+    # `scripts/test-pfro-pattern-match.ps1`, which is now a pre-ship gate.
+    '\\Google\\Chrome\\Temp(?:\\|$)',
+    '\\Microsoft\\Edge\\Temp(?:\\|$)',
+    '\\Mozilla Firefox\\updated(?:\\|$)',
+    # Firefox staging dirs use a GUID suffix -- mirror the scrub script's
+    # pattern so scanner and scrub stay in sync.
+    '\\Mozilla Firefox\\[0-9a-f-]+(?:\\|$)',
+    # Office Click-to-Run + print-spooler V4 driver rename-on-reboot
+    # queues. Observed on Greg's box: 17 entries surviving reboots.
+    '\\Common Files\\microsoft shared\\ClickToRun\\backup(?:\\|$)',
+    '\\Common Files\\microsoft shared\\ClickToRun\\Updates(?:\\|$)',
+    '\\Microsoft Office\\Updates\\Apply\\FilesInUse(?:\\|$)',
+    '\\System32\\spool\\V4Dirs(?:\\|$)'
 )
 $pfro = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue
 if ($pfro) {
