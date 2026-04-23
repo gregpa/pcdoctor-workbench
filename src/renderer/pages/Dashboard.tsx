@@ -35,6 +35,7 @@ import type { ActionDefinition } from '@shared/actions.js';
 import { recommendAction, getTopRecommendations } from '@shared/recommendations.js';
 import type { ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
+import { logPerf } from '@renderer/lib/perfLog.js';
 
 const QUICK_ACTIONS: ActionName[] = [
   'clear_temp_files', 'flush_dns',
@@ -146,6 +147,20 @@ export function Dashboard() {
     if (r?.ok) setLastActionSuccess(r.data);
   }, []);
   useEffect(() => { refreshLastSuccess(); }, [refreshLastSuccess]);
+
+  // v2.4.38: log every Dashboard render so we can detect render storms
+  // during a resize drag once the window is unlocked in v2.4.39. One
+  // line per render, tagged with the finding count + loading state so
+  // the log is self-describing. Does NOT gate on changes -- every
+  // render emits a line, which is the point (we want to count them).
+  useEffect(() => {
+    logPerf('Dashboard.render', 0, {
+      findings: status?.findings.length ?? 0,
+      loading: loading ? 1 : 0,
+      width: typeof window !== 'undefined' ? window.innerWidth : 0,
+      height: typeof window !== 'undefined' ? window.innerHeight : 0,
+    });
+  });
   // Refresh the map whenever an action completes (useAction dispatches
   // statusRefreshed after its post-action scan finishes).
   useEffect(() => {

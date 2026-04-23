@@ -45,6 +45,7 @@ import { sendWeeklyDigestEmail } from './emailDigest.js';
 import { buildClaudeReport, type ClaudeReport } from './claudeReportExporter.js';
 import { getAutopilotActivity, evaluateRule, dispatchDecision } from './autopilotEngine.js';
 import { listAutopilotRules, suppressAutopilotRule, setAutopilotRuleEnabled, getAutopilotRule, insertAutopilotActivity } from './dataStore.js';
+import { writeRenderPerfLine } from './renderPerfLog.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
@@ -1137,4 +1138,40 @@ export function registerIpcHandlers() {
       return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to read Event Log breakdown' } };
     }
   });
+
+  // v2.4.38: renderer-side perf telemetry. Fire-and-forget; renderer
+  // uses ipcRenderer.send (not invoke) so there is no response. Every
+  // input from the renderer goes through validation before touching the
+  // filesystem to prevent log injection -- phase is clamped, duration is
+  // coerced, and extra is restricted to a flat object of primitives.
+  ipcMain.on('api:logRenderPerf', (_evt, raw: unknown) => {
+    try {
+      const sanitized = sanitizeRenderPerfInput(raw);
+      if (!sanitized) return;
+      void writeRenderPerfLine(sanitized.phase, sanitized.duration, sanitized.extra);
+    } catch { /* telemetry must never throw */ }
+  });
+}
+
+/** Pure validation helper for the api:logRenderPerf IPC payload. Exported for unit testing. */
+export function sanitizeRenderPerfInput(raw: unknown): {
+  phase: string;
+  duration: number;
+  extra: Record<string, unknown> | undefined;
+} | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const phase = typeof r.phase === 'string' ? r.phase.slice(0, 64) : 'unknown';
+  const duration = typeof r.duration_ms === 'number' && Number.isFinite(r.duration_ms) ? r.duration_ms : 0;
+  let extra: Record<string, unknown> | undefined;
+  if (r.extra && typeof r.extra === 'object' && !Array.isArray(r.extra)) {
+    const e = r.extra as Record<string, unknown>;
+    extra = {};
+    // Only keep primitive values; strip nested objects / arrays.
+    for (const [k, v] of Object.entries(e)) {
+      if (typeof v === 'string') extra[k] = v.slice(0, 256);
+      else if (typeof v === 'number' || typeof v === 'boolean') extra[k] = v;
+    }
+  }
+  return { phase, duration, extra };
 }

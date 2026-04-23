@@ -100,6 +100,14 @@ const api = {
   // v2.4.6: on-demand Event Log breakdown for the chart click-to-expand.
   getEventLogBreakdown: (opts?: { days?: number; topN?: number; level?: string }): Promise<IpcResult<any>> =>
     ipcRenderer.invoke('api:getEventLogBreakdown', opts ?? {}),
+  // v2.4.38: renderer-side perf telemetry. Fire-and-forget (no Promise) so
+  // calling sites never block on the IPC round-trip. Main process appends
+  // to C:\ProgramData\PCDoctor\logs\render-perf-YYYYMMDD.log.
+  logRenderPerf: (phase: string, durationMs: number, extra?: Record<string, string | number | boolean>): void => {
+    try {
+      ipcRenderer.send('api:logRenderPerf', { phase, duration_ms: durationMs, extra });
+    } catch { /* telemetry must never throw */ }
+  },
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

@@ -253,7 +253,11 @@ function mapToSystemStatus(r: any): SystemStatus {
       label: 'RAM Usage',
       value: m.ram_used_pct,
       display: `${m.ram_used_pct}%`,
-      subtext: `${free.toFixed(1)} / ${total.toFixed(1)} GB`,
+      // v2.4.38 (B48): subtext used to read "${free} / ${total} GB" which
+      // looked like USED/TOTAL and disagreed with the 'RAM Usage' label +
+      // gauge % (which IS used %). Show USED explicitly so the semantic
+      // matches. Greg's box: 59.9% used = 38.2 GB of 63.8 GB.
+      subtext: `${(total - free).toFixed(1)} / ${total.toFixed(1)} GB`,
       severity: ramSev,
     });
   }

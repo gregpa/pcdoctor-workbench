@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import { usePoll } from './usePoll.js';
+import { logPerf, markPerf } from '@renderer/lib/perfLog.js';
 import type { SystemStatus, IpcError } from '@shared/types.js';
 
 const POLL_INTERVAL_MS = 60_000;
@@ -40,9 +41,19 @@ export function useStatus() {
   useEffect(() => {
     const onFocus = () => {
       const now = Date.now();
-      if (now - lastFocusRefetchRef.current < REFOCUS_DEBOUNCE_MS) return;
+      // v2.4.38: log both accepted and dropped focus events so we can
+      // see focus cadence during a resize drag (once window is unlocked
+      // in v2.4.39). `dropped` is the v2.4.36 debounce behavior; we want
+      // to confirm it actually kicks in during storms, not just in tests.
+      if (now - lastFocusRefetchRef.current < REFOCUS_DEBOUNCE_MS) {
+        logPerf('useStatus.focus.dropped', 0, {
+          since_last_ms: now - lastFocusRefetchRef.current,
+        });
+        return;
+      }
       lastFocusRefetchRef.current = now;
-      void refetch();
+      const end = markPerf('useStatus.focus.refetch');
+      void refetch().finally(() => end());
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
