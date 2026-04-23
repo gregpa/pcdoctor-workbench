@@ -36,18 +36,23 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 980,
+    // v2.4.39: resize unlocked after v2.4.39 responsive layout rebuild
+    // (B45) + v2.4.38 renderer-perf instrumentation is in place.
+    // minWidth/minHeight keep the window above the threshold where
+    // panels stop fitting even with responsive stacking. If a resize
+    // freeze recurs, v2.4.38's render-perf-YYYYMMDD.log has the data
+    // to diagnose it -- re-lock as a ship-blocker while we fix.
+    resizable: true,
+    minWidth: 900,
+    minHeight: 640,
+    // v2.4.39 (code-reviewer): preserve explicit intent carried from the
+    // v2.4.37 lock -- Electron defaults both to true on Windows, but
+    // spelling it out keeps the options block self-describing.
+    maximizable: true,
+    minimizable: true,
     show: !startHidden,
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
-    // v2.4.37 (B43 ship-blocker): edge-drag resize caused >1 min UI freeze
-    // on Greg's box (cause not yet isolated; v2.4.36's focus-debounce
-    // hypothesis didn't fix it). Panel layout also breaks at narrow
-    // widths (B45). Locking the window to the design size until both are
-    // properly diagnosed + the responsive layout rebuild lands in v2.4.38.
-    // Maximize + minimize still work.
-    resizable: false,
-    maximizable: true,
-    minimizable: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.cjs'),
       contextIsolation: true,

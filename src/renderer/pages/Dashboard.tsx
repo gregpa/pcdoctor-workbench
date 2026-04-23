@@ -12,7 +12,7 @@ import { Gauge } from '@renderer/components/dashboard/Gauge.js';
 import { ActionButton } from '@renderer/components/dashboard/ActionButton.js';
 import { AlertCard } from '@renderer/components/dashboard/AlertCard.js';
 import { AlertDetailModal } from '@renderer/components/dashboard/AlertDetailModal.js';
-import type { Finding } from '@shared/types.js';
+import type { Finding, Trend } from '@shared/types.js';
 import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
 import { TrendLineModal } from '@renderer/components/dashboard/TrendLineModal.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
@@ -128,7 +128,12 @@ export function Dashboard() {
   const [scanning, setScanning] = useState(false);
   const [resultModal, setResultModal] = useState<{ action: ActionDefinition; result: Record<string, unknown> } | null>(null);
   const [showStartupPicker, setShowStartupPicker] = useState(false);
-  const [expandedTrend, setExpandedTrend] = useState<null | { title: string; unit: string; yDomain?: [number, number] }>(null);
+  // v2.4.39 (B49): state now carries the actual trend object clicked.
+  // Prior shape was `{title, unit, yDomain}` only, so the modal always
+  // rendered cpuTrend regardless of which tile was clicked (CPU Temp +
+  // GPU Temp expansions silently showed CPU Load data with a fake °C
+  // label). Threading the trend through state fixes that.
+  const [expandedTrend, setExpandedTrend] = useState<null | { title: string; trend: Trend; unit: string; yDomain?: [number, number] }>(null);
   // v2.4.13: bump after a NAS @Recycle empty so the panel re-fetches sizes.
   const [nasRefreshToken, setNasRefreshToken] = useState(0);
   // v2.4.6: Event Log chart click-to-expand. Opens a modal that fetches
@@ -294,8 +299,10 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* KPI row */}
-      <div className="grid grid-cols-6 gap-2.5 mb-3">
+      {/* KPI row -- v2.4.39 (B45) responsive:
+          <640px: 2 cols (phones/very narrow) | 640-1024: 3 cols |
+          1024+: 6 cols (original design width). */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mb-3">
         {status.kpis.slice(0, 6).map((k) => (<KpiCard key={k.label} kpi={k} />))}
       </div>
 
@@ -310,7 +317,8 @@ export function Dashboard() {
           ? status.gauges.filter(g => !g.label.toLowerCase().includes('ram')).slice(0, 2)
           : status.gauges.slice(0, 3);
         return (
-          <div className="grid grid-cols-3 gap-2.5 mb-3">
+          // v2.4.39 (B45): gauges stack vertically below md, 2-up at md, 3-up at lg.
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 mb-3">
             {gaugesToShow.map((g) => {
               // v2.4.6: click-to-expand on the CPU gauge opens the same
               // 7-day trend modal the row below uses. RAM/Disk gauges
@@ -320,8 +328,8 @@ export function Dashboard() {
               // useTrend hook that we don't have yet).
               const isCpu = g.label?.toLowerCase().includes('cpu');
               const clickable = isCpu && !!cpuTrend;
-              const onClick = clickable
-                ? () => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', unit: '%', yDomain: [0, 100] })
+              const onClick = clickable && cpuTrend
+                ? () => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', trend: cpuTrend, unit: '%', yDomain: [0, 100] })
                 : undefined;
               return (
                 <div
@@ -356,14 +364,16 @@ export function Dashboard() {
           🌡 Refresh CPU Temp (admin)
         </button>
       </div>
-      <div className="grid grid-cols-3 gap-2.5 mb-3">
+      {/* v2.4.39 (B45): trend charts need width to be legible -- stack below
+          lg rather than squeezing 3-up too narrow. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">
         {cpuTrend ? (
           <TrendLine
             title="CPU Load - 7 Day Trend"
             trend={cpuTrend}
             severity="info"
             yDomain={[0, 100]}
-            onExpand={() => setExpandedTrend({ title: 'CPU Load - 7 Day Trend', unit: '%', yDomain: [0, 100] })}
+            onExpand={() => cpuTrend && setExpandedTrend({ title: 'CPU Load - 7 Day Trend', trend: cpuTrend, unit: '%', yDomain: [0, 100] })}
           />
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering CPU load trend…</div>
@@ -374,7 +384,7 @@ export function Dashboard() {
             trend={cpuTempTrend}
             severity="info"
             yDomain={[30, 100]}
-            onExpand={() => setExpandedTrend({ title: 'CPU Temp - 7 Day Trend', unit: '°C', yDomain: [30, 100] })}
+            onExpand={() => cpuTempTrend && setExpandedTrend({ title: 'CPU Temp - 7 Day Trend', trend: cpuTempTrend, unit: '°C', yDomain: [30, 100] })}
           />
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex flex-col items-center justify-center text-text-secondary text-xs gap-2">
@@ -388,7 +398,7 @@ export function Dashboard() {
             trend={gpuTempTrend}
             severity="info"
             yDomain={[30, 100]}
-            onExpand={() => setExpandedTrend({ title: 'GPU Temp - 7 Day Trend', unit: '°C', yDomain: [30, 100] })}
+            onExpand={() => gpuTempTrend && setExpandedTrend({ title: 'GPU Temp - 7 Day Trend', trend: gpuTempTrend, unit: '°C', yDomain: [30, 100] })}
           />
         ) : (
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center justify-center text-text-secondary text-xs">Gathering GPU temp trend…</div>
@@ -433,7 +443,9 @@ export function Dashboard() {
           : 0;
 
         return (
-          <div className="grid grid-cols-2 gap-2.5 mb-3">
+          // v2.4.39 (B45): Deep Clean + Harden stack below lg so each gets
+          // full width for readability on narrow windows.
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
             {/* Deep Clean panel */}
             <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
               <div className="mb-2">
@@ -521,11 +533,14 @@ export function Dashboard() {
         );
       })()}
 
-      {/* Services + Actions + Alerts row */}
-      <div className="grid grid-cols-3 gap-2.5 mb-3">
+      {/* Services + Actions + Alerts row -- v2.4.39 (B45): stacks below lg
+          so each of the three panels has full width on narrow windows. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">
         <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Services & Processes</div>
-          <div className="grid grid-cols-3 gap-1.5">
+          {/* v2.4.39 (B45): service pills widen to 2-up on phones, 3-up at sm
+              so pill text has room to breathe instead of clipping to "S..." */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
             {(status.services ?? []).slice(0, 9).map((s) => (
               <ServicePill key={s.key} service={s} onClick={setSelectedService} />
             ))}
@@ -536,7 +551,10 @@ export function Dashboard() {
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2 flex items-center gap-1">
             <span>⚡</span><span>One-Click Actions</span>
           </div>
-          <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
+          {/* v2.4.39 (B45): reduce min-tile width from 120 -> 100 so the
+              auto-fill grid can fit more on narrow widths without
+              dropping a tile off the row entirely. */}
+          <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
             {QUICK_ACTIONS.map((name) => (
               <ActionButton key={name} action={ACTIONS[name]} onRun={(params, dryRun) => handleAction(name, params, dryRun)} disabled={running !== null} recommendation={recommendAction(name, status, security, getLastRun)} />
             ))}
@@ -567,8 +585,9 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* SMART + Event log chart + Security stub */}
-      <div className="grid grid-cols-3 gap-2.5">
+      {/* SMART + Event log chart + Security stub
+          v2.4.39 (B45): stacks below lg. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5">
         <SmartTable
           entries={status.smart ?? []}
           onRunSmartCheck={async () => {
@@ -617,7 +636,8 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2.5">
+      {/* v2.4.39 (B45): AuthEvents + BsodPanel stack below md. */}
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
         <AuthEventsWidget />
         <BsodPanel />
       </div>
@@ -706,10 +726,10 @@ export function Dashboard() {
         />
       )}
 
-      {expandedTrend && cpuTrend && (
+      {expandedTrend && (
         <TrendLineModal
           title={expandedTrend.title}
-          trend={cpuTrend}
+          trend={expandedTrend.trend}
           severity="info"
           unit={expandedTrend.unit}
           yDomain={expandedTrend.yDomain}

@@ -61,11 +61,18 @@ export function ServicePill({ service, onClick }: ServicePillProps) {
       className={`bg-surface-900 border border-surface-600 rounded-md p-2 text-left w-full ${clickable ? 'hover:border-status-info/40 cursor-pointer transition' : ''}`}
       title={clickable ? 'Click for actions' : undefined}
     >
-      <div className="flex items-center gap-1.5 mb-0.5">
-        <span className={`w-2 h-2 rounded-full ${dotColor}`}></span>
-        <span className="font-semibold text-[11px] truncate">{service.display}</span>
+      <div className="flex items-start gap-1.5 mb-0.5">
+        <span className={`w-2 h-2 rounded-full ${dotColor} flex-shrink-0 mt-1`}></span>
+        {/* v2.4.39 (B45): service display name wraps to 2 lines instead of
+            clipping to "S..." / "Wi..." on narrow tiles. Tooltip carries
+            the full name on hover for extreme cases. min-w-0 is the
+            flex-clip fix that lets break-words actually take effect on
+            long compound identifiers like "DockerDesktopGUI". */}
+        <span className="font-semibold text-[11px] break-words leading-tight min-w-0" title={service.display}>
+          {service.display}
+        </span>
       </div>
-      <div className="text-[9.5px] text-text-secondary pl-3.5">
+      <div className="text-[9.5px] text-text-secondary pl-3.5 break-words min-w-0">
         {service.status}{service.start ? ` · ${service.start}` : ''}
       </div>
     </Wrapper>

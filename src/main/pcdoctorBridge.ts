@@ -223,7 +223,11 @@ function mapToSystemStatus(r: any): SystemStatus {
       value: m.cpu_load_pct,
       unit: '%',
       severity: cpuSev,
-      sub: 'Note: temps require HWiNFO import',
+      // v2.4.39 (B50): removed stale "temps require HWiNFO import" note.
+      // Temps now come from LHM HTTP / nvidia-smi / SMART cache / MSAcpi
+      // (see src/renderer/pages/Dashboard.tsx 7-day trends row). The note
+      // was a pre-v2.4.29 leftover AND lived on the wrong card (Load, not
+      // temp). Leaving `sub` undefined is fine -- KpiCard tolerates.
       delta: computeDelta(m.cpu_load_pct, cpuDelta.week_ago, 'up'),
     });
     gauges.push({
