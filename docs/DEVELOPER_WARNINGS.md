@@ -292,6 +292,90 @@ any machine that experiences occasional power hiccups.
 block that locks in positive + three negative cases. If you ever see that
 block go red, **the regex has been loosened** -- re-tighten it.
 
+## 9. spawn() errors fire ASYNCHRONOUSLY on Windows — wrap in a Promise
+
+### The bug (v2.4.33 → v2.4.36)
+
+v2.4.33 tried to catch EACCES on winget per-user scoop installs
+(`%LOCALAPPDATA%\Microsoft\WinGet\Packages\...`) with a synchronous
+try/catch around `spawn()`:
+
+```typescript
+try {
+  const child = spawn(status.resolved_path, mode.args, { detached: true, stdio: 'ignore' });
+  child.unref();
+  return { ok: true, pid: child.pid };
+} catch (e: any) {
+  if (e?.code === 'EACCES') { /* fall back to shell.openPath */ }
+}
+```
+
+On Windows, `spawn()` almost never throws synchronously. The EACCES
+error (Mark-of-the-Web on a downloaded exe) fires via
+`child.on('error', ...)` OR propagates through
+`ChildProcess._handle.onexit`. The sync try/catch never sees it. The
+error bubbles to Electron's default uncaughtException handler and the
+user gets **"A JavaScript error occurred in the main process. Error:
+spawn ... EACCES"** as a modal dialog.
+
+Greg reproduced this reliably clicking Tools → LibreHardwareMonitor →
+Launch on v2.4.32 and v2.4.33.
+
+### The fix (v2.4.36)
+
+Wrap the spawn in a Promise that settles on exactly one of three paths:
+
+```typescript
+const result = await new Promise<{ok: boolean; pid?: number; error?: string; code?: string}>((resolve) => {
+  let settled = false;
+  const settle = (v) => { if (!settled) { settled = true; resolve(v); } };
+  let child: ChildProcess;
+  try {
+    child = spawn(path, args, options);
+  } catch (e: any) {
+    settle({ ok: false, error: e?.message, code: e?.code });
+    return;
+  }
+  child.once('error', (err) => settle({ ok: false, error: err.message, code: err.code }));
+  child.once('spawn', () => { child.unref(); settle({ ok: true, pid: child.pid }); });
+  setTimeout(() => { if (!settled) { child.unref(); settle({ ok: true, pid: child.pid }); } }, 500);
+});
+```
+
+Key points:
+
+- **`settled` guard**: prevents double-resolve when both `error` and
+  `spawn` arrive, or when the 500ms timeout fires alongside an event.
+- **500ms timeout as success**: detached GUI launches on slow boxes
+  sometimes don't emit `spawn` promptly. After 500ms with no `error`,
+  assume the process started (matches pre-v2.4.33 behavior where we
+  called `unref()` and returned ok immediately after `spawn()`).
+- **Fallback decision happens post-Promise**: `shell.openPath` (Electron)
+  routes through `ShellExecuteW`, which handles MoTW + SmartScreen +
+  user-scope execution correctly. Only engage fallback when args.length
+  === 0 (shell.openPath can't pass args) AND code is EACCES/UNKNOWN.
+
+### Rules
+
+- **Never** trust a sync try/catch around `spawn()` on Windows to catch
+  runtime spawn failures. Wrap in a Promise, listen for `error` and
+  `spawn` events, add a safety-net timeout.
+- **Never** call `child.unref()` before `spawn` has fired — `pid` may
+  be undefined, and on EACCES there's nothing to unref (unref would
+  throw, then THAT throw bubbles up).
+- The `settled` guard is load-bearing. Don't remove it thinking "only
+  one of the three paths will fire" — the 500ms timeout fires
+  independently of whether the child process is still alive, and it
+  can race with a delayed `error` event.
+
+### Regression coverage
+
+`tests/main/toolLauncher.test.ts` has a
+`describe('launchTool async EACCES handling (v2.4.36)')` block with 6
+cases: async EACCES fallback, async UNKNOWN fallback, non-EACCES error
+returns error, args-present skips fallback, shell.openPath failure
+surfaces, sync EACCES with code falls back.
+
 ## References
 
 - [`scripts/installer.nsh`](../scripts/installer.nsh) — the NSIS install hook

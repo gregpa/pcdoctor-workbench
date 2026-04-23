@@ -167,4 +167,54 @@ describe('useStatus', () => {
 
     expect(mockGetStatus.mock.calls.length).toBe(callsBeforeUnmount);
   });
+
+  /**
+   * v2.4.36 (B43) regression: Electron emits window.focus events repeatedly
+   * during a resize drag. Pre-v2.4.36 each event triggered a full getStatus
+   * refetch (file read + SQLite write + notifier diff), producing a >1 min
+   * UI freeze. A leading-edge debounce collapses storms into one refetch.
+   */
+  it('debounces focus storms to one refetch per 500ms window', async () => {
+    mockGetStatus.mockResolvedValue({ ok: true, data: makeStatus() });
+
+    const { result } = renderHook(() => useStatus());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const baseline = mockGetStatus.mock.calls.length;
+
+    // Fire 20 focus events back-to-back (simulating resize drag spam).
+    await act(async () => {
+      for (let i = 0; i < 20; i++) {
+        window.dispatchEvent(new Event('focus'));
+      }
+      await new Promise(r => setTimeout(r, 10));
+    });
+
+    // Leading edge: first focus in the cluster is allowed through.
+    // All 19 that follow within the 500ms debounce window are dropped.
+    expect(mockGetStatus.mock.calls.length).toBe(baseline + 1);
+  });
+
+  it('allows a fresh refetch once the debounce window has elapsed', async () => {
+    mockGetStatus.mockResolvedValue({ ok: true, data: makeStatus() });
+
+    const { result } = renderHook(() => useStatus());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const baseline = mockGetStatus.mock.calls.length;
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await new Promise(r => setTimeout(r, 10));
+    });
+    expect(mockGetStatus.mock.calls.length).toBe(baseline + 1);
+
+    // Wait > 500ms, then fire another focus — should go through.
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 600));
+      window.dispatchEvent(new Event('focus'));
+      await new Promise(r => setTimeout(r, 10));
+    });
+    expect(mockGetStatus.mock.calls.length).toBe(baseline + 2);
+  });
 });

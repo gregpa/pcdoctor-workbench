@@ -383,7 +383,16 @@ $pfroBenignPatterns = @(
     # kept PendingFileRename flagged even after a Clear action ran.
     '\\\\Google\\\\Chrome\\\\Temp(?:\\\\|$)',
     '\\\\Microsoft\\\\Edge\\\\Temp(?:\\\\|$)',
-    '\\\\Mozilla Firefox\\\\updated(?:\\\\|$)'
+    '\\\\Mozilla Firefox\\\\updated(?:\\\\|$)',
+    # v2.4.36 (B42): Office Click-to-Run update/backup and print-spooler
+    # V4 driver dirs queue rename-on-reboot for files that are still
+    # locked at boot, so the queue never clears. Observed on Greg's
+    # box: 17 entries surviving reboots, all matching these paths.
+    # `Clear Stale Pending Renames` mirrors the same patterns.
+    '\\\\Common Files\\\\microsoft shared\\\\ClickToRun\\\\backup(?:\\\\|$)',
+    '\\\\Common Files\\\\microsoft shared\\\\ClickToRun\\\\Updates(?:\\\\|$)',
+    '\\\\Microsoft Office\\\\Updates\\\\Apply\\\\FilesInUse(?:\\\\|$)',
+    '\\\\System32\\\\spool\\\\V4Dirs(?:\\\\|$)'
 )
 $pfro = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue
 if ($pfro) {

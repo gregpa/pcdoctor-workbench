@@ -72,7 +72,17 @@ $benignPatterns = @(
     '\\Mozilla Firefox\\updated(?:\\|$)',
     '\\Mozilla Firefox\\[0-9a-f-]+(?:\\|$)',
     'gamingservicesproxy_e\.dll',
-    'gamingservices_e\.dll'
+    'gamingservices_e\.dll',
+    # v2.4.36 (B42): Office Click-to-Run backup/staging dirs re-queue
+    # rename-on-reboot entries every update when files are read-locked
+    # at boot. Observed on Greg's box: 17 entries survived a reboot, all
+    # pointing at \ClickToRun\backup\<guid>\*.dll plus \Office\Updates\Apply\FilesInUse\*.
+    '\\Common Files\\microsoft shared\\ClickToRun\\backup(?:\\|$)',
+    '\\Common Files\\microsoft shared\\ClickToRun\\Updates(?:\\|$)',
+    '\\Microsoft Office\\Updates\\Apply\\FilesInUse(?:\\|$)',
+    # v2.4.36 (B42): Print spooler V4 driver swap. Spooler locks the
+    # driver folder so the rename never completes on reboot.
+    '\\System32\\spool\\V4Dirs(?:\\|$)'
 )
 
 $raw = $null

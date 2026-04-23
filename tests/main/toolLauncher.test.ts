@@ -10,9 +10,14 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, spawnSync: vi.fn(), spawn: vi.fn() };
 });
+// v2.4.36: mock electron.shell.openPath for the async EACCES fallback tests.
+vi.mock('electron', () => ({
+  shell: { openPath: vi.fn() },
+}));
 
 import { existsSync } from 'node:fs';
 import { spawnSync, spawn } from 'node:child_process';
+import { shell } from 'electron';
 import { getToolStatus, launchTool } from '../../src/main/toolLauncher.js';
 import { TOOLS } from '../../src/shared/tools.js';
 
@@ -153,7 +158,12 @@ describe('launchTool', () => {
       p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
     );
     const child = makeFakeChild(1234);
-    (spawn as any).mockReturnValue(child);
+    // v2.4.36: launchTool now awaits the child's 'spawn' event. Emit it
+    // on next tick so the wrapping Promise settles to ok=true.
+    (spawn as any).mockImplementation(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
 
     const result = await launchTool('occt', 'default');
 
@@ -168,7 +178,9 @@ describe('launchTool', () => {
     const msixTool = Object.values(TOOLS).find((t: any) => t.msix_app_id) as any;
     if (!msixTool) return; // skip if catalog has no MSIX tools
 
-    // All FS checks return true so isMsixInstalled fast-paths to installed
+    // All FS checks return true so isMsixInstalled fast-paths to installed.
+    // The MSIX branch still uses the pre-v2.4.36 sync spawn+unref pattern
+    // (not the new Promise path), so mockReturnValue still works for it.
     (existsSync as any).mockReturnValue(true);
     const child = makeFakeChild(5555);
     (spawn as any).mockReturnValue(child);
@@ -181,7 +193,7 @@ describe('launchTool', () => {
     expect(spawnCall[1][0]).toContain('shell:AppsFolder\\');
   });
 
-  it('returns ok=false and error message when spawn throws', async () => {
+  it('returns ok=false and error message when spawn throws synchronously', async () => {
     (existsSync as any).mockImplementation((p: string) =>
       p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
     );
@@ -190,5 +202,135 @@ describe('launchTool', () => {
     const result = await launchTool('occt', 'default');
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/EACCES/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.4.36 (B44) regression guard: async spawn EACCES + shell.openPath fallback
+// ---------------------------------------------------------------------------
+
+describe('launchTool async EACCES handling (v2.4.36)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('falls back to shell.openPath when spawn emits async EACCES (args empty)', async () => {
+    // OCCT's default mode has args: [] -- eligible for the fallback.
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    const child = makeFakeChild(1234);
+    (spawn as any).mockImplementation(() => {
+      queueMicrotask(() => {
+        const err: any = new Error('spawn EACCES');
+        err.code = 'EACCES';
+        child.emit('error', err);
+      });
+      return child;
+    });
+    (shell.openPath as any).mockResolvedValueOnce(''); // '' = success
+
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(true);
+    expect(shell.openPath).toHaveBeenCalledWith('C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe');
+  });
+
+  it('falls back to shell.openPath on async UNKNOWN error (args empty)', async () => {
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    const child = makeFakeChild(1234);
+    (spawn as any).mockImplementation(() => {
+      queueMicrotask(() => {
+        const err: any = new Error('spawn UNKNOWN');
+        err.code = 'UNKNOWN';
+        child.emit('error', err);
+      });
+      return child;
+    });
+    (shell.openPath as any).mockResolvedValueOnce('');
+
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns ok=false when spawn emits async error with non-EACCES code', async () => {
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    const child = makeFakeChild(1234);
+    (spawn as any).mockImplementation(() => {
+      queueMicrotask(() => {
+        const err: any = new Error('ENOENT');
+        err.code = 'ENOENT';
+        child.emit('error', err);
+      });
+      return child;
+    });
+
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/ENOENT/);
+    expect(shell.openPath).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fall back to shell.openPath when launch mode has CLI args', async () => {
+    // hwinfo64's default mode has args: ['-so'] -- shell.openPath can't
+    // pass args so we must surface the error instead of dropping them.
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\Program Files\\HWiNFO64\\HWiNFO64.exe'
+    );
+    const child = makeFakeChild(1234);
+    (spawn as any).mockImplementation(() => {
+      queueMicrotask(() => {
+        const err: any = new Error('spawn EACCES');
+        err.code = 'EACCES';
+        child.emit('error', err);
+      });
+      return child;
+    });
+
+    const result = await launchTool('hwinfo64', 'gui');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/EACCES/);
+    expect(shell.openPath).not.toHaveBeenCalled();
+  });
+
+  it('surfaces shell.openPath failure message when fallback itself fails', async () => {
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    const child = makeFakeChild(1234);
+    (spawn as any).mockImplementation(() => {
+      queueMicrotask(() => {
+        const err: any = new Error('spawn EACCES');
+        err.code = 'EACCES';
+        child.emit('error', err);
+      });
+      return child;
+    });
+    (shell.openPath as any).mockResolvedValueOnce('Access is denied.');
+
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/shell\.openPath failed: Access is denied/);
+  });
+
+  it('sync-throw EACCES with code falls back to shell.openPath', async () => {
+    // Pre-spawn sync throw (rare but possible) with code=EACCES should
+    // engage the same fallback as the async path.
+    (existsSync as any).mockImplementation((p: string) =>
+      p === 'C:\\ProgramData\\PCDoctor\\tools\\OCCT\\OCCT.exe'
+    );
+    (spawn as any).mockImplementation(() => {
+      const err: any = new Error('spawn EACCES');
+      err.code = 'EACCES';
+      throw err;
+    });
+    (shell.openPath as any).mockResolvedValueOnce('');
+
+    const result = await launchTool('occt', 'default');
+    expect(result.ok).toBe(true);
+    expect(shell.openPath).toHaveBeenCalled();
   });
 });

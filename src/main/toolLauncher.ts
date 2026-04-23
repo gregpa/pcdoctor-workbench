@@ -110,33 +110,68 @@ export async function launchTool(toolId: string, modeId: string): Promise<{ ok: 
   if (!status.installed || !status.resolved_path) {
     return { ok: false, error: `Tool not installed: ${def.name}` };
   }
-  try {
-    const child = spawn(status.resolved_path, mode.args, {
-      detached: mode.detached ?? true,
-      stdio: 'ignore',
-      windowsHide: false,
-    });
-    child.unref();
-    return { ok: true, pid: child.pid };
-  } catch (e: any) {
-    // v2.4.33: winget's per-user scoop installs (e.g. LibreHardwareMonitor
-    // under %LOCALAPPDATA%\Microsoft\WinGet\Packages\...) have Mark-of-the-
-    // Web attributes that cause CreateProcessW (what spawn uses) to return
-    // EACCES. shell.openPath routes through ShellExecuteW which handles
-    // MoTW + SmartScreen + user-scope execution correctly. Arguments are
-    // dropped - acceptable because the EACCES tools are all GUI launches
-    // that don't rely on CLI args for the primary launch mode.
-    if (mode.args.length === 0 && (e?.code === 'EACCES' || e?.code === 'UNKNOWN')) {
-      try {
-        const errMsg = await shell.openPath(status.resolved_path);
-        if (!errMsg) return { ok: true };
-        return { ok: false, error: `shell.openPath failed: ${errMsg}` };
-      } catch (e2: any) {
-        return { ok: false, error: e2?.message ?? 'Shell launch failed' };
-      }
+
+  // v2.4.36 (B44): the EACCES error on winget per-user scoop installs
+  // (e.g. LibreHardwareMonitor under %LOCALAPPDATA%\Microsoft\WinGet\
+  // Packages\...) fires ASYNCHRONOUSLY via the child's 'error' event --
+  // ChildProcess._handle.onexit -- not synchronously from spawn(). The
+  // v2.4.33 sync try/catch missed that entire code path, so the error
+  // bubbled to Electron's uncaughtException handler as a JS error dialog.
+  // Wrap spawn in a Promise that settles on 'error' / 'spawn' / 500ms
+  // timeout so every outcome is caught exactly once.
+  const result = await new Promise<{ ok: boolean; pid?: number; error?: string; code?: string }>((resolve) => {
+    let settled = false;
+    const settle = (v: { ok: boolean; pid?: number; error?: string; code?: string }) => {
+      if (settled) return;
+      settled = true;
+      resolve(v);
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(status.resolved_path!, mode.args, {
+        detached: mode.detached ?? true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+    } catch (e: any) {
+      // Sync throw path (rare on Windows; covers pre-spawn arg validation).
+      settle({ ok: false, error: e?.message ?? 'Launch failed', code: e?.code });
+      return;
     }
-    return { ok: false, error: e?.message ?? 'Launch failed' };
+    child.once('error', (err: NodeJS.ErrnoException) => {
+      settle({ ok: false, error: err.message, code: err.code });
+    });
+    child.once('spawn', () => {
+      child.unref();
+      settle({ ok: true, pid: child.pid });
+    });
+    // Safety net: detached GUI launches sometimes don't emit 'spawn'
+    // promptly on slow systems. After 500ms with no 'error', assume the
+    // process started successfully (matches pre-v2.4.36 behavior where
+    // we called unref() and returned ok immediately after spawn()).
+    setTimeout(() => {
+      if (settled) return;
+      try { child.unref(); } catch { /* child already gone */ }
+      settle({ ok: true, pid: child.pid });
+    }, 500);
+  });
+
+  if (result.ok) return { ok: true, pid: result.pid };
+
+  // shell.openPath routes through ShellExecuteW which handles MoTW +
+  // SmartScreen + user-scope execution correctly. Arguments are dropped
+  // for the fallback -- acceptable because the EACCES tools are all GUI
+  // launches whose primary mode carries no CLI args.
+  if (mode.args.length === 0 && (result.code === 'EACCES' || result.code === 'UNKNOWN')) {
+    try {
+      const errMsg = await shell.openPath(status.resolved_path);
+      if (!errMsg) return { ok: true };
+      return { ok: false, error: `shell.openPath failed: ${errMsg}` };
+    } catch (e2: any) {
+      return { ok: false, error: e2?.message ?? 'Shell launch failed' };
+    }
   }
+  return { ok: false, error: result.error ?? 'Launch failed' };
 }
 
 export async function installToolViaWinget(toolId: string): Promise<{ ok: boolean; error?: string }> {
