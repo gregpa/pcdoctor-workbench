@@ -741,12 +741,18 @@ export function insertAutopilotActivity(row: {
   duration_ms?: number;
   message?: string;
   details?: unknown;
+  // v2.4.45: optional timestamp override. autopilotLogIngestor passes the
+  // actual scheduled-task run time (parsed from the JSON log line) so the
+  // Autopilot UI's LAST RUN column reflects when the task fired, not when
+  // the ingestor happened to see the line. Defaults to Date.now() for all
+  // in-process callers (actionRunner, autopilotEngine).
+  ts?: number;
 }): number {
   const info = openDb().prepare(
     `INSERT INTO autopilot_activity (ts, rule_id, tier, action_name, outcome, bytes_freed, duration_ms, message, details_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    Date.now(),
+    row.ts ?? Date.now(),
     row.rule_id,
     row.tier,
     row.action_name ?? null,

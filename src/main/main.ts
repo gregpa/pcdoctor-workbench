@@ -24,6 +24,7 @@ import { flushBufferedNotifications, getDigestHour } from './notifier.js';
 import { initAutoUpdater, checkForUpdates } from './autoUpdater.js';
 import { registerPtyIpc, killAllPtySessions } from './ptyBridge.js';
 import { startAutopilotEngine, stopAutopilotEngine, getAutopilotActivity } from './autopilotEngine.js';
+import { startAutopilotLogIngestor, stopAutopilotLogIngestor } from './autopilotLogIngestor.js';
 import { suppressAutopilotRule, insertAutopilotActivity } from './dataStore.js';
 
 // Hide dock icon / single-instance check
@@ -196,18 +197,23 @@ app.whenReady().then(() => {
   // v2.3.0 B2: on the first launch of 2.3.0, force-recreate existing tasks so
   // the user/SYSTEM context split applies. This rewrites /RU for tasks that
   // used to run as SYSTEM and need to read HKCU.
+  // v2.4.45: bumped to force-recreate so the 11 Autopilot tasks swap their
+  // inline action-script invocation for the Run-AutopilotScheduled.ps1
+  // dispatcher wrapper. Without this, upgrading installs keep their
+  // v2.4.44 task definitions and their LAST RUN column stays blank.
   (async () => {
     try {
       const { runPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
+      const TASK_MIGRATION_VERSION = '2.4.45';
       const lastMigration = getSetting('last_task_migration_version');
       const args = ['-JsonOutput'];
-      if (lastMigration !== '2.3.0') {
+      if (lastMigration !== TASK_MIGRATION_VERSION) {
         args.push('-ForceRecreate');
       }
       await runPowerShellScript('Register-All-Tasks.ps1', args, { timeoutMs: 60_000 });
-      if (lastMigration !== '2.3.0') {
-        setSetting('last_task_migration_version', '2.3.0');
+      if (lastMigration !== TASK_MIGRATION_VERSION) {
+        setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);
       }
     } catch { /* non-fatal */ }
   })();
@@ -373,11 +379,17 @@ app.whenReady().then(() => {
   createWindow();
   createTray({
     getWindow: () => mainWindow,
-    onQuit: () => {
+    onQuit: async () => {
       (app as any).isQuitting = true;
       if (pollTimer) clearInterval(pollTimer);
       stopTelegramPolling();
       stopAutopilotEngine();
+      // v2.4.45 (code-reviewer W3): await the ingestor's in-flight drain
+      // so timer-triggered ingestOnce() can't touch better-sqlite3 after
+      // the app process starts tearing down. Bounded -- the drain is
+      // sub-second on healthy disks and the whole ingestOnce already
+      // swallows internal errors.
+      await stopAutopilotLogIngestor();
       killAllPtySessions();
       app.quit();
     },
@@ -398,6 +410,8 @@ app.whenReady().then(() => {
   // Start Telegram callback polling
   startClaudeBridgeWatcher(() => mainWindow);
   startAutopilotEngine();
+  // v2.4.45: tail autopilot-scheduled-YYYYMMDD.log into autopilot_activity.
+  startAutopilotLogIngestor();
 
   startTelegramPolling(async (q) => {
     if (!q.data) { await answerCallbackQuery(q.id, 'Invalid request'); return; }
