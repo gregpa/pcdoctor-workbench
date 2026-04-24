@@ -1,4 +1,6 @@
-import { readFile, appendFile, mkdir } from 'node:fs/promises';
+import { readFile, appendFile, mkdir, copyFile, unlink } from 'node:fs/promises';
+import os from 'node:os';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { LATEST_JSON_PATH } from './constants.js';
 import { recordStatusSnapshot, getMetricWeekDelta } from './dataStore.js';
@@ -148,24 +150,85 @@ let _statusCache: { ts: number; status: SystemStatus } | null = null;
 let _getStatusInFlight: Promise<SystemStatus> | null = null;
 
 /**
- * readFile with a hard timeout. Uses AbortSignal so a stuck syscall
- * actually cancels (vs Promise.race which leaves the syscall hanging).
+ * v2.4.43: copyFile-then-read with Promise.race timeout.
+ *
+ * Why NOT AbortSignal (what v2.4.40 did):
+ *   Node's `fs.readFile({ signal })` cannot cancel a syscall blocked at
+ *   Windows CreateFileW waiting for a share-mode lock. Confirmed in Node
+ *   docs ("does not abort individual operating system requests") and
+ *   libuv source (uv_cancel only cancels queued, not running, tasks).
+ *   Greg's perf log captured 64-74s blocked reads when the configured
+ *   timeout was 3000ms -- abort was ignored because the threadpool
+ *   worker was already inside the OS syscall.
+ *
+ * Why Promise.race alone isn't enough:
+ *   The background readFile keeps occupying a libuv threadpool slot
+ *   until the OS finally releases the lock. Default pool = 4 threads.
+ *   Repeated lock events starve the pool -- every main-process fs
+ *   operation queues behind the stuck reads.
+ *
+ * Why copyFile-then-read:
+ *   CopyFileW also respects share modes, BUT Windows Defender's scan
+ *   window on small JSONs is sub-second (empirical, per
+ *   write-file-atomic experience). The big blockers -- producer writers
+ *   holding an exclusive lock during a multi-chunk Copy-Item -- are
+ *   eliminated by the matching atomic-rename change in
+ *   Invoke-PCDoctor.ps1 (v2.4.43 producer fix). What remains is brief
+ *   Defender windows that copyFile usually clears in milliseconds.
+ *   If copyFile still blocks, Promise.race unblocks the CALLER, the
+ *   background copyFile eventually settles and cleans up its own temp.
+ *   No indefinite threadpool starvation because copyFile is short-lived
+ *   by assumption (Defender window, not a long exclusive write).
+ *
+ * Also: UV_THREADPOOL_SIZE is bumped to 8 in main.ts as defense in depth.
  */
 async function readFileWithTimeout(filePath: string, timeoutMs: number): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await readFile(filePath, { encoding: 'utf8', signal: controller.signal });
-  } catch (e: any) {
-    if (e?.name === 'AbortError' || e?.code === 'ABORT_ERR') {
-      throw Object.assign(
-        new Error(`readFile timed out after ${timeoutMs}ms: ${filePath}`),
+  const tmp = path.join(os.tmpdir(), `pcd-latest-${crypto.randomUUID()}.json`);
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(Object.assign(
+        new Error(`readFile timed out after ${timeoutMs}ms via copyFile: ${filePath}`),
         { code: 'E_BRIDGE_READ_TIMEOUT' },
-      );
-    }
-    throw e;
+      ));
+    }, timeoutMs);
+  });
+
+  // v2.4.43 (code-reviewer Warning 1 fix): DO NOT chain cleanup onto
+  // copyPromise.finally. That pattern fires `unlink` in the SAME microtask
+  // that copyPromise settles, which means when copyFile resolves the
+  // scheduled unlink races the subsequent `await readFile(tmp)` on the
+  // libuv threadpool. Under load the unlink can win, producing sporadic
+  // ENOENT on a successful copy.
+  //
+  // Correct pattern: run unlink in the OUTER finally (after readFile has
+  // already returned). AND register a secondary late-cleanup on copyPromise
+  // to catch the timeout-lost path where copyFile eventually creates the
+  // temp after the race. Both unlinks are idempotent -- ENOENT is swallowed.
+  const copyPromise = copyFile(filePath, tmp);
+  // Swallow rejection on copyPromise if it loses the race, to avoid Node's
+  // unhandledRejection warning. The try/catch in the outer await handles
+  // rejection when copyPromise wins or ties the race.
+  copyPromise.catch(() => { /* handled by Promise.race */ });
+
+  try {
+    await Promise.race([copyPromise, timeoutPromise]);
+    // copyFile won the race -- temp is readable, fresh, locally-owned, no
+    // share-mode contention. Reading it is instant.
+    return await readFile(tmp, 'utf8');
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
+    // Primary cleanup: runs AFTER readFile has returned (if we got that far).
+    // Runs AFTER timeout rejection (no readFile in flight).
+    // If temp doesn't exist (copyFile hadn't opened it yet on timeout),
+    // ENOENT is swallowed.
+    unlink(tmp).catch(() => { /* temp already gone */ });
+    // Secondary late cleanup: if copyPromise was still pending when we hit
+    // the finally (timeout path) and eventually settles, it may have created
+    // the temp after our first unlink. This catches that orphan.
+    copyPromise
+      .catch(() => { /* already handled */ })
+      .finally(() => { unlink(tmp).catch(() => { /* already gone */ }); });
   }
 }
 

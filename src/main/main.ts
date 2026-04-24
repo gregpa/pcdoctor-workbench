@@ -1,3 +1,13 @@
+// v2.4.43 (expert review): bump libuv threadpool from default 4 -> 8 BEFORE
+// any import that might touch libuv (fs, dns, crypto). Defense in depth
+// against threadpool starvation if a background copyFile / readFile blocks
+// on a Windows share-mode lock. With only 4 threads, 4 stuck ops block all
+// subsequent fs I/O in the main process; 8 gives headroom for transient
+// Defender / OneDrive locks without user-visible stalls.
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = '8';
+}
+
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { access, constants as fsConstants } from 'node:fs/promises';

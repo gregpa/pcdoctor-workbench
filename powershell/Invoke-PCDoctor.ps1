@@ -1107,11 +1107,23 @@ if ($report.actions.Count) {
 
 $md -join "`n" | Out-File -FilePath $mdPath -Encoding UTF8
 
-# Maintain "latest" alias for quick access by the skill
+# v2.4.43: write latest.json + latest.md atomically via tmp + rename.
+# Prior `Copy-Item -Force` opened the destination file for writing while
+# streaming contents, which on Windows held a share-mode lock that
+# blocked readers (observed in perf log: 64-74 second blocked reads on
+# the Electron main-process side when this write ran concurrent with a
+# getStatus poll). NTFS Move-Item -Force = MoveFileExW with REPLACE_
+# EXISTING = atomic swap. Readers see either old content OR new
+# content, never an in-progress locked file.
 $latestLink = Join-Path $OutDir 'latest.json'
-Copy-Item -Path $jsonPath -Destination $latestLink -Force
-$latestMd = Join-Path $OutDir 'latest.md'
-Copy-Item -Path $mdPath -Destination $latestMd -Force
+$latestTmp  = "$latestLink.tmp"
+Copy-Item -Path $jsonPath -Destination $latestTmp -Force
+Move-Item -LiteralPath $latestTmp -Destination $latestLink -Force
+
+$latestMd    = Join-Path $OutDir 'latest.md'
+$latestMdTmp = "$latestMd.tmp"
+Copy-Item -Path $mdPath -Destination $latestMdTmp -Force
+Move-Item -LiteralPath $latestMdTmp -Destination $latestMd -Force
 
 # Event log emit: severity-mapped entry so the run is visible in Event Viewer
 $evtLevel  = switch ($report.summary.overall) {

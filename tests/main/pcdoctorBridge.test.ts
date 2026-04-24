@@ -5,11 +5,21 @@ import { readFile as realReadFile } from 'node:fs/promises';
 
 vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-  return { ...actual, readFile: vi.fn(actual.readFile) };
+  return {
+    ...actual,
+    readFile: vi.fn(actual.readFile),
+    // v2.4.43: copyFile is now on the hot path for getStatus (copy-first,
+    // read-temp). Default to a no-op that resolves immediately; tests
+    // that need to simulate a lock override via mockImplementation.
+    // readFile is then mocked per-test to return the fixture, bypassing
+    // the temp file path -- we only care about the outer contract.
+    copyFile: vi.fn(async () => undefined),
+    unlink: vi.fn(async () => { /* best-effort cleanup */ }),
+  };
 });
 
 // Import AFTER vi.mock so the module under test sees the mocked readFile.
-import { readFile } from 'node:fs/promises';
+import { readFile, copyFile } from 'node:fs/promises';
 import { getStatus, mapAreaToAction, _resetStatusCacheForTests } from '../../src/main/pcdoctorBridge.js';
 
 // Resolve fixture path without relying on __dirname (ESM-safe)
@@ -24,6 +34,9 @@ describe('pcdoctorBridge.getStatus', () => {
     // implementation set by `vi.fn(actual.readFile)`, which breaks
     // realReadFile() at the top of each test (would return undefined).
     (readFile as any).mockClear();
+    // v2.4.43: copyFile is now on the hot path. Clear between tests so
+    // call counts / mock setups don't bleed through.
+    (copyFile as any).mockClear();
   });
 
   it('maps real latest.json schema to SystemStatus', async () => {
@@ -109,64 +122,63 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     expect((readFile as any)).toHaveBeenCalledTimes(1);
   });
 
-  it('concurrent callers share a single in-flight readFile (single-flight)', async () => {
+  it('concurrent callers share a single in-flight copyFile (single-flight)', async () => {
     const fixture = await realReadFile(fixturePath, 'utf8');
     (readFile as any).mockClear();
-    // Delay the read so two callers pile up while the first is pending.
-    let resolveRead: (v: string) => void = () => {};
-    (readFile as any).mockReturnValueOnce(new Promise<string>((resolve) => {
-      resolveRead = resolve;
+    (copyFile as any).mockClear();
+    // v2.4.43: copyFile is now the blocking op (source -> temp). Hold it
+    // open so callers B and C pile up on the in-flight Promise.
+    let resolveCopy: () => void = () => {};
+    (copyFile as any).mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolveCopy = () => resolve(undefined);
     }));
+    // The subsequent readFile (reading the local temp) will hit the
+    // default mock after copy resolves -- return fixture there.
+    (readFile as any).mockResolvedValue(fixture);
 
     const pA = getStatus();
     const pB = getStatus();
     const pC = getStatus();
 
-    // All three should be waiting on the single in-flight read.
-    expect((readFile as any)).toHaveBeenCalledTimes(1);
+    // Flush the microtask queue so getStatusInner reaches its copyFile call.
+    await Promise.resolve();
+    await Promise.resolve();
 
-    resolveRead(fixture);
+    // All three should be waiting on the single in-flight copy.
+    expect((copyFile as any)).toHaveBeenCalledTimes(1);
+
+    resolveCopy();
     const [a, b, c] = await Promise.all([pA, pB, pC]);
     // All three resolve to the same data.
     expect(a.host).toBe('ALIENWARE-R11');
     expect(b).toEqual(a);
     expect(c).toEqual(a);
+    // readFile called exactly once -- reading the shared temp.
+    expect((readFile as any)).toHaveBeenCalledTimes(1);
   });
 
-  it('times out readFile after 3s and falls back to cached last-good status', async () => {
+  it('times out copyFile after 3s and falls back to cached last-good status', async () => {
     const fixture = await realReadFile(fixturePath, 'utf8');
 
-    // Seed the cache with a successful first call.
+    // Seed the cache with a successful first call (copyFile default no-op +
+    // mocked readFile returning fixture).
     (readFile as any).mockResolvedValueOnce(fixture);
     const first = await getStatus();
     expect(first.host).toBe('ALIENWARE-R11');
 
-    // Force cache miss by sleeping past 2s ... but that's slow. Instead
-    // reset the IN-FLIGHT Promise only; keep the cache alive for fallback.
-    // Actually cleaner: reach past the 2s window via fake timers, so the
-    // next call goes through readFile which we simulate as stuck.
+    // Advance past the 2s cache window to force a fresh fetch.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    // Advance Date.now() past STATUS_CACHE_MS (2000) to force fresh fetch.
     vi.setSystemTime(Date.now() + 3_000);
 
-    // Next readFile: never resolves (simulates file lock). AbortController
-    // inside readFileWithTimeout should abort after 3s, triggering the
-    // cache fallback.
-    (readFile as any).mockImplementationOnce((_path: string, opts: any) => {
-      return new Promise<string>((_resolve, reject) => {
-        if (opts?.signal) {
-          opts.signal.addEventListener('abort', () => {
-            const err: any = new Error('aborted');
-            err.name = 'AbortError';
-            err.code = 'ABORT_ERR';
-            reject(err);
-          });
-        }
-      });
+    // v2.4.43: simulate a Windows share-mode lock by making copyFile
+    // hang indefinitely. Promise.race inside readFileWithTimeout should
+    // reject after 3s, and getStatus's outer catch should fall back to
+    // the cached last-good status (not throw).
+    (copyFile as any).mockImplementationOnce(() => {
+      return new Promise<void>(() => { /* never resolves */ });
     });
 
     const pending = getStatus();
-    // Advance past the 3-second readFile timeout.
     await vi.advanceTimersByTimeAsync(3_100);
     const fallback = await pending;
 
@@ -177,25 +189,18 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
   });
 
   it('propagates ENOENT (no cache fallback for missing-file errors)', async () => {
-    // Clean state, no prior cache.
-    (readFile as any).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    // Clean state, no prior cache. copyFile itself raises ENOENT when the
+    // source file is missing (this is the realistic path in v2.4.43 since
+    // readFile no longer sees the source path directly).
+    (copyFile as any).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     await expect(getStatus()).rejects.toMatchObject({ code: 'E_BRIDGE_FILE_MISSING' });
   });
 
-  it('throws timeout error when no cache exists and read times out', async () => {
+  it('throws timeout error when no cache exists and copyFile hangs', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
-    (readFile as any).mockImplementationOnce((_path: string, opts: any) => {
-      return new Promise<string>((_resolve, reject) => {
-        if (opts?.signal) {
-          opts.signal.addEventListener('abort', () => {
-            const err: any = new Error('aborted');
-            err.name = 'AbortError';
-            err.code = 'ABORT_ERR';
-            reject(err);
-          });
-        }
-      });
+    (copyFile as any).mockImplementationOnce(() => {
+      return new Promise<void>(() => { /* never resolves */ });
     });
 
     const pending = getStatus();
@@ -206,6 +211,31 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
 
     // No cache seeded → timeout should bubble up as an error.
     await expect(pending).rejects.toMatchObject({ code: 'E_BRIDGE_READ_TIMEOUT' });
+
+    vi.useRealTimers();
+  });
+
+  it('cache fires even when copyFile fails transiently (EBUSY) if cache exists', async () => {
+    // Seed cache with a successful call.
+    const fixture = await realReadFile(fixturePath, 'utf8');
+    (readFile as any).mockResolvedValueOnce(fixture);
+    const first = await getStatus();
+    expect(first.host).toBe('ALIENWARE-R11');
+
+    // Force cache miss via fake time advance.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(Date.now() + 3_000);
+
+    // copyFile rejects with EBUSY (transient Windows share-mode lock).
+    // getStatus should catch isTransientReadError and serve cached data.
+    (copyFile as any).mockClear();
+    (copyFile as any).mockRejectedValueOnce(Object.assign(new Error('EBUSY: locked'), { code: 'EBUSY' }));
+
+    const result = await getStatus();
+    expect(result.host).toBe('ALIENWARE-R11');
+    // Assert copyFile was actually attempted -- rules out a cache-hit
+    // path that would return stale data without trying to refresh.
+    expect((copyFile as any)).toHaveBeenCalledTimes(1);
 
     vi.useRealTimers();
   });
