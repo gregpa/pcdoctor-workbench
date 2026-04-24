@@ -170,7 +170,7 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
         : '';
 
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 mb-3">
+    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain mb-3">
       <div className="flex items-center justify-between mb-2">
         <button
           type="button"

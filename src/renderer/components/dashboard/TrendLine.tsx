@@ -21,7 +21,7 @@ export function TrendLine({ title, trend, severity = 'info', height = 120, yDoma
 
   if (points.length < 2) {
     return (
-      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary mb-1">{title}</div>
         <div className="h-24 flex items-center justify-center text-xs text-text-secondary">
           Insufficient data · {points.length} point{points.length === 1 ? '' : 's'}
@@ -51,14 +51,18 @@ export function TrendLine({ title, trend, severity = 'info', height = 120, yDoma
   const interactive = !!onExpand;
   const wrapperProps = interactive
     ? {
-        className: 'bg-surface-800 border border-surface-600 rounded-lg p-3 cursor-pointer hover:border-surface-500 transition-colors group',
+        // v2.4.42: panel-contain scopes layout recalc to this SVG panel
+        // instead of letting Chromium walk the whole Dashboard tree on
+        // every resize pixel. The SVG uses viewBox + w-full so paint
+        // containment is safe (nothing escapes the tile).
+        className: 'bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain cursor-pointer hover:border-surface-500 transition-colors group',
         onClick: onExpand,
         role: 'button' as const,
         tabIndex: 0,
         title: 'Click to expand',
         onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand?.(); } },
       }
-    : { className: 'bg-surface-800 border border-surface-600 rounded-lg p-3' };
+    : { className: 'bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain' };
 
   return (
     <div {...wrapperProps}>

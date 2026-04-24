@@ -16,3 +16,29 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+@layer utilities {
+  /*
+   * v2.4.42: CSS containment on dashboard panels to bound Chromium's layout
+   * engine cost during window resize. Without `contain`, Chromium re-lays
+   * out the entire document tree on every pixel of window width change,
+   * which on a dashboard with 15+ nested grid/flex panels + SVG trend
+   * charts produced a ~273ms stall per resize tick (observed in
+   * render-perf-YYYYMMDD.log at 01:12:30 on 2026-04-24 — `getStatus`
+   * returned in 42ms but `useStatus.focus.refetch` wallclocked 273ms,
+   * the 230ms gap was Chromium layout).
+   *
+   *   - layout: each panel is an independent layout sandbox; child
+   *     resizes don't walk up the tree.
+   *   - style: style recalc stops at the panel boundary.
+   *   - paint: paint is clipped to the panel (acceptable because
+   *     dashboard panels never have absolutely-positioned descendants
+   *     that escape their bounds -- all modals portal to #root).
+   *
+   * If a panel needs to render a dropdown / tooltip that escapes, drop
+   * `paint` from its containment list or don't apply the class.
+   */
+  .panel-contain {
+    contain: layout style paint;
+  }
+}

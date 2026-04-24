@@ -141,7 +141,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
 
   return (
     <>
-      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
         <div className="flex justify-between items-start gap-2 mb-2">
           <div>
             <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold">🧼 Clean My PC</div>

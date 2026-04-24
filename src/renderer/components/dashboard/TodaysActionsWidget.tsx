@@ -43,7 +43,7 @@ export function TodaysActionsWidget({ status }: { status: SystemStatus }) {
   const weeklyAutoRuns = activity.filter(a => a.outcome === 'auto_run');
 
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-4 mb-3">
+    <div className="bg-surface-800 border border-surface-600 rounded-lg p-4 panel-contain mb-3">
       <div className="flex justify-between items-center mb-3">
         <div className="text-sm font-semibold">🎯 Today's Actions</div>
         <button
