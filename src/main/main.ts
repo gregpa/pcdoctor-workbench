@@ -46,18 +46,21 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 980,
-    // v2.4.41: re-unlocked after v2.4.40 getStatus concurrency fix
-    // verified clean in production. Perf log over 5+ minutes showed
-    // consistent 3-4ms reads, cache hits on schedule, zero timeouts,
-    // zero fallback events. The v2.4.40 fix (2s cache + single-flight
-    // + 3s readFile timeout + cache fallback on transient errors)
-    // makes the B51 resize-freeze stampede impossible by construction
-    // -- no two concurrent callers can both hit readFile, so no pile-up
-    // on a locked latest.json. If resize surfaces a DIFFERENT freeze
-    // mode, v2.4.38 instrumentation remains active to capture it.
-    resizable: true,
-    minWidth: 900,
-    minHeight: 640,
+    // v2.4.44: window locked non-resizable. Reasoning documented across
+    // v2.4.37 (first lock), v2.4.40 (getStatus concurrency fix),
+    // v2.4.42 (CSS contain), v2.4.43 (atomic producer + copyFile
+    // consumer). Each release improved resize perf but the 56-second
+    // freeze event at 02:14:05 on 2026-04-24 demonstrated that when
+    // Windows Defender / OneDrive / the scanner saturate the disk,
+    // the Node main-process event loop can be starved for tens of
+    // seconds. Even Promise.race + setTimeout(3000) can't fire if the
+    // process doesn't get CPU. User-space can't guarantee against
+    // OS-level thrash.
+    //
+    // User decision 2026-04-24: lock it. Maximize still works.
+    // Re-evaluate if/when we move to a worker-thread file read
+    // (worker.terminate() is OS-enforced and bypasses the starvation).
+    resizable: false,
     maximizable: true,
     minimizable: true,
     show: !startHidden,

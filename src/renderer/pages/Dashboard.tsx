@@ -348,13 +348,12 @@ export function Dashboard() {
          Disk SMART Health section. */}
       <div className="mb-1.5 flex justify-between items-center">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold">7-day trends</div>
-        <button
-          onClick={() => void handleAction('refresh_temperatures')}
-          className="text-[10px] text-text-secondary hover:text-text-primary underline-offset-2 hover:underline"
-          title="Run Get-Temperatures elevated. CPU thermal-zone WMI needs admin; this caches the read so subsequent scans populate the CPU temp trend without UAC."
-        >
-          🌡 Refresh CPU Temp (admin)
-        </button>
+        {/* v2.4.44: "Refresh CPU Temp (admin)" button removed. It seeded
+            the temperature cache by running Get-Temperatures elevated
+            before LHM HTTP was wired up (v2.4.29). Now that LHM HTTP
+            feeds temps automatically once the user enables Remote Web
+            Server, manual seeding is redundant -- the cache self-
+            populates on every scanner tick. */}
       </div>
       {/* v2.4.39 (B45): trend charts need width to be legible -- stack below
           lg rather than squeezing 3-up too narrow. */}

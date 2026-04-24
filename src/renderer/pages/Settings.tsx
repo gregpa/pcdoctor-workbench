@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import { DEFAULT_NOTIFICATION_EVENTS } from '@shared/types.js';
 import type { ScheduledTaskInfo } from '@shared/types.js';
+import { NasMappingEditor, type NasMapping } from '@renderer/components/settings/NasMappingEditor.js';
 
 const EVENT_LABELS: Record<string, string> = {
   critical_finding: 'Critical finding detected',
@@ -27,10 +28,14 @@ export function Settings() {
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
   const [updateStatus, setUpdateStatus] = useState<any>({ state: 'idle' });
   const [appVersion, setAppVersion] = useState('…');
-  // v2.4.6: NAS config editor state. nasJson holds the pretty-printed
-  // mappings array so the user can bulk-edit without a nested-form UI.
+  // v2.4.44: NAS config editor now uses the row-based NasMappingEditor
+  // (B36). The raw-JSON textarea is still available inside the editor as
+  // a collapsible escape hatch for power users. Mappings are held as a
+  // typed array here; validity is maintained by the editor + reflected
+  // via nasEditorValid (Save button disables when false).
   const [nasServer, setNasServer] = useState('');
-  const [nasJson, setNasJson] = useState('');
+  const [nasMappings, setNasMappings] = useState<NasMapping[]>([]);
+  const [nasEditorValid, setNasEditorValid] = useState(true);
   const [nasDirty, setNasDirty] = useState(false);
   const [nasError, setNasError] = useState<string | null>(null);
   const [nasLoaded, setNasLoaded] = useState(false);
@@ -69,15 +74,14 @@ export function Settings() {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
-  // v2.4.6: load NAS config from main. Only runs once per mount; edits
-  // hydrate the controlled state locally until the user clicks Save.
+  // v2.4.44: load NAS config + hydrate row-based editor state.
   useEffect(() => {
     let alive = true;
     (async () => {
       const r = await (api as any).getNasConfig?.();
       if (alive && r?.ok) {
         setNasServer(r.data.nas_server);
-        setNasJson(JSON.stringify(r.data.nas_mappings, null, 2));
+        setNasMappings(Array.isArray(r.data.nas_mappings) ? r.data.nas_mappings : []);
         setNasLoaded(true);
       }
     })();
@@ -86,28 +90,19 @@ export function Settings() {
 
   async function saveNasConfig() {
     setNasError(null);
-    let parsedMappings: Array<{ drive: string; share: string }>;
-    try {
-      parsedMappings = JSON.parse(nasJson);
-    } catch (e: any) {
-      setNasError(`Mappings JSON is invalid: ${e?.message ?? e}`);
+    if (!nasEditorValid) {
+      setNasError('Fix the highlighted rows before saving.');
       return;
     }
-    if (!Array.isArray(parsedMappings) || parsedMappings.length === 0) {
-      setNasError('Mappings must be a non-empty array.');
+    if (nasMappings.length === 0) {
+      setNasError('At least one mapping is required.');
       return;
-    }
-    for (const m of parsedMappings) {
-      if (!m || typeof m !== 'object' || typeof m.drive !== 'string' || !/^[A-Z]:$/.test(m.drive) || typeof m.share !== 'string' || !m.share) {
-        setNasError(`Each mapping must be {drive:"X:", share:"..."}. Bad entry: ${JSON.stringify(m)}`);
-        return;
-      }
     }
     if (!nasServer || !nasServer.trim()) {
       setNasError('Server address is required.');
       return;
     }
-    const r = await (api as any).setNasConfig?.({ nas_server: nasServer.trim(), nas_mappings: parsedMappings });
+    const r = await (api as any).setNasConfig?.({ nas_server: nasServer.trim(), nas_mappings: nasMappings });
     if (r?.ok) {
       setNasDirty(false);
       showToast('NAS settings saved. Scanner + Remap will use new values.');
@@ -375,16 +370,14 @@ export function Settings() {
               placeholder="192.168.50.226"
               className="w-full mb-3 px-2 py-1.5 text-xs font-mono bg-surface-900 border border-surface-600 rounded"
             />
-            <label className="block text-xs font-semibold mb-1">
-              Drive mappings (JSON array of <code>{'{ drive: "X:", share: "..." }'}</code>)
-            </label>
-            <textarea
-              value={nasJson}
-              onChange={(e) => { setNasJson(e.target.value); setNasDirty(true); }}
-              rows={10}
-              spellCheck={false}
-              className="w-full mb-3 px-2 py-1.5 text-xs font-mono bg-surface-900 border border-surface-600 rounded resize-y"
-            />
+            <label className="block text-xs font-semibold mb-1">Drive mappings</label>
+            <div className="mb-3">
+              <NasMappingEditor
+                value={nasMappings}
+                onChange={(next) => { setNasMappings(next); setNasDirty(true); }}
+                onValidityChange={setNasEditorValid}
+              />
+            </div>
             {nasError && (
               <div className="text-xs text-status-crit mb-3 p-2 bg-status-crit/10 border border-status-crit/40 rounded">
                 {nasError}
@@ -393,7 +386,7 @@ export function Settings() {
             <div className="flex gap-2">
               <button
                 onClick={saveNasConfig}
-                disabled={!nasDirty}
+                disabled={!nasDirty || !nasEditorValid}
                 className="px-3 py-1.5 rounded-md text-xs bg-status-good/20 border border-status-good/40 text-status-good disabled:opacity-50"
               >
                 Save NAS settings
@@ -403,7 +396,7 @@ export function Settings() {
                   const r = await (api as any).getNasConfig?.();
                   if (r?.ok) {
                     setNasServer(r.data.nas_server);
-                    setNasJson(JSON.stringify(r.data.nas_mappings, null, 2));
+                    setNasMappings(Array.isArray(r.data.nas_mappings) ? r.data.nas_mappings : []);
                     setNasDirty(false);
                     setNasError(null);
                   }
