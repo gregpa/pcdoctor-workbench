@@ -10,7 +10,7 @@ if (!process.env.UV_THREADPOOL_SIZE) {
 
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
-import { access, constants as fsConstants } from 'node:fs/promises';
+import { access, constants as fsConstants, stat } from 'node:fs/promises';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
 import { getStatus } from './pcdoctorBridge.js';
@@ -36,6 +36,11 @@ if (!gotLock) {
 
 let mainWindow: BrowserWindow | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
+
+// v2.4.47 (B46-1): the autopilot script names + the predicate that decides
+// whether to fire the elevated Sync-ScriptsFromBundle.ps1 are extracted to
+// taskMigrationVerify.ts so they're unit-testable without dragging in the
+// Electron app boot side-effects of main.ts.
 
 function createWindow() {
   // v2.4.6: show the window by default on launch. Previously always
@@ -185,6 +190,22 @@ app.whenReady().then(() => {
   let resolveBundleSync!: () => void;
   const bundleSyncPromise: Promise<void> = new Promise<void>((res) => { resolveBundleSync = res; });
   let bundleNeedsElevatedCopy = false;
+  // v2.4.47 (B46-1): per-file mismatch list captured by the bundle-sync IIFE
+  // and read by the migration IIFE after `await bundleSyncPromise`. Stored as
+  // an array of relative path strings (e.g. 'Register-All-Tasks.ps1'). The
+  // implicit contract: the bundle-sync IIFE writes this *before* calling
+  // resolveBundleSync(), so any reader awaiting bundleSyncPromise sees a
+  // settled value. Documented inline because module-scope mutable shared
+  // state across IIFEs is otherwise easy to misread.
+  let bundleMismatches: string[] = [];
+  // v2.4.47 (B46-1): set by the bundle-sync IIFE to true if it already
+  // performed the elevated Sync (whether successful or declined). The
+  // migration IIFE reads this to AVOID firing a second UAC prompt for the
+  // same operation -- the bundle-sync IIFE always tries first, and the
+  // migration's elevated-Sync fallback is a defensive belt-and-braces for
+  // the case where the bundle-sync's ACL-versioning short-circuit
+  // (`last_acl_repair_version`) suppressed it.
+  let bundleElevatedSyncAttempted = false;
   const bundledPsDir = app.isPackaged
     ? path.join(process.resourcesPath, 'powershell')
     : path.join(app.getAppPath(), 'powershell');
@@ -237,12 +258,40 @@ app.whenReady().then(() => {
       // Register-All-Tasks sees a fully-populated C:\ProgramData\PCDoctor\.
       await Promise.allSettled([nasSyncPromise, startupSyncPromise, bundleSyncPromise]);
 
-      const { runPowerShellScript } = await import('./scriptRunner.js');
+      const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
-      const TASK_MIGRATION_VERSION = '2.4.46';
+      const TASK_MIGRATION_VERSION = '2.4.47';
       const lastMigration = getSetting('last_task_migration_version');
+      const isUpgrade = lastMigration !== TASK_MIGRATION_VERSION;
+
+      // v2.4.47 (B46-1): if (a) we are mid-upgrade, (b) the bundle-sync probe
+      // said elevation is needed, AND (c) at least one of the autopilot
+      // dispatcher / Register scripts is on the mismatch list, AND (d) the
+      // bundle-sync IIFE did NOT already attempt the elevated copy (avoids
+      // double UAC), fire our own elevated Sync BEFORE invoking
+      // Register-All-Tasks. The (d) gate is what makes this defensive
+      // belt-and-braces: when the bundle-sync IIFE's
+      // `last_acl_repair_version` short-circuit suppresses its elevated
+      // call -- which is exactly what caused B46-1 (ACL block decided
+      // "already repaired this version" and skipped) -- we fire here
+      // instead. When the bundle-sync IIFE DID try elevation, we trust its
+      // result (success or UAC decline) and don't re-prompt.
+      // No-op on steady-state launches (no version bump). No-op when the
+      // autopilot scripts themselves aren't stale.
+      const { shouldFireElevatedAutopilotSync } = await import('./taskMigrationVerify.js');
+      if (
+        !bundleElevatedSyncAttempted
+        && shouldFireElevatedAutopilotSync({ isUpgrade, bundleNeedsElevatedCopy, bundleMismatches })
+      ) {
+        try {
+          await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
+            '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',
+          ], { timeoutMs: 60_000 });
+        } catch { /* declined / failed - migration will see stale bundle, retry next launch */ }
+      }
+
       const args = ['-JsonOutput'];
-      if (lastMigration !== TASK_MIGRATION_VERSION) {
+      if (isUpgrade) {
         args.push('-ForceRecreate');
       }
       // runPowerShellScript returns the parsed JSON object (see
@@ -251,15 +300,37 @@ app.whenReady().then(() => {
       const result = await runPowerShellScript<RegResult>(
         'Register-All-Tasks.ps1', args, { timeoutMs: 60_000 },
       );
-      if (lastMigration !== TASK_MIGRATION_VERSION) {
+      if (isUpgrade) {
         // Verification (B45-4 self-heal): require at least one autopilot row
         // to be both `registered` and carry the dispatcher reference. If the
         // /XML path silently regresses again (or all 11 tasks fail), the
         // flag stays unwritten and the next launch retries with
         // -ForceRecreate. Predicate extracted to ./taskMigrationVerify.ts
         // for unit-test isolation.
+        //
+        // v2.4.47 (B46-1 belt-and-braces): also pass the bundled vs. deployed
+        // sizes for Register-All-Tasks.ps1. If the elevated Sync above failed
+        // (or was declined) and the deployed copy is still v2.4.45-stale, the
+        // sizes will mismatch and verification fails -- exactly catches the
+        // B46-1 silent-success-against-stale-script mode.
         const { verifyAutopilotMigration } = await import('./taskMigrationVerify.js');
-        if (verifyAutopilotMigration(result)) {
+        let sizes: { deployedSize?: number; bundledSize?: number } | undefined;
+        try {
+          const bundledRegister = path.join(bundledPsDir, 'Register-All-Tasks.ps1');
+          // Sync-ScriptsFromBundle.ps1 copies bundled files into
+          // C:\ProgramData\PCDoctor\ at their relative path; for top-level
+          // scripts that means root, NOT a 'powershell' subdir.
+          const deployedRegister = path.join('C:\\ProgramData\\PCDoctor', 'Register-All-Tasks.ps1');
+          const [bundledStat, deployedStat] = await Promise.all([
+            stat(bundledRegister).catch(() => null),
+            stat(deployedRegister).catch(() => null),
+          ]);
+          if (bundledStat && deployedStat) {
+            sizes = { bundledSize: bundledStat.size, deployedSize: deployedStat.size };
+          }
+        } catch { /* non-fatal: skip the size check on stat failure */ }
+
+        if (verifyAutopilotMigration(result, sizes)) {
           setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);
         }
         // If !verified, deliberately do NOT write the flag -- next launch
@@ -304,6 +375,15 @@ app.whenReady().then(() => {
           '-SourceDir', bundledPsDir, '-JsonOutput',
         ], { timeoutMs: 20_000 });
         bundleNeedsElevatedCopy = !!syncResult?.needs_elevation;
+        // v2.4.47 (B46-1): capture the per-file mismatch list so the migration
+        // block can decide whether the autopilot dispatcher / Register script
+        // are actually stale on disk. The script returns an array of objects
+        // shaped { rel, src, dst, cause } per Sync-ScriptsFromBundle.ps1.
+        if (Array.isArray(syncResult?.mismatches)) {
+          bundleMismatches = syncResult.mismatches
+            .map((m: any) => (typeof m?.rel === 'string' ? m.rel : null))
+            .filter((s: string | null): s is string => !!s);
+        }
       } catch { /* probe failed -- we'll fall through; ACL leg still runs */ }
 
       if (bundleNeedsElevatedCopy) {
@@ -314,6 +394,9 @@ app.whenReady().then(() => {
         const lastRepair = getSetting('last_acl_repair_version');
         const thisVersion = app.getVersion();
         if (lastRepair !== thisVersion) {
+          // v2.4.47 (B46-1): mark the attempt regardless of UAC outcome so
+          // the migration IIFE doesn't re-prompt for the same operation.
+          bundleElevatedSyncAttempted = true;
           try {
             await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
               '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',

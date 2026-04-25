@@ -1,6 +1,6 @@
 {
     "name":  "pcdoctor-workbench",
-    "version":  "2.4.46",
+    "version":  "2.4.47",
     "engines":  {
                     "node":  "\u003e=17.3.0"
                 },
@@ -12,7 +12,9 @@
                     "dev":  "vite",
                     "build":  "vite build \u0026\u0026 node scripts/add-cjs-package-json.mjs",
                     "preview":  "vite preview",
-                    "package":  "npm run build && electron-builder",
+                    "package":  "npm run build && npx @electron/rebuild -f -o better-sqlite3 && electron-builder",
+                    "test:smoke":  "powershell.exe -ExecutionPolicy Bypass -File scripts/test-installed-smoke.ps1",
+                    "verify:abi":  "powershell.exe -ExecutionPolicy Bypass -File scripts/verify-better-sqlite3-abi.ps1",
                     "typecheck":  "tsc -p tsconfig.main.json --noEmit \u0026\u0026 tsc -p tsconfig.renderer.json --noEmit",
                     "test":  "vitest run",
                     "test:watch":  "vitest",

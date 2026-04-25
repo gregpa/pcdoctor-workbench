@@ -1035,7 +1035,14 @@ $report.summary = @{
 }
 
 Log "Writing report..."
-$report | ConvertTo-Json -Depth 8 | Out-File -FilePath $jsonPath -Encoding UTF8
+# v2.4.47 (B46-3a): write report.json WITHOUT a UTF-8 BOM. PowerShell 5.1's
+# `Out-File -Encoding UTF8` emits a BOM (EF BB BF), which breaks downstream
+# JSON.parse() in the Electron renderer (and many JSON parsers in general,
+# which expect raw UTF-8 per RFC 8259). Use [System.IO.File]::WriteAllText
+# with UTF8Encoding($false) to write without the BOM. The latest.json copy
+# (later via Copy-Item + Move-Item) inherits the BOM-less bytes verbatim.
+$reportJson = $report | ConvertTo-Json -Depth 8
+[System.IO.File]::WriteAllText($jsonPath, $reportJson, (New-Object System.Text.UTF8Encoding($false)))
 
 # Markdown summary for humans
 $md = @()
