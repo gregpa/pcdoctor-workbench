@@ -1,5 +1,13 @@
 param([switch]$DryRun, [switch]$JsonOutput, [switch]$ForceRecreate)
-$ErrorActionPreference = 'Stop'
+# v2.4.46: $ErrorActionPreference deliberately stays 'Continue' for the
+# native cmd.exe / schtasks.exe sections below. The pre-2.4.46 'Stop'
+# value combined with cmd.exe stderr output was treated by PowerShell as
+# a terminating error, which the trap then re-emitted as
+# E_PS_UNHANDLED -- masking the real schtasks message. We still rely on
+# the trap for genuinely unhandled exceptions in the managed-PS code
+# (Test-Path failures, file IO, etc.). Local 'Stop' is reapplied around
+# those small islands.
+$ErrorActionPreference = 'Continue'
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -40,18 +48,22 @@ $systemContextTasks = @(
 # tier is 1 for every schedule-triggered autopilot rule.
 # Check-ToolUpdates has no corresponding autopilot_rules row, so it remains
 # unwrapped (the tool-updates page reads its own log path).
+#
+# v2.4.46 (B45-2): SmartCheck and UpdateHosts moved to $systemAutopilotTasks
+# because their underlying Run-* scripts require admin rights at runtime --
+# Get-Disk + ConfigureDefenderExclusions + writing C:\Windows\System32\drivers\
+# etc\hosts. Running them under user/InteractiveToken silently exits with
+# UAC failure or 'access denied' and the autopilot LAST RUN column shows
+# only red error rows.
 $userAutopilotTasks = @(
     @{ name = 'PCDoctor-Autopilot-EmptyRecycleBins';        sched = '/SC WEEKLY /D SUN /ST 03:00';             script = "$root\actions\Empty-RecycleBins.ps1";          ruleId = 'empty_recycle_bins_weekly';       tier = 1 }
     @{ name = 'PCDoctor-Autopilot-ClearBrowserCaches';       sched = '/SC WEEKLY /D SAT /ST 03:00';             script = "$root\actions\Clear-BrowserCaches.ps1";        ruleId = 'clear_browser_caches_weekly';     tier = 1 }
     @{ name = 'PCDoctor-Autopilot-DefenderQuickScan';         sched = '/SC DAILY /ST 02:00';                      script = "$root\actions\Run-DefenderQuickScan.ps1";      ruleId = 'defender_quick_scan_daily';       tier = 1 }
     @{ name = 'PCDoctor-Autopilot-UpdateDefenderDefs';        sched = '/SC DAILY /ST 06:00';                      script = "$root\actions\Update-DefenderDefs.ps1";        ruleId = 'update_defender_defs_daily';      tier = 1 }
-    @{ name = 'PCDoctor-Autopilot-SmartCheck';                sched = '/SC DAILY /ST 01:00';                      script = "$root\actions\Run-SmartCheck.ps1";             ruleId = 'run_smart_check_daily';           tier = 1 }
     @{ name = 'PCDoctor-Autopilot-MalwarebytesCli';           sched = '/SC WEEKLY /D MON /ST 03:00';              script = "$root\actions\Run-MalwarebytesCli.ps1";        ruleId = 'run_malwarebytes_cli_weekly';     tier = 1 }
     @{ name = 'PCDoctor-Autopilot-AdwCleanerScan';            sched = '/SC MONTHLY /D 1 /ST 04:00';               script = "$root\actions\Run-AdwCleanerScan.ps1";         ruleId = 'run_adwcleaner_scan_monthly';     tier = 1 }
     @{ name = 'PCDoctor-Autopilot-HwinfoLog';                 sched = '/SC MONTHLY /MO FIRST /D SAT /ST 23:00';    script = "$root\actions\Run-HwinfoLog.ps1";              ruleId = 'run_hwinfo_log_monthly';          tier = 1 }
     @{ name = 'PCDoctor-Autopilot-SafetyScanner';             sched = '/SC MONTHLY /MO THIRD /D SAT /ST 04:00';    script = "$root\actions\Run-SafetyScanner.ps1";          ruleId = 'run_safety_scanner_monthly';      tier = 1 }
-    # Tier 2 per DEFAULT_RULES in autopilotEngine.ts:77 (post-review fix).
-    @{ name = 'PCDoctor-Autopilot-UpdateHostsStevenBlack';    sched = '/SC MONTHLY /MO FIRST /D SUN /ST 04:00';    script = "$root\actions\Update-HostsFromStevenBlack.ps1"; ruleId = 'update_hosts_stevenblack_monthly'; tier = 2 }
     # v2.4.0 tool updates: weekly winget upgrade check (reports only; user
     # presses Upgrade in the Tools page to actually apply).
     # No ruleId -- not an autopilot rule; remains unwrapped.
@@ -61,7 +73,154 @@ $userAutopilotTasks = @(
 $systemAutopilotTasks = @(
     # DISM /ResetBase requires admin, so keep it SYSTEM.
     @{ name = 'PCDoctor-Autopilot-ShrinkComponentStore';      sched = '/SC MONTHLY /MO SECOND /D SAT /ST 04:00';   script = "$root\actions\Shrink-ComponentStore.ps1";      ruleId = 'shrink_component_store_monthly';  tier = 1 }
+    # v2.4.46 B45-2: SmartCheck reads physical disk SMART data; needs admin.
+    @{ name = 'PCDoctor-Autopilot-SmartCheck';                sched = '/SC DAILY /ST 01:00';                       script = "$root\actions\Run-SmartCheck.ps1";             ruleId = 'run_smart_check_daily';           tier = 1 }
+    # v2.4.46 B45-2: UpdateHostsStevenBlack writes %WINDIR%\System32\drivers\etc\hosts.
+    # Tier 2 per DEFAULT_RULES in autopilotEngine.ts:77.
+    @{ name = 'PCDoctor-Autopilot-UpdateHostsStevenBlack';    sched = '/SC MONTHLY /MO FIRST /D SUN /ST 04:00';    script = "$root\actions\Update-HostsFromStevenBlack.ps1"; ruleId = 'update_hosts_stevenblack_monthly'; tier = 2 }
 )
+
+# ---- v2.4.46 helpers: build XML triggers + full task XML for /XML registration ----
+# These mirror the proof-of-fix in C:\ProgramData\PCDoctor\logs\wrap-autopilot-xml*.ps1
+# which hand-patched Greg's box after the v2.4.45 schtasks /TR 261-char overflow
+# silently destroyed the install. Bypassing /TR via /XML removes the length cap
+# entirely. Word-week names ('First','Second','Third','Fourth') MUST be mapped
+# to their numeric equivalents ('1','2','3','4'); 'Last' stays 'Last'. Without
+# the mapping, schtasks /Create /XML rejects the document silently with
+# 'The system cannot find the file specified' (exit 1), which also bit Greg
+# on 2026-04-24 -- see wrap-autopilot-xml-fixup.ps1.
+function ConvertTo-TriggerXml {
+    param([Parameter(Mandatory)] [string]$ScheduleSpec)
+
+    # ScheduleSpec examples:
+    #   '/SC DAILY /ST 02:00'
+    #   '/SC WEEKLY /D SUN /ST 22:00'
+    #   '/SC MONTHLY /D 1 /ST 04:00'
+    #   '/SC MONTHLY /MO FIRST /D SAT /ST 23:00'
+
+    # Tokenize: split on whitespace, then walk pairs.
+    $tokens = $ScheduleSpec.Trim() -split '\s+'
+    $kind = $null; $time = $null; $day = $null; $monthOpt = $null; $dayNum = $null
+    for ($i = 0; $i -lt $tokens.Length; $i++) {
+        switch -Regex ($tokens[$i]) {
+            '^/SC$' { $kind = $tokens[$i+1].ToUpperInvariant(); $i++; continue }
+            '^/ST$' { $time = $tokens[$i+1]; $i++; continue }
+            '^/D$'  {
+                $val = $tokens[$i+1]
+                if ($val -match '^\d+$') { $dayNum = [int]$val }
+                else { $day = $val }
+                $i++; continue
+            }
+            '^/MO$' { $monthOpt = $tokens[$i+1].ToUpperInvariant(); $i++; continue }
+        }
+    }
+
+    if (-not $time) { throw "ConvertTo-TriggerXml: no /ST in spec '$ScheduleSpec'" }
+    $sd = "2026-01-01T${time}:00"
+
+    # Map word-day to XML element name (full English noun, capitalized). schtasks
+    # /D accepts MON/TUE/.../SUN abbreviations; the XML schema needs
+    # <Sunday/>, <Monday/>, etc.
+    $dayMap = @{
+        SUN = 'Sunday'; MON = 'Monday'; TUE = 'Tuesday'; WED = 'Wednesday'
+        THU = 'Thursday'; FRI = 'Friday'; SAT = 'Saturday'
+    }
+    $dayElem = if ($day) { $dayMap[$day.ToUpperInvariant()] } else { $null }
+    if ($day -and -not $dayElem) { throw "ConvertTo-TriggerXml: unknown /D value '$day'" }
+
+    # Word-week -> numeric. CRITICAL gotcha (caused production-incident #2 on
+    # 2026-04-24): the Task Scheduler XML schema requires <Week>1|2|3|4|Last</Week>.
+    # 'First','Second','Third','Fourth' (which schtasks /MO accepts) cause silent
+    # registration failure when used inside the XML.
+    $weekMap = @{
+        FIRST = '1'; SECOND = '2'; THIRD = '3'; FOURTH = '4'; LAST = 'Last'
+    }
+
+    $monthsXml = '<January/><February/><March/><April/><May/><June/><July/><August/><September/><October/><November/><December/>'
+
+    switch ($kind) {
+        'DAILY' {
+            return "<CalendarTrigger><StartBoundary>$sd</StartBoundary><Enabled>true</Enabled><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>"
+        }
+        'WEEKLY' {
+            if (-not $dayElem) { throw "ConvertTo-TriggerXml: WEEKLY requires /D <day> in '$ScheduleSpec'" }
+            return "<CalendarTrigger><StartBoundary>$sd</StartBoundary><Enabled>true</Enabled><ScheduleByWeek><WeeksInterval>1</WeeksInterval><DaysOfWeek><$dayElem /></DaysOfWeek></ScheduleByWeek></CalendarTrigger>"
+        }
+        'MONTHLY' {
+            if ($monthOpt) {
+                # MONTHLY /MO <Word> /D <Day> -- day-of-week-of-month
+                if (-not $dayElem) { throw "ConvertTo-TriggerXml: MONTHLY /MO requires /D <day> in '$ScheduleSpec'" }
+                $weekNum = $weekMap[$monthOpt]
+                if (-not $weekNum) { throw "ConvertTo-TriggerXml: unknown /MO value '$monthOpt' (expected First|Second|Third|Fourth|Last)" }
+                return "<CalendarTrigger><StartBoundary>$sd</StartBoundary><Enabled>true</Enabled><ScheduleByMonthDayOfWeek><Weeks><Week>$weekNum</Week></Weeks><DaysOfWeek><$dayElem /></DaysOfWeek><Months>$monthsXml</Months></ScheduleByMonthDayOfWeek></CalendarTrigger>"
+            }
+            elseif ($null -ne $dayNum) {
+                # MONTHLY /D <N> -- specific day of month
+                return "<CalendarTrigger><StartBoundary>$sd</StartBoundary><Enabled>true</Enabled><ScheduleByMonth><DaysOfMonth><Day>$dayNum</Day></DaysOfMonth><Months>$monthsXml</Months></ScheduleByMonth></CalendarTrigger>"
+            }
+            else { throw "ConvertTo-TriggerXml: MONTHLY needs either /MO <Word> /D <Day> or /D <N>" }
+        }
+        default {
+            # Reviewer-preempt (plan section 8.a): explicit unknown-schedule guard.
+            throw "ConvertTo-TriggerXml: unknown /SC kind '$kind' in spec '$ScheduleSpec' (supported: DAILY|WEEKLY|MONTHLY)"
+        }
+    }
+}
+
+function New-AutopilotTaskXml {
+    param(
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] [string]$ScheduleSpec,
+        [Parameter(Mandatory)] [string]$RuleId,
+        [Parameter(Mandatory)] [int]$Tier,
+        [Parameter(Mandatory)] [string]$ActionScript,
+        [Parameter(Mandatory)] [ValidateSet('user','system')] [string]$Context,
+        [Parameter(Mandatory)] [string]$Dispatcher
+    )
+    $triggerXml = ConvertTo-TriggerXml -ScheduleSpec $ScheduleSpec
+
+    $argString = "-NoProfile -ExecutionPolicy Bypass -File `"$Dispatcher`" -RuleId `"$RuleId`" -Tier $Tier -ActionScript `"$ActionScript`""
+    $argEscaped = [System.Security.SecurityElement]::Escape($argString)
+
+    if ($Context -eq 'user') {
+        $runUser = "$env:USERDOMAIN\$env:USERNAME"
+        # User XML uses literal DOMAIN\user. Domain users + accented usernames
+        # work because the file is written UTF-16 LE w/ BOM below.
+        $principalXml = "<Principal id=`"Author`"><UserId>$runUser</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal>"
+    } else {
+        $principalXml = "<Principal id=`"Author`"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal>"
+    }
+
+    return @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Author>PCDoctor v2.4.46</Author></RegistrationInfo>
+  <Triggers>$triggerXml</Triggers>
+  <Principals>$principalXml</Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT72H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>$argEscaped</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+}
 
 function Register-PCDoctorTask {
     param(
@@ -79,46 +238,69 @@ function Register-PCDoctorTask {
     }
     $today = Get-Date -Format 'yyyyMMdd'
     $log = Join-Path $LogDir "autopilot-$today.log"
-    # v2.4.45: When a rule_id is supplied the task is wrapped via
-    # Run-AutopilotScheduled.ps1 which emits a structured JSON line per run
-    # to autopilot-scheduled-YYYYMMDD.log. The wrapped script's stdout is
-    # still relayed to our stdout, so the existing >> $log redirect below
-    # continues to capture debugging output unchanged.
+
     if ($RuleId -and $Tier -ge 1) {
+        # v2.4.46 fix path: build full Task XML and register via /XML to bypass
+        # the schtasks /TR 261-char limit that silently broke v2.4.45 on every
+        # install. The wrapped command-line is ~279 chars (path + dispatcher +
+        # args + redirect) -- well over the limit. /XML has no length cap.
         $dispatcher = "$root\Run-AutopilotScheduled.ps1"
-        # Post-review guard: if the dispatcher isn't present yet (fresh
-        # install before Sync-ScriptsFromBundle runs, or a bundle-copy
-        # failure left the tree partial), skip the task rather than
-        # register a scheduled task that silently fails at runtime with
-        # exit 1 (PowerShell file-not-found).
         if (-not (Test-Path -LiteralPath $dispatcher)) {
             return @{ name = $Name; status = 'skipped'; reason = "Dispatcher missing: $dispatcher" }
         }
-        $psCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dispatcher`" -RuleId `"$RuleId`" -Tier $Tier -ActionScript `"$Script`" >> `"$log`" 2>&1"
-    }
-    else {
-        # Legacy path (non-autopilot tasks or tasks without a matching rule).
-        $psCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Script`" -JsonOutput >> `"$log`" 2>&1"
+
+        if ($ForceRecreate) {
+            cmd.exe /c "schtasks.exe /Delete /TN `"$Name`" /F" *>$null
+        }
+
+        try {
+            $taskXml = New-AutopilotTaskXml -Name $Name -ScheduleSpec $Sched -RuleId $RuleId -Tier $Tier -ActionScript $Script -Context $Context -Dispatcher $dispatcher
+        } catch {
+            return @{ name = $Name; status = 'failed'; context = $Context; output = "XML build failed: $($_.Exception.Message)"; command = '<XML build error>' }
+        }
+
+        $xmlPath = Join-Path $env:TEMP "pcd-task-$Name.xml"
+        try {
+            # UTF-16 LE w/ BOM. schtasks /Create /XML rejects UTF-8.
+            [System.IO.File]::WriteAllText($xmlPath, $taskXml, [System.Text.UnicodeEncoding]::new($false, $true))
+        } catch {
+            return @{ name = $Name; status = 'failed'; context = $Context; output = "WriteAllText failed: $($_.Exception.Message)"; command = '<XML write error>' }
+        }
+
+        $out = cmd.exe /c "schtasks.exe /Create /TN `"$Name`" /XML `"$xmlPath`" /F" 2>&1 | Out-String
+        $code = $LASTEXITCODE
+        Remove-Item $xmlPath -ErrorAction SilentlyContinue
+        $ok = $code -eq 0
+        # `command` field surfaces the dispatcher invocation for the
+        # post-registration verification block in main.ts (so we can prove
+        # at least one task is wrapped before writing the migration flag).
+        return @{
+            name    = $Name
+            status  = if ($ok) { 'registered' } else { 'failed' }
+            context = $Context
+            output  = $out.Trim()
+            command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dispatcher`" -RuleId `"$RuleId`" -Tier $Tier -ActionScript `"$Script`""
+        }
     }
 
+    # Legacy non-autopilot path: keep the existing /TR pipeline. These tasks
+    # all fit comfortably under 261 chars (verified by test-task-registration.ps1).
+    $psCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Script`" -JsonOutput >> `"$log`" 2>&1"
+
     if ($ForceRecreate) {
-        # Idempotent recreate: delete then recreate so the /RU change is picked up.
         cmd.exe /c "schtasks.exe /Delete /TN `"$Name`" /F" *>$null
     }
 
     if ($Context -eq 'user') {
-        # Run interactively as the current user so HKCU StartupApproved / per-user
-        # caches resolve correctly. /RL LIMITED == least privilege.
         $runUser = "$env:USERDOMAIN\$env:USERNAME"
         $createArgs = "/Create /TN `"$Name`" /TR `"$psCmd`" $Sched /RU `"$runUser`" /IT /RL LIMITED /F"
     }
     else {
-        # SYSTEM context with elevation; used for SFC/DISM/VSS-heavy tasks.
         $createArgs = "/Create /TN `"$Name`" /TR `"$psCmd`" $Sched /RU SYSTEM /RL HIGHEST /F"
     }
     $out = cmd.exe /c "schtasks.exe $createArgs" 2>&1 | Out-String
     $ok = $LASTEXITCODE -eq 0
-    return @{ name = $Name; status = if ($ok) { 'registered' } else { 'failed' }; context = $Context; output = $out.Trim() }
+    return @{ name = $Name; status = if ($ok) { 'registered' } else { 'failed' }; context = $Context; output = $out.Trim(); command = $psCmd }
 }
 
 # v2.4.45: splat helper so tasks carrying ruleId+tier (the autopilot rows)

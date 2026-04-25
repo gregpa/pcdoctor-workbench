@@ -14,6 +14,16 @@ import {
 // before every elevated spawn so the UAC prompt (which tracks focus)
 // lands on top of whatever the user is doing. Reset flags after the
 // elevated work completes so normal focus behaviour resumes.
+//
+// v2.4.46 (B45-3): make `restore` idempotent and add a 60s safety-net
+// timer that always fires. Pre-2.4.46 callers attached `restore` only to
+// the child's `'exit'` event and the timeout path; if the spawn rejected
+// with `'error'` (ENOENT, EACCES, EMFILE, etc.) before `'exit'`, the
+// window stayed pinned `setAlwaysOnTop(true)` and the taskbar icon kept
+// flashing forever. Idempotency lets every callback fire `restore()`
+// without stacking calls; the safety-net timer is the belt + suspenders
+// for code paths that forget to wire `'error'` (or for any unforeseen
+// scenario where neither `'exit'` nor `'error'` ever fires).
 function cueUacForeground(): { restore: () => void } {
   const win = BrowserWindow.getAllWindows()[0];
   if (!win) return { restore: () => {} };
@@ -22,14 +32,25 @@ function cueUacForeground(): { restore: () => void } {
     win.focus();
     win.flashFrame(true);
   } catch { /* ignore */ }
-  return {
-    restore: () => {
-      try {
-        win.setAlwaysOnTop(false);
-        win.flashFrame(false);
-      } catch { /* ignore */ }
-    },
+
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    try {
+      win.setAlwaysOnTop(false);
+      win.flashFrame(false);
+    } catch { /* ignore */ }
   };
+
+  // Belt + suspenders: even if every caller forgets to wire `'error'` /
+  // `'exit'`, the window can't stay pinned for more than 60s. `unref()`
+  // (reviewer-preempt §8.c) so this timer can never keep the Electron
+  // main process alive at quit time.
+  const safety = setTimeout(restore, 60_000);
+  if (typeof safety.unref === 'function') safety.unref();
+
+  return { restore };
 }
 
 export class PCDoctorScriptError extends Error {
@@ -296,6 +317,15 @@ export async function runElevatedPowerShellScript<T = unknown>(
       uacCue.restore();
       reject(new PCDoctorScriptError('E_TIMEOUT_KILLED', `Elevated script exceeded ${timeoutMs}ms`));
     }, timeoutMs);
+    // v2.4.46 B45-3: wire 'error' too so a failed spawn (ENOENT, EACCES,
+    // EMFILE, etc.) restores the always-on-top + flashFrame state. Without
+    // this the window stayed pinned and the taskbar icon kept flashing
+    // forever on rare elevation-spawn failures.
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      uacCue.restore();
+      reject(new PCDoctorScriptError('E_ELEVATION_FAILED', `Failed to spawn elevation wrapper: ${err?.message ?? String(err)}`));
+    });
     child.on('exit', (code) => {
       clearTimeout(timer);
       uacCue.restore();

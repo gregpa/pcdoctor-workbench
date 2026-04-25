@@ -170,11 +170,30 @@ async function backgroundPoll() {
 app.whenReady().then(() => {
   registerIpcHandlers();
 
+  // v2.4.46: extract the two sidecar-sync IIFEs into named promises so the
+  // task-migration block (below) can await them. Pre-2.4.46 the migration
+  // ran in parallel with the NAS / Startup config writes, which on a fast
+  // SSD usually finished in time but on slow disks could race the
+  // schtasks /Create -- producing a registered task that read stale
+  // sidecar JSON on its first scheduled fire.
+
+  // Bundle-sync coordination Promise. Declared up-front (before the
+  // migration IIFE that awaits it) so the synchronous evaluation of
+  // `bundleSyncPromise` inside the migration's `Promise.allSettled([...])`
+  // expression doesn't hit a TDZ. Resolved by the bundle-sync IIFE further
+  // down.
+  let resolveBundleSync!: () => void;
+  const bundleSyncPromise: Promise<void> = new Promise<void>((res) => { resolveBundleSync = res; });
+  let bundleNeedsElevatedCopy = false;
+  const bundledPsDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'powershell')
+    : path.join(app.getAppPath(), 'powershell');
+
   // v2.4.6: sync NAS config (server IP + drive mappings) from the settings
   // DB to the sidecar JSON at C:\ProgramData\PCDoctor\settings\nas.json.
   // Scanner + Remap-NAS action read this file; falling back to hardcoded
   // defaults if it's missing keeps fresh installs + upgrades silent.
-  (async () => {
+  const nasSyncPromise: Promise<void> = (async () => {
     try {
       const { syncNasConfigToDisk } = await import('./nasConfig.js');
       syncNasConfigToDisk();
@@ -186,7 +205,7 @@ app.whenReady().then(() => {
   // startup-count warning. Default threshold 20 matches the user-facing
   // "healthy under 20" language. Empty allowlist is the pre-v2.4.13
   // baseline.
-  (async () => {
+  const startupSyncPromise: Promise<void> = (async () => {
     try {
       const { syncStartupConfigToDisk } = await import('./startupConfig.js');
       syncStartupConfigToDisk();
@@ -201,19 +220,50 @@ app.whenReady().then(() => {
   // inline action-script invocation for the Run-AutopilotScheduled.ps1
   // dispatcher wrapper. Without this, upgrading installs keep their
   // v2.4.44 task definitions and their LAST RUN column stays blank.
+  // v2.4.46 (B45-1 + B45-4):
+  //  - bumped TASK_MIGRATION_VERSION so every v2.4.45 install re-registers
+  //    via the new /XML path (the v2.4.45 /TR path silently failed at
+  //    261 chars and the migration flag was already set on every install).
+  //  - await sidecar syncs + bundle-sync completion before invoking the
+  //    PowerShell so newly-synced scripts are guaranteed on disk first.
+  //  - parse the script's JSON return and require at least one autopilot
+  //    row carry a `command` referencing `Run-AutopilotScheduled.ps1`.
+  //    Only then is the flag written. If verification fails, the flag is
+  //    left at its previous value and the next launch retries -- exactly
+  //    the self-healing v2.4.45 lacked.
   (async () => {
     try {
+      // Order: NAS + Startup sidecars + ACL/bundle-sync first so that
+      // Register-All-Tasks sees a fully-populated C:\ProgramData\PCDoctor\.
+      await Promise.allSettled([nasSyncPromise, startupSyncPromise, bundleSyncPromise]);
+
       const { runPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
-      const TASK_MIGRATION_VERSION = '2.4.45';
+      const TASK_MIGRATION_VERSION = '2.4.46';
       const lastMigration = getSetting('last_task_migration_version');
       const args = ['-JsonOutput'];
       if (lastMigration !== TASK_MIGRATION_VERSION) {
         args.push('-ForceRecreate');
       }
-      await runPowerShellScript('Register-All-Tasks.ps1', args, { timeoutMs: 60_000 });
+      // runPowerShellScript returns the parsed JSON object (see
+      // scriptRunner.ts -- JSON.parse(stdout.trim())), not a string.
+      type RegResult = import('./taskMigrationVerify.js').RegisterAllTasksResult;
+      const result = await runPowerShellScript<RegResult>(
+        'Register-All-Tasks.ps1', args, { timeoutMs: 60_000 },
+      );
       if (lastMigration !== TASK_MIGRATION_VERSION) {
-        setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);
+        // Verification (B45-4 self-heal): require at least one autopilot row
+        // to be both `registered` and carry the dispatcher reference. If the
+        // /XML path silently regresses again (or all 11 tasks fail), the
+        // flag stays unwritten and the next launch retries with
+        // -ForceRecreate. Predicate extracted to ./taskMigrationVerify.ts
+        // for unit-test isolation.
+        const { verifyAutopilotMigration } = await import('./taskMigrationVerify.js');
+        if (verifyAutopilotMigration(result)) {
+          setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);
+        }
+        // If !verified, deliberately do NOT write the flag -- next launch
+        // will retry. This is the desired self-healing property.
       }
     } catch { /* non-fatal */ }
   })();
@@ -232,54 +282,76 @@ app.whenReady().then(() => {
   // detect missing / size-mismatched scripts (root cause of the v2.4.4/5
   // stale-deploy cascade). If any mismatches show up, we reuse the same
   // once-per-upgrade UAC prompt to copy them from the bundle.
+  //
+  // v2.4.46 (B45-1): split into two IIFEs so the task-migration block
+  // (above) can await `bundleSyncPromise` -- it resolves as soon as the
+  // Sync-ScriptsFromBundle leg has finished (probe + optional elevated
+  // copy), independent of the slower ACL repair leg. This guarantees the
+  // newly-bumped Run-AutopilotScheduled.ps1 + Register-All-Tasks.ps1 are
+  // on disk before Register-All-Tasks.ps1 fires. The Promise + resolver
+  // are declared at the top of app.whenReady (above) so the migration
+  // IIFE can synchronously reference `bundleSyncPromise` without hitting
+  // TDZ.
+
+  // Bundle-sync IIFE -- probe + (optionally) elevated copy. resolveBundleSync()
+  // fires regardless of outcome (elevated decline / probe error / success)
+  // so the migration block isn't blocked indefinitely.
   (async () => {
     try {
+      const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
+      try {
+        const syncResult = await runPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
+          '-SourceDir', bundledPsDir, '-JsonOutput',
+        ], { timeoutMs: 20_000 });
+        bundleNeedsElevatedCopy = !!syncResult?.needs_elevation;
+      } catch { /* probe failed -- we'll fall through; ACL leg still runs */ }
+
+      if (bundleNeedsElevatedCopy) {
+        // Need to wait for the user's UAC decision; only THEN can we say
+        // the on-disk bundle reflects the new version. Wrap in try/catch
+        // so a UAC decline still resolves the promise.
+        const { getSetting } = await import('./dataStore.js');
+        const lastRepair = getSetting('last_acl_repair_version');
+        const thisVersion = app.getVersion();
+        if (lastRepair !== thisVersion) {
+          try {
+            await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
+              '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',
+            ], { timeoutMs: 60_000 });
+          } catch { /* declined / failed - migration block will see stale bundle, retry next launch */ }
+        }
+      }
+    } finally {
+      resolveBundleSync();
+    }
+  })();
+
+  // ACL repair IIFE (separate from bundle sync to keep migration unblocked).
+  (async () => {
+    try {
+      // Wait for the bundle sync to finish first so any newly-copied scripts
+      // can have their ACLs inspected (zero-ACE files can't be opened by
+      // the non-elevated probe).
+      await bundleSyncPromise;
+
       const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
       const thisVersion = app.getVersion();
       const lastRepair = getSetting('last_acl_repair_version');
 
-      // Resolve the bundled powershell/ path. In a packaged app this sits
-      // at <resourcesPath>/powershell/ via electron-builder's
-      // extraResources. In dev, use the repo root.
-      const bundledPsDir = app.isPackaged
-        ? path.join(process.resourcesPath, 'powershell')
-        : path.join(app.getAppPath(), 'powershell');
-
-      let syncNeedsElevation = false;
-      try {
-        const syncResult = await runPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
-          '-SourceDir', bundledPsDir, '-JsonOutput',
-        ], { timeoutMs: 20_000 });
-        syncNeedsElevation = !!syncResult?.needs_elevation;
-      } catch { /* Sync probe failed - fall through to ACL repair anyway */ }
-
       const aclResult = await runPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
       const aclNeedsElevation = !!aclResult?.needs_elevation;
 
-      if ((syncNeedsElevation || aclNeedsElevation) && lastRepair !== thisVersion) {
-        // One UAC prompt per upgrade covers both the bundle sync and the
-        // ACL repair. Order matters: sync first (so fresh files land with
-        // correct ACLs from inheritance), then repair any zero-ACE files.
+      if ((bundleNeedsElevatedCopy || aclNeedsElevation) && lastRepair !== thisVersion) {
         try {
-          if (syncNeedsElevation) {
-            await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
-              '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',
-            ], { timeoutMs: 60_000 });
-          }
           if (aclNeedsElevation) {
             await runElevatedPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput', '-Elevated'], { timeoutMs: 60_000 });
           }
           // v2.4.10: only mark this version repaired if the elevation chain
-          // actually completed. Prior code set the marker unconditionally
-          // after the if-block, so a UAC decline would silence future
-          // re-prompts even though nothing was repaired. Now the marker
-          // only persists on successful completion of the elevated calls.
+          // actually completed.
           setSetting('last_acl_repair_version', thisVersion);
         } catch { /* user declined UAC; we'll try again next upgrade */ }
       } else {
-        // Nothing to repair OR already repaired at this version — safe to
-        // record the marker so we don't re-probe on every boot.
         setSetting('last_acl_repair_version', thisVersion);
       }
     } catch { /* non-fatal; most users will never hit this path */ }

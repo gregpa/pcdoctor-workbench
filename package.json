@@ -1,6 +1,6 @@
 {
     "name":  "pcdoctor-workbench",
-    "version":  "2.4.45",
+    "version":  "2.4.46",
     "engines":  {
                     "node":  "\u003e=17.3.0"
                 },
@@ -16,6 +16,7 @@
                     "typecheck":  "tsc -p tsconfig.main.json --noEmit \u0026\u0026 tsc -p tsconfig.renderer.json --noEmit",
                     "test":  "vitest run",
                     "test:watch":  "vitest",
+                    "test:tasks":  "powershell.exe -ExecutionPolicy Bypass -File scripts/test-task-registration.ps1",
                     "lint":  "eslint src --ext .ts,.tsx"
                 },
     "dependencies":  {
