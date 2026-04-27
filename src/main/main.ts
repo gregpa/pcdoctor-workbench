@@ -206,6 +206,12 @@ app.whenReady().then(() => {
   // the case where the bundle-sync's ACL-versioning short-circuit
   // (`last_acl_repair_version`) suppressed it.
   let bundleElevatedSyncAttempted = false;
+  // v2.4.48 (B48-MIG-1a): set by the migration IIFE once it dispatches its
+  // own elevated Sync-ScriptsFromBundle.ps1 + Register-All-Tasks.ps1 chain.
+  // Currently informational only -- the bundle-sync IIFE doesn't read it
+  // (it always runs first via Promise scheduling) -- but the flag exists
+  // so future refactors that interleave the two IIFEs can avoid dual UAC.
+  let migrationElevatedRegisterAttempted = false;
   const bundledPsDir = app.isPackaged
     ? path.join(process.resourcesPath, 'powershell')
     : path.join(app.getAppPath(), 'powershell');
@@ -260,7 +266,7 @@ app.whenReady().then(() => {
 
       const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
-      const TASK_MIGRATION_VERSION = '2.4.47';
+      const TASK_MIGRATION_VERSION = '2.4.48';
       const lastMigration = getSetting('last_task_migration_version');
       const isUpgrade = lastMigration !== TASK_MIGRATION_VERSION;
 
@@ -294,12 +300,54 @@ app.whenReady().then(() => {
       if (isUpgrade) {
         args.push('-ForceRecreate');
       }
-      // runPowerShellScript returns the parsed JSON object (see
-      // scriptRunner.ts -- JSON.parse(stdout.trim())), not a string.
+      // v2.4.48 (B48-MIG-1a): on upgrade, Register-All-Tasks.ps1 MUST run
+      // elevated. The /Delete /TN /F leg fails non-elevated against tasks
+      // originally created elevated (root cause of Greg's box stuck at
+      // last_task_migration_version='2.4.45' for two releases -- every
+      // subsequent migration tried non-elevated, every /Delete returned
+      // ERROR: Access is denied, /Create then collided with the still-present
+      // task and reported `failed`, the `some()` predicate happened to find
+      // the one row that succeeded, and the flag advanced anyway).
+      //
+      // UAC budget on upgrade:
+      //  - Best case (1 prompt): bundle-sync IIFE did NOT already prompt
+      //    (its `last_acl_repair_version` short-circuit suppressed the
+      //    elevated copy), so this is the only elevation in the boot path.
+      //  - Worst case (2 prompts): bundle-sync IIFE already prompted for
+      //    its elevated Sync. We still need a second prompt because the
+      //    sync/register pair cannot be merged after the fact -- the bundle
+      //    is already on disk by the time we get here. Loud `console.warn`
+      //    so the dual-prompt frequency is visible in main.log post-ship.
+      //  - Steady-state launch (`isUpgrade === false`): no UAC, runs
+      //    non-elevated without -ForceRecreate (existing tasks are queried
+      //    via /Query, not deleted -- non-elevated is fine).
+      //
+      // E_UAC_CANCELLED on the elevated call leaves the migration flag
+      // unwritten, so the next launch retries. Every other elevated-path
+      // failure (E_ELEVATION_FAILED, E_TIMEOUT_KILLED) does the same -- we
+      // catch and let the function fall through; the flag is written only
+      // inside the `if (verifyAutopilotMigration(...))` guard below.
       type RegResult = import('./taskMigrationVerify.js').RegisterAllTasksResult;
-      const result = await runPowerShellScript<RegResult>(
-        'Register-All-Tasks.ps1', args, { timeoutMs: 60_000 },
-      );
+      let result: RegResult;
+      if (isUpgrade) {
+        if (bundleElevatedSyncAttempted) {
+          console.warn('migration: dual UAC required (sync already attempted)');
+        }
+        migrationElevatedRegisterAttempted = true;
+        try {
+          result = await runElevatedPowerShellScript<RegResult>(
+            'Register-All-Tasks.ps1', args, { timeoutMs: 120_000 },
+          );
+        } catch {
+          // Elevation declined / failed. Leave the migration flag
+          // unwritten so the next launch retries.
+          return;
+        }
+      } else {
+        result = await runPowerShellScript<RegResult>(
+          'Register-All-Tasks.ps1', args, { timeoutMs: 60_000 },
+        );
+      }
       if (isUpgrade) {
         // Verification (B45-4 self-heal): require at least one autopilot row
         // to be both `registered` and carry the dispatcher reference. If the

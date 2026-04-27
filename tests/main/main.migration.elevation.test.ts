@@ -16,11 +16,14 @@
 // v2.4.45 autopilot scripts, producing a no-op migration.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   verifyAutopilotMigration,
   shouldFireElevatedAutopilotSync,
   autopilotScriptsAreStale,
   AUTOPILOT_SCRIPT_NAMES,
+  EXPECTED_AUTOPILOT_TASK_NAMES,
 } from '../../src/main/taskMigrationVerify.js';
 
 describe('AUTOPILOT_SCRIPT_NAMES (B46-1 invariant)', () => {
@@ -107,15 +110,15 @@ describe('shouldFireElevatedAutopilotSync (B46-1)', () => {
 });
 
 describe('verifyAutopilotMigration size-mismatch arm (B46-1 belt-and-braces)', () => {
+  // v2.4.48: build a full 11-row result so the dispatcher-content predicate
+  // passes by itself; size-mismatch arm is what we're isolating here.
   const validResult = {
-    results: [
-      {
-        name: 'PCDoctor-Autopilot-EmptyRecycleBins',
-        status: 'registered',
-        command: 'powershell.exe -File "C:\\ProgramData\\PCDoctor\\Run-AutopilotScheduled.ps1" -RuleId "x"',
-        output: 'SUCCESS',
-      },
-    ],
+    results: EXPECTED_AUTOPILOT_TASK_NAMES.map(name => ({
+      name,
+      status: 'registered',
+      command: 'powershell.exe -File "C:\\ProgramData\\PCDoctor\\Run-AutopilotScheduled.ps1" -RuleId "x"',
+      output: 'SUCCESS',
+    })),
   };
 
   it('passes when sizes match (deployed Sync did happen)', () => {
@@ -134,12 +137,50 @@ describe('verifyAutopilotMigration size-mismatch arm (B46-1 belt-and-braces)', (
   });
 
   it('still fails when the dispatcher predicate fails, regardless of sizes', () => {
+    // Full 11-row set, but every row references the legacy direct script
+    // (no dispatcher). Should fail on the per-row dispatcher check.
     const noDispatcher = {
-      results: [
-        { name: 'PCDoctor-Autopilot-X', status: 'registered',
-          command: 'powershell.exe -File "C:\\actions\\X.ps1"', output: 'SUCCESS' },
-      ],
+      results: EXPECTED_AUTOPILOT_TASK_NAMES.map(name => ({
+        name,
+        status: 'registered',
+        command: 'powershell.exe -File "C:\\actions\\X.ps1"',
+        output: 'SUCCESS',
+      })),
     };
     expect(verifyAutopilotMigration(noDispatcher, { deployedSize: 12345, bundledSize: 12345 })).toBe(false);
+  });
+});
+
+describe('main.ts migration IIFE elevates on upgrade (B48-MIG-1a)', () => {
+  // The migration logic lives inside `app.whenReady().then(...)` so we can't
+  // unit-test the dispatch through normal mocks without booting Electron.
+  // Instead we lock in the contract by source inspection: `Register-All-Tasks.ps1`
+  // MUST be invoked via `runElevatedPowerShellScript` on the upgrade branch.
+  // If a future edit silently regresses to `runPowerShellScript('Register-All-Tasks.ps1', ...)`
+  // on the upgrade path, this test fails. The non-elevated steady-state call
+  // is allowed and is what the test asserts must continue to coexist.
+  const mainSource: string = readFileSync(
+    path.join(process.cwd(), 'src', 'main', 'main.ts'),
+    'utf8',
+  );
+
+  it('contains an elevated Register-All-Tasks.ps1 invocation', () => {
+    // Match the call across the line break between function name and arg.
+    const re = /runElevatedPowerShellScript[\s\S]{0,80}'Register-All-Tasks\.ps1'/;
+    expect(re.test(mainSource), 'main.ts is missing the elevated Register-All-Tasks invocation').toBe(true);
+  });
+
+  it('still contains the non-elevated Register-All-Tasks.ps1 fallback for steady-state launches', () => {
+    const re = /runPowerShellScript<RegResult>\s*\(\s*\n?\s*'Register-All-Tasks\.ps1'/;
+    expect(re.test(mainSource), 'main.ts dropped the non-elevated steady-state path').toBe(true);
+  });
+
+  it('passes -ForceRecreate when isUpgrade is true', () => {
+    // Direct token check — the args.push happens before the elevated call.
+    expect(mainSource).toContain("args.push('-ForceRecreate')");
+  });
+
+  it('logs a warning when both bundle-sync and migration would prompt for UAC (dual-prompt path)', () => {
+    expect(mainSource).toContain('migration: dual UAC required (sync already attempted)');
   });
 });
