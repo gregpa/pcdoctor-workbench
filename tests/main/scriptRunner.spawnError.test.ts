@@ -56,6 +56,38 @@ describe('runPowerShellScript spawn error (B48-AS-4)', () => {
     mocks.existsSyncFn.mockReturnValue(true);
   });
 
+  it('safety timer is cleared after spawn error so child.kill is not called when the timeout expires (fake timers)', async () => {
+    // The prior proxy test (child.kill not called immediately) does not prove
+    // clearTimeout ran -- the 5-minute timer simply hasn't fired yet. This
+    // test uses fake timers to advance past the full DEFAULT_SCRIPT_TIMEOUT_MS
+    // (5 min) and asserts child.kill is still not called. If the try/finally
+    // clearTimeout were removed from scriptRunner.ts, child.kill WOULD be
+    // called at the advanced tick, and this test would fail.
+    vi.useFakeTimers();
+    const child = makeChildEmitter();
+    mocks.spawnFn.mockReturnValue(child);
+
+    // Schedule the error event in real-timer terms -- vitest fake timers
+    // still process microtasks, but setImmediate / nextTick variants work.
+    // We emit the error directly after the promise is awaiting.
+    const scriptPromise = runPowerShellScript('FakeScript.ps1', []);
+
+    // Advance a tiny slice so the listeners are registered, then fire error.
+    await vi.advanceTimersByTimeAsync(1);
+    const err: NodeJS.ErrnoException = new Error('spawn pwsh ENOENT');
+    err.code = 'ENOENT';
+    child.emit('error', err);
+
+    await expect(scriptPromise).rejects.toMatchObject({ code: 'E_SPAWN_FAILED' });
+
+    // Now advance past DEFAULT_SCRIPT_TIMEOUT_MS (5 * 60 * 1000 = 300_000 ms).
+    // If clearTimeout did NOT run, the safety timer fires here and calls child.kill.
+    await vi.advanceTimersByTimeAsync(310_000);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
   it('rejects with E_SPAWN_FAILED when child emits ENOENT', async () => {
     const child = makeChildEmitter();
     mocks.spawnFn.mockReturnValue(child);
