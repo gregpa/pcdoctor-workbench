@@ -33,6 +33,9 @@ const pExecFile = promisify(execFile);
 // loads electron-updater + better-sqlite3 -- not loadable from vitest
 // node env).
 import { SCHEDULED_TASK_NAME_RE } from './scheduledTaskNames.js';
+// v2.4.49 (B48-AUDIT-1/2): renderer-supplied reviewDate validator. Extracted
+// to a leaf module so tests can import the constant without booting IPC.
+import { REVIEW_DATE_RE } from './reviewDateRe.js';
 
 async function runSchtasks(args: string[], timeoutMs = 5000): Promise<{ stdout: string; stderr: string }> {
   return pExecFile(
@@ -306,6 +309,13 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:getWeeklyReview', async (_evt, reviewDate?: string): Promise<IpcResult<WeeklyReview | null>> => {
     try {
+      // v2.4.49 (B48-AUDIT-2): refuse any renderer-supplied reviewDate that
+      // doesn't match YYYY-MM-DD. Even though the existing files.find
+      // existsSync path is filesystem-bounded, defence-in-depth: validate
+      // at the handler boundary, not the sink.
+      if (reviewDate !== undefined && !REVIEW_DATE_RE.test(reviewDate)) {
+        return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+      }
       if (!existsSync(weeklyDir)) return { ok: true, data: null };
       const files = (await readdir(weeklyDir)).filter(f => f.endsWith('.json')).sort().reverse();
       if (files.length === 0) return { ok: true, data: null };
@@ -354,6 +364,14 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:archiveWeeklyReviewToObsidian', async (_evt, reviewDate: string): Promise<IpcResult<{ archive_path: string }>> => {
     try {
+      // v2.4.49 (B48-AUDIT-1): reject path-traversal payloads at the handler
+      // boundary. Without this, '../../etc/passwd' would let `${reviewDate}.md`
+      // resolve OUTSIDE weeklyDir and a maliciously named source file would
+      // satisfy the existsSync check, causing a copyFile to an attacker-
+      // chosen destination.
+      if (!REVIEW_DATE_RE.test(reviewDate)) {
+        return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+      }
       const sourceMd = path.join(weeklyDir, `${reviewDate}.md`);
       if (!existsSync(sourceMd)) return { ok: false, error: { code: 'E_NOT_FOUND', message: 'Review markdown not found' } };
       // Reviewer P2: path was hardcoded to greg_'s dev box. Read from a
