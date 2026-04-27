@@ -76,8 +76,14 @@ foreach ($d in $fixedDrives) {
         $clearError = $_.Exception.Message
     }
 
-    # Give Explorer a moment to update the $Recycle.Bin index before re-measuring.
-    Start-Sleep -Milliseconds 200
+    # v2.4.49 (B47-3 revisited): give Explorer / the $Recycle.Bin index more
+    # time to settle before re-measuring. Pre-2.4.49 200ms was too tight on
+    # NTFS — Greg's 2026-04-26 dispatcher log showed before>0 / clearError=null
+    # / after>=before on D/E/G/J drives, which hit the (since-removed)
+    # `else { 'error' }` branch and emitted a false-error row. Empirically
+    # ~1s suffices; 1500ms is a comfortable margin for unattended Task
+    # Scheduler runs.
+    Start-Sleep -Milliseconds 1500
 
     $after = Get-RecycleBinSize -DriveRoot $driveRoot
     # v2.4.16: explicit Int64 conditional rather than [math]::Max(0, int64).
@@ -86,12 +92,21 @@ foreach ($d in $fixedDrives) {
     # "Cannot convert value 'X' to type 'System.Int32'" error.
     $freed = if ($before -gt $after) { [int64]($before - $after) } else { [int64]0 }
 
+    # v2.4.49 (B47-3 revisited): the trailing `else { 'error' }` branch was
+    # firing when Clear-RecycleBin returned cleanly (no exception) but the
+    # re-measure 200ms later still saw the same/larger size — i.e. the
+    # $Recycle.Bin index hadn't settled yet. Tier-down to 'partial' for
+    # this case: we can't prove the bin is empty, but we have no evidence
+    # of failure either. 'partial' counts as $anySuccess so the top-level
+    # success: true holds, matching user intent ("we tried and it looks
+    # fine"). The 'blocked' / 'error' paths still cover all exception cases.
     $status =
         if ($before -eq 0 -and $null -eq $clearError) { 'empty' }
         elseif ($clearError -and $after -eq $before)  { 'blocked' }
         elseif ($clearError -and $after -lt $before)  { 'partial' }
         elseif ($after -eq 0 -and $before -gt 0)      { 'cleared' }
         elseif ($after -lt $before)                   { 'partial' }
+        elseif ($null -eq $clearError -and $before -gt 0) { 'partial' }  # NEW: clean exit, slow index settle
         else                                          { 'error' }
 
     if ($status -eq 'cleared' -or $status -eq 'partial') { $anySuccess = $true }
