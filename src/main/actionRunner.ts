@@ -153,6 +153,35 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
     const runnerOpts = def.timeout_ms ? { timeoutMs: def.timeout_ms } : undefined;
     const result = await runner<Record<string, unknown>>(def.ps_script, scriptArgs, runnerOpts);
     const duration = Date.now() - start;
+
+    // v2.4.48 (B48-AS-1): centralised silent-success guard. Four scripts
+    // currently emit exit 0 + `{"success":false,"message":"..."}` on
+    // logical failure (Run-DISM, Cleanup-WinSxS, Reset-Firewall,
+    // Reset-WinSock). Pre-2.4.48 the runner trusted exit 0 + valid JSON
+    // and recorded `status:'success'` -- the audit log lied, the History
+    // page showed green, and the user got no warning toast. The check is
+    // deliberately `=== false` (not `!== true`) so actions whose JSON
+    // intentionally omits the `success` key keep the legacy success path.
+    if ((result as any)?.success === false) {
+      const message = (result as any)?.message ?? 'Action reported success=false';
+      finishActionLog(logId, { status: 'error', duration_ms: duration, error_message: message });
+      // Notify on user-triggered failures so the renderer surfaces the toast,
+      // matching the existing catch-block notification at line 186-191.
+      if ((input.triggered_by ?? 'user') === 'user') {
+        notify({
+          severity: 'warning',
+          title: `✗ ${def.label} failed`,
+          body: message,
+          eventKey: 'action_failed',
+        }).catch(() => {});
+      }
+      return {
+        action: input.name,
+        success: false,
+        duration_ms: duration,
+        error: { code: 'E_ACTION_REPORTED_FAILURE', message, details: result },
+      };
+    }
     finishActionLog(logId, { status: 'success', duration_ms: duration, result });
     // Capture tool-import results into tool_results history
     if (input.name === 'import_hwinfo_csv' || input.name === 'import_occt_csv') {

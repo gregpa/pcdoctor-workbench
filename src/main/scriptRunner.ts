@@ -116,11 +116,31 @@ export async function runPowerShellScript<T = unknown>(
     opts.onStderr?.(s);
   });
 
-  const exitCode: number = await new Promise((resolve) => {
-    child.on('exit', (code) => resolve(code ?? -1));
-  });
-
-  clearTimeout(timer);
+  // v2.4.48 (B48-AS-4): wire 'error' alongside 'exit' so a failed spawn
+  // (ENOENT, EACCES, EMFILE, EPERM, etc.) rejects the promise instead of
+  // hanging forever. Pre-2.4.48 this Promise resolved only on 'exit'; if
+  // pwsh.exe couldn't be spawned at all (e.g. PWSH_FALLBACK pointed at a
+  // missing path on a fresh image), child_process emitted 'error' and no
+  // 'exit' ever fired. The await blocked indefinitely; only the safety
+  // timer eventually killed a process that was never alive in the first
+  // place. The clearTimeout below now happens via try/finally so the
+  // safety timer is cancelled on rejection too -- otherwise the
+  // dangling timer fires `child.kill` ~5 minutes later for no reason.
+  let exitCode: number;
+  try {
+    exitCode = await new Promise<number>((resolve, reject) => {
+      child.on('exit', (code) => resolve(code ?? -1));
+      child.on('error', (err: NodeJS.ErrnoException) => {
+        reject(new PCDoctorScriptError(
+          'E_SPAWN_FAILED',
+          `Failed to spawn pwsh: ${err.code ?? 'unknown'}: ${err.message}`,
+          { errno: err.errno, syscall: err.syscall, path: err.path },
+        ));
+      });
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (timedOut) {
     throw new PCDoctorScriptError('E_TIMEOUT_KILLED', `Script exceeded ${timeoutMs}ms and was killed`, {

@@ -365,11 +365,23 @@ if (Test-Path $autostartExe) {
 
 $sw.Stop()
 $totalCount = @($userContextTasks).Count + @($systemContextTasks).Count + @($userAutopilotTasks).Count + @($systemAutopilotTasks).Count + 1
+
+# v2.4.48 (B48-AS-3): emit success=false + exit 1 when any required task
+# registration fails. Pre-2.4.48 this script unconditionally wrote
+# success=$true regardless of how many rows reported `failed` -- the
+# migration block in main.ts saw success and trusted it. The Autostart
+# task is excluded from the required set because it legitimately reports
+# `skipped` on a fresh install (line ~363 above) before the workbench
+# .exe is in %LOCALAPPDATA%; every other failed row is load-bearing.
+$failedRequired = @($results | Where-Object {
+    $_.status -eq 'failed' -and $_.name -ne 'PCDoctor-Workbench-Autostart'
+}).Count
+$overallSuccess = ($failedRequired -eq 0)
 $result = @{
-    success     = $true
+    success     = $overallSuccess
     duration_ms = $sw.ElapsedMilliseconds
     results     = $results
-    message     = "Processed $totalCount tasks"
+    message     = if ($overallSuccess) { "Processed $totalCount tasks" } else { "Processed $totalCount tasks; $failedRequired required tasks failed" }
 }
 $result | ConvertTo-Json -Depth 5 -Compress
-exit 0
+if ($overallSuccess) { exit 0 } else { exit 1 }
