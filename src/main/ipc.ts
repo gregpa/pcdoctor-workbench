@@ -354,6 +354,14 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:setWeeklyReviewItemState', async (_evt, reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<{}>> => {
+    // v2.4.49 (B48-AUDIT-3): third reviewDate callsite. better-sqlite3 binds
+    // parameters so SQL injection is not the threat, but the unvalidated
+    // string lands in `weekly_review_states` as a TEXT primary key. Future
+    // code that reads this back and feeds it to `path.join` would re-open
+    // the traversal that B48-AUDIT-1/2 closed. Same allowlist for parity.
+    if (!REVIEW_DATE_RE.test(reviewDate)) {
+      return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+    }
     try {
       setReviewItemState(reviewDate, itemId, state as any, appliedActionId);
       return { ok: true, data: {} };

@@ -101,9 +101,17 @@ describe('dispatchAlert dedup gate (v2.4.49 B49-NOTIF-1)', () => {
     const dispatch = await loadDispatch();
     await dispatch(makeDecision(), 0);
     expect(sendTelegramMock).toHaveBeenCalledTimes(1);
+    expect(ACTIVITY.length).toBe(1); // first dispatch wrote one 'alerted' row
     // Second call: same decision, same signature. Should be suppressed.
     await dispatch(makeDecision(), 0);
     expect(sendTelegramMock).toHaveBeenCalledTimes(1); // still 1
+    // v2.4.49 polish (code-review W2): assert no phantom activity row written
+    // on the dedup-skip path. Without this assertion, a future edit that
+    // moves the dedup `return` AFTER `insertAutopilotActivity` would still
+    // pass case 2 — the test would only verify Telegram silence, not
+    // activity-log silence. The dedup gate's invariant is BOTH: no Telegram
+    // call AND no activity row.
+    expect(ACTIVITY.length).toBe(1);
   });
 
   it('case 3: second emission >24h later, same signature → sendTelegramMessage called', async () => {

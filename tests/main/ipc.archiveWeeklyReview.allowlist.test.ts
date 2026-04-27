@@ -78,6 +78,17 @@ function getReviewGate(reviewDate?: string): IpcResult<unknown> | null {
   return null;
 }
 
+// v2.4.49 polish (code-review W1 / B48-AUDIT-3): third reviewDate callsite
+// handler. Mirror its first lines so the same allowlist contract applies.
+// Required is `string` (not optional) — the handler signature is
+// `(reviewDate: string, itemId, state, ...)`. No undefined fall-through.
+function setItemStateGate(reviewDate: string): IpcResult<{}> | null {
+  if (!REVIEW_DATE_RE.test(reviewDate)) {
+    return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+  }
+  return null;
+}
+
 describe('api:archiveWeeklyReviewToObsidian validation gate shape', () => {
   it('proceeds (returns null) for a valid ISO date', () => {
     expect(archiveGate('2026-04-27')).toBeNull();
@@ -113,5 +124,37 @@ describe('api:getWeeklyReview validation gate shape', () => {
       ok: false,
       error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' },
     });
+  });
+});
+
+describe('api:setWeeklyReviewItemState validation gate shape (B48-AUDIT-3)', () => {
+  // v2.4.49 polish (code-review W1): third reviewDate callsite. Same
+  // allowlist semantics as the archive/get handlers; required-string param
+  // (no undefined fall-through). better-sqlite3 binds parameters so SQL
+  // injection isn't the threat — the gate prevents DB-key pollution and
+  // closes the bug class for any future code that reads the value back
+  // and feeds it to the filesystem.
+  it('proceeds (returns null) for a valid ISO date', () => {
+    expect(setItemStateGate('2026-04-27')).toBeNull();
+  });
+
+  it('returns E_INVALID_DATE for path-traversal payload', () => {
+    const r = setItemStateGate('../../etc/passwd');
+    expect(r).toEqual({
+      ok: false,
+      error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' },
+    });
+  });
+
+  it('returns E_INVALID_DATE for empty string', () => {
+    const r = setItemStateGate('');
+    expect(r?.ok).toBe(false);
+    if (r && !r.ok) expect(r.error.code).toBe('E_INVALID_DATE');
+  });
+
+  it('returns E_INVALID_DATE for null-byte injection', () => {
+    const r = setItemStateGate('2026-04-27\x00.evil');
+    expect(r?.ok).toBe(false);
+    if (r && !r.ok) expect(r.error.code).toBe('E_INVALID_DATE');
   });
 });

@@ -383,6 +383,16 @@ export async function dispatchDecision(d: AutopilotDecision, minGapMs = 6 * 60 *
  * the signature so the next emission bypasses the dedup window naturally. If
  * a future caller mutates a fourth field that should also break dedup, add it
  * here and bump the slice — see plan §6 risk row.
+ *
+ * STABILITY REQUIREMENT (code-review S1): every component of the hash MUST be
+ * stable across consecutive evaluations of the same logical alert state. In
+ * particular, `d.reason` MUST NOT include numeric counts that change every
+ * tick (e.g., "3 errors in 7 days" is fine; "disk usage at 87.4%" is not —
+ * the float drifts, signature differs, the 24h dedup gate becomes a no-op
+ * and Telegram fires every tick). Today's only Tier-3 reason strings (see
+ * `evaluateRule` cases) are all stable. If you add a Tier-3 alert whose
+ * reason is dynamic, EITHER drop reason from this hash OR bucket the dynamic
+ * value (e.g., `Math.floor(pct/10)`) before constructing the reason.
  */
 function stateSignature(d: AutopilotDecision): string {
   const sev = d.alert?.severity ?? 'unknown';
