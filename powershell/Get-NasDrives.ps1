@@ -131,26 +131,28 @@ foreach ($d in $allDrives) {
             $totalBytes = [int64]$d.Size
         } catch { }
 
-        if ($isNetwork) {
-            # @Recycle sizing. Missing folder = 0 bytes (not null). Access
-            # errors during the walk are tolerated; a stale low number is
-            # better than failing the whole tile.
-            $recyclePath = Join-Path $root '@Recycle'
-            if (Test-Path $recyclePath -ErrorAction SilentlyContinue) {
-                try {
-                    $sum = (Get-ChildItem -Path $recyclePath -Recurse -Force -File -ErrorAction SilentlyContinue |
-                            Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
-                    $recycleBytes = if ($null -eq $sum) { [int64]0 } else { [int64]$sum }
-                } catch {
-                    $recycleBytes = $null
-                }
-            } else {
-                $recycleBytes = [int64]0
-            }
-        }
-        # Local + removable drives leave $recycleBytes = $null. The UI uses
-        # this to hide the @Recycle trash button (local $Recycle.Bin is
-        # handled by the existing empty_recycle_bins Quick Action).
+        # v2.4.50 (B49-NAS-1): @Recycle size scanning REMOVED from this
+        # hot path. Pre-2.4.50 the script ran `Get-ChildItem -Recurse` over
+        # each network share's @Recycle folder. On Greg's QNAP that took
+        # 21.5s for M:\@Recycle alone (4 huge Plex video files producing
+        # SMB metadata round-trips per directory) plus 3.5s for Z:, easily
+        # blowing the 30s IPC timeout and breaking the entire drive panel.
+        #
+        # `recycle_bytes` is now always `$null` for network drives. The UI
+        # gates the trash button on `unc` presence instead of size > 0.
+        # The actual empty operation (Empty-NasRecycleBin.ps1) computes
+        # size on-demand in the action runner, which has its own 5-min
+        # action timeout (not the 30s IPC budget) so a slow share is
+        # tolerable there.
+        #
+        # Future v2.4.51+: scheduled-task background refresh of @Recycle
+        # sizes into a cache; UI reads cache (always fast). For now,
+        # simplicity wins.
+        $recycleBytes = $null
+        # Local + removable drives also leave $recycleBytes = $null. The
+        # UI uses `kind === 'network'` to decide whether to show the @Recycle
+        # button at all (local $Recycle.Bin is handled by the existing
+        # empty_recycle_bins Quick Action).
     }
 
     $result += [ordered]@{

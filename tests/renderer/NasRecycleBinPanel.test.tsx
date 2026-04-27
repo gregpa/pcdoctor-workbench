@@ -121,20 +121,28 @@ describe('<NasRecycleBinPanel>', () => {
     expect(trashBtn).toBeDisabled();
   });
 
-  it('trash button is disabled when recycle_bytes is 0', async () => {
+  // v2.4.50 (B49-NAS-1): the button no longer gates on recycle_bytes.
+  // Pre-2.4.50 the gate was `(recycle_bytes ?? 0) === 0` which mixed
+  // "size known to be 0" and "size unknown"; the underlying script's
+  // recursive SMB scan blew the 30s IPC budget on Plex shares so we
+  // now skip the scan and report null. Button enabled whenever the
+  // drive is reachable; the empty action no-ops gracefully.
+  it('trash button stays enabled when recycle_bytes is 0 (size known empty)', async () => {
     vi.stubGlobal('api', makeApi([drive({ recycle_bytes: 0, reachable: true })]));
     render(<NasRecycleBinPanel onEmptyDrive={noop} />);
     await waitFor(() => expect(screen.getByText('M:')).toBeTruthy());
     const trashBtn = screen.getByTitle(/@Recycle is empty or missing/);
-    expect(trashBtn).toBeDisabled();
+    expect(trashBtn).not.toBeDisabled();
   });
 
-  it('trash button is disabled when recycle_bytes is null', async () => {
+  it('trash button stays enabled when recycle_bytes is null (size unknown — v2.4.50 deferred-compute path)', async () => {
     vi.stubGlobal('api', makeApi([drive({ recycle_bytes: null, reachable: true })]));
     render(<NasRecycleBinPanel onEmptyDrive={noop} />);
     await waitFor(() => expect(screen.getByText('M:')).toBeTruthy());
-    const trashBtn = screen.getByTitle(/@Recycle is empty or missing/);
-    expect(trashBtn).toBeDisabled();
+    const trashBtn = screen.getByTitle(/size computed on click/);
+    expect(trashBtn).not.toBeDisabled();
+    // Button label uses 'Empty' fallback rather than '-' when size is unknown.
+    expect(screen.getByRole('button', { name: /🗑 Empty/ })).toBeTruthy();
   });
 
   it('clicking the trash button calls onEmptyDrive with the letter without the colon', async () => {

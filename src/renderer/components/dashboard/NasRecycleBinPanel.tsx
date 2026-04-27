@@ -241,18 +241,31 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
                         : `${fmtBytes(d.used_bytes)} / ${fmtBytes(d.total_bytes)}`}
                     </span>
                     {isNetwork ? (
+                      // v2.4.50 (B49-NAS-1): button enabled whenever the
+                      // drive is reachable. Pre-2.4.50 we gated on
+                      // `recycle_bytes > 0` but Get-NasDrives.ps1 no longer
+                      // populates that field (the recursive SMB scan blew
+                      // the 30s IPC budget). The actual empty operation
+                      // computes size on-demand inside Empty-NasRecycleBin.ps1
+                      // and no-ops gracefully if @Recycle is missing/empty.
                       <button
                         type="button"
                         onClick={() => void handleEmpty(d)}
-                        disabled={isOffline || busy === d.letter || (d.recycle_bytes ?? 0) === 0}
+                        disabled={isOffline || busy === d.letter}
                         title={isOffline
                           ? 'Drive offline'
-                          : (d.recycle_bytes ?? 0) === 0
-                            ? '@Recycle is empty or missing'
-                            : `Empty ${d.letter}\\@Recycle (${fmtBytes(d.recycle_bytes)})`}
+                          : d.recycle_bytes === null
+                            ? `Empty ${d.letter}\\@Recycle (size computed on click)`
+                            : (d.recycle_bytes ?? 0) === 0
+                              ? '@Recycle is empty or missing'
+                              : `Empty ${d.letter}\\@Recycle (${fmtBytes(d.recycle_bytes)})`}
                         className="px-2 py-1 rounded-md text-[10px] bg-status-warn/20 border border-status-warn/50 text-status-warn hover:bg-status-warn/30 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                       >
-                        {busy === d.letter ? '...' : `🗑 ${fmtBytes(d.recycle_bytes)}`}
+                        {busy === d.letter
+                          ? '...'
+                          : d.recycle_bytes === null
+                            ? '🗑 Empty'
+                            : `🗑 ${fmtBytes(d.recycle_bytes)}`}
                       </button>
                     ) : (
                       // Placeholder keeps row heights aligned when mixing local
