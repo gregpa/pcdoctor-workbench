@@ -727,11 +727,13 @@ export function registerIpcHandlers() {
   ]);
 
   ipcMain.handle('api:listScheduledTasks', async (): Promise<IpcResult<ScheduledTaskInfo[]>> => {
-    // Delegate to a single PowerShell script that wraps schtasks.exe one-task-
-    // at-a-time. Calling schtasks via Node child_process directly hangs (it
-    // expects an attached console). Calling /Query without /TN to enumerate
-    // everything also fails on this machine because of a corrupted Microsoft
-    // task entry under the root.
+    // Delegate to Get-ScheduledTasksStatus.ps1 (COM-based enumeration via
+    // Schedule.Service). The hang note here applies ONLY to schtasks /Query
+    // WITHOUT /TN — that's why this enumerator goes via COM. The two
+    // schtasks /Change /TN and /Run /TN handlers below were hardened in
+    // v2.4.48 (B48-SEC-1) to call schtasks.exe directly via execFile +
+    // an allowlist regex, since the /TN-bearing path doesn't trip the hang.
+    // See runSchtasks at the top of this file.
     try {
       const r = await runPowerShellScript<{ success: boolean; tasks: ScheduledTaskInfo[] }>(
         'Get-ScheduledTasksStatus.ps1', ['-JsonOutput'], { timeoutMs: 30_000 }

@@ -59,6 +59,10 @@ describe('runAction silent-success guard (B48-AS-1)', () => {
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_ACTION_REPORTED_FAILURE');
     expect(r.error?.message).toContain('0x800f081f');
+    // triggered_by defaults to 'user' when omitted — notify must fire so
+    // the implicit-default path doesn't silently regress to scheduled-style
+    // suppression. (Code-reviewer W6.)
+    expect((notify as any).mock.calls.length).toBe(1);
   });
 
   it('writes status:error to the audit log when success=false', async () => {

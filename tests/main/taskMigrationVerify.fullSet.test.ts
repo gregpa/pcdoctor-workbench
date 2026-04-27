@@ -88,9 +88,12 @@ describe('EXPECTED_AUTOPILOT_TASK_NAMES drift guard (B48-MIG-1b §7 risk row)', 
     const ps = readFileSync(scriptPath, 'utf8');
 
     // Pull every literal PCDoctor-Autopilot-<word> name. The script writes
-    // these as e.g. `name = 'PCDoctor-Autopilot-EmptyRecycleBins'`. We allow
-    // both single and double quotes for resilience to future edits.
-    const re = /['"](PCDoctor-Autopilot-[A-Za-z0-9_-]+)['"]/g;
+    // these as `name = 'PCDoctor-Autopilot-EmptyRecycleBins'` inside a
+    // hashtable literal. Anchor on the `name = '...'` shape so a future
+    // comment that happens to quote a task name (e.g. `# replaces
+    // 'PCDoctor-Autopilot-OldName'`) does not pollute the live set.
+    // Both single and double quotes accepted for resilience to future edits.
+    const re = /\bname\s*=\s*['"](PCDoctor-Autopilot-[A-Za-z0-9_-]+)['"]/g;
     const live = new Set<string>();
     let m: RegExpExecArray | null;
     while ((m = re.exec(ps)) !== null) {

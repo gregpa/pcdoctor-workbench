@@ -206,12 +206,6 @@ app.whenReady().then(() => {
   // the case where the bundle-sync's ACL-versioning short-circuit
   // (`last_acl_repair_version`) suppressed it.
   let bundleElevatedSyncAttempted = false;
-  // v2.4.48 (B48-MIG-1a): set by the migration IIFE once it dispatches its
-  // own elevated Sync-ScriptsFromBundle.ps1 + Register-All-Tasks.ps1 chain.
-  // Currently informational only -- the bundle-sync IIFE doesn't read it
-  // (it always runs first via Promise scheduling) -- but the flag exists
-  // so future refactors that interleave the two IIFEs can avoid dual UAC.
-  let migrationElevatedRegisterAttempted = false;
   const bundledPsDir = app.isPackaged
     ? path.join(process.resourcesPath, 'powershell')
     : path.join(app.getAppPath(), 'powershell');
@@ -333,14 +327,14 @@ app.whenReady().then(() => {
         if (bundleElevatedSyncAttempted) {
           console.warn('migration: dual UAC required (sync already attempted)');
         }
-        migrationElevatedRegisterAttempted = true;
         try {
           result = await runElevatedPowerShellScript<RegResult>(
             'Register-All-Tasks.ps1', args, { timeoutMs: 120_000 },
           );
         } catch {
-          // Elevation declined / failed. Leave the migration flag
-          // unwritten so the next launch retries.
+          // Elevation declined / failed. Returns from THIS async IIFE
+          // (not from app.whenReady's then-callback). Leaves the
+          // migration flag unwritten so the next launch retries.
           return;
         }
       } else {
