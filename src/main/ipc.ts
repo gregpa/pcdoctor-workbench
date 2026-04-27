@@ -6,18 +6,38 @@ import AdmZip from 'adm-zip';
 import { spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-// Windows-quirk: schtasks.exe hangs when invoked directly via spawn/execFile
-// from a Node child_process (it expects an attached console and times out
-// otherwise — observed under both spawnSync and execFile). Wrapping the call
-// in powershell.exe avoids the hang because PowerShell handles the console
-// attachment correctly. Every schtasks call below goes through this helper.
+// v2.4.48 (B48-SEC-1): direct execFile of schtasks.exe with array-form
+// args (no shell interpolation). Pre-2.4.48 this helper concatenated
+// `['schtasks', ...args].join(' ')` into a powershell.exe -Command string
+// at the three callsites that pass renderer-controlled task names. A name
+// containing shell metachars (e.g. `'PCDoctor-Foo$(Remove-Item ...)'`)
+// would have been parsed and executed by PowerShell. The renderer-side
+// allowlist regex below is the primary defence; switching to direct
+// execFile is defence-in-depth so a future regex weakening cannot reach
+// a shell parser.
+//
+// Historical Windows-quirk: schtasks.exe hung under direct
+// spawn/execFile when invoked via `/Query` WITHOUT `/TN` against a
+// machine with a corrupted Microsoft task entry (it expected an
+// attached console and timed out). The three callsites here all pass
+// `/TN <name>` (Query, Change /ENABLE|/DISABLE, Run) and have NOT been
+// observed to hang. If a future regression surfaces the hang we can
+// fall back to wrapping in powershell.exe -Command, but each user-
+// supplied arg must be emitted as a single-quoted PS literal (mirrors
+// scriptRunner.ts:269-279). Do NOT regress to .join(' ').
 const pExecFile = promisify(execFile);
 
+// v2.4.48 (B48-SEC-1): allowlist regex extracted to scheduledTaskNames.ts
+// so tests/main/ipc.runSchtasksAllowlist.test.ts can import the constant
+// without pulling the entire IPC handler module (which transitively
+// loads electron-updater + better-sqlite3 -- not loadable from vitest
+// node env).
+import { SCHEDULED_TASK_NAME_RE } from './scheduledTaskNames.js';
+
 async function runSchtasks(args: string[], timeoutMs = 5000): Promise<{ stdout: string; stderr: string }> {
-  const psCmd = ['schtasks', ...args].join(' ');
   return pExecFile(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+    'schtasks.exe',
+    args,
     { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, maxBuffer: 256 * 1024 }
   );
 }
@@ -730,6 +750,14 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:setScheduledTaskEnabled', async (_evt, name: string, enabled: boolean): Promise<IpcResult<{}>> => {
+    // v2.4.48 (B48-SEC-1): regex allowlist BEFORE the MANAGED_TASKS.has
+    // check. The regex catches shell-metachar smuggling regardless of
+    // whether MANAGED_TASKS is later weakened. A name like
+    // `PCDoctor-Foo; rm -rf /` would have failed MANAGED_TASKS.has
+    // anyway, but two-layer defence costs nothing.
+    if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
+    }
     if (!MANAGED_TASKS.has(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
     }
@@ -742,6 +770,10 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<{}>> => {
+    // v2.4.48 (B48-SEC-1): see api:setScheduledTaskEnabled comment.
+    if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
+    }
     if (!MANAGED_TASKS.has(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
     }
