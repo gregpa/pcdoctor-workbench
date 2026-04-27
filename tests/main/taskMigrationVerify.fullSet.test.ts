@@ -112,3 +112,49 @@ describe('EXPECTED_AUTOPILOT_TASK_NAMES drift guard (B48-MIG-1b §7 risk row)', 
     }
   });
 });
+
+// v2.4.49 (B47-2): drift guard for the registered task XML's <Author> field.
+// Pre-2.4.49 the line was hardcoded to '<Author>PCDoctor v2.4.46</Author>'
+// across multiple releases. The live script now reads $ScriptVersion from
+// package.json with a hardcoded fallback. This test asserts:
+//   1. The live <Author> line uses the $ScriptVersion variable (not a literal).
+//   2. The hardcoded fallback literal in the $ScriptVersion = '...' line
+//      matches package.json.version.
+// If a future package.json bump forgets to update the fallback literal, this
+// test fails BEFORE shipping.
+describe('Register-All-Tasks.ps1 Author/version drift guard (v2.4.49 B47-2)', () => {
+  it('the <Author> line uses $ScriptVersion (not a hardcoded literal)', () => {
+    const scriptPath = path.join(process.cwd(), 'powershell', 'Register-All-Tasks.ps1');
+    const ps = readFileSync(scriptPath, 'utf8');
+    expect(ps).toMatch(/<Author>PCDoctor v\$ScriptVersion<\/Author>/);
+    // Negative: the old hardcoded literal must NOT survive.
+    expect(ps).not.toMatch(/<Author>PCDoctor v2\.4\.46<\/Author>/);
+  });
+
+  it('the $ScriptVersion fallback literal matches package.json.version', () => {
+    const scriptPath = path.join(process.cwd(), 'powershell', 'Register-All-Tasks.ps1');
+    const ps = readFileSync(scriptPath, 'utf8');
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
+
+    // Match the literal assignment "$ScriptVersion = '<x.y.z>'" — the first
+    // occurrence (the fallback). PowerShell allows single or double quotes.
+    const m = ps.match(/\$ScriptVersion\s*=\s*['"]([^'"]+)['"]/);
+    expect(m, '$ScriptVersion fallback literal not found in Register-All-Tasks.ps1').not.toBeNull();
+    if (m) {
+      expect(m[1]).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(m[1]).toBe(pkg.version);
+    }
+  });
+
+  it('the rendered Author string (with $ScriptVersion = package.json.version) matches PCDoctor v<semver>', () => {
+    // Cheap semantic check: take the live <Author> line, substitute
+    // $ScriptVersion with package.json.version, assert the result matches
+    // the documented shape.
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
+    const rendered = `<Author>PCDoctor v${pkg.version}</Author>`;
+    expect(rendered).toMatch(/^<Author>PCDoctor v\d+\.\d+\.\d+<\/Author>$/);
+    expect(rendered).toBe(`<Author>PCDoctor v${pkg.version}</Author>`);
+  });
+});

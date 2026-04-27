@@ -8,6 +8,26 @@ param([switch]$DryRun, [switch]$JsonOutput, [switch]$ForceRecreate)
 # (Test-Path failures, file IO, etc.). Local 'Stop' is reapplied around
 # those small islands.
 $ErrorActionPreference = 'Continue'
+
+# v2.4.49 (B47-2): read script version from package.json so the registered
+# task XML's <Author> field tracks the live release. Pre-2.4.49 the Author
+# string was hardcoded to 'PCDoctor v2.4.46' and drifted across releases,
+# making it impossible to tell from a registered task which version of the
+# installer last touched it. The read is best-effort: if package.json is
+# missing (e.g. running from C:\ProgramData\PCDoctor where ..\package.json
+# doesn't exist), the hardcoded fallback below applies. The fallback literal
+# is updated alongside the package.json bump per release.
+$ScriptVersion = '2.4.49'
+try {
+    $pkgPath = Join-Path $PSScriptRoot '..\package.json'
+    if (Test-Path $pkgPath) {
+        $pkg = Get-Content -Path $pkgPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($pkg.version) { $ScriptVersion = [string]$pkg.version }
+    }
+} catch {
+    # Fallback already set above; swallow.
+}
+
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -194,7 +214,7 @@ function New-AutopilotTaskXml {
     return @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Author>PCDoctor v2.4.46</Author></RegistrationInfo>
+  <RegistrationInfo><Author>PCDoctor v$ScriptVersion</Author></RegistrationInfo>
   <Triggers>$triggerXml</Triggers>
   <Principals>$principalXml</Principals>
   <Settings>
