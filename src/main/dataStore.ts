@@ -153,6 +153,21 @@ CREATE TABLE IF NOT EXISTS autopilot_activity (
 );
 CREATE INDEX IF NOT EXISTS idx_autopilot_activity_ts ON autopilot_activity(ts);
 CREATE INDEX IF NOT EXISTS idx_autopilot_activity_rule ON autopilot_activity(rule_id, ts);
+
+-- ============== ALERT EMIT DEDUP (v2.4.49 B49-NOTIF-1) ==============
+-- Records the last successful Telegram alert emission per (rule_id, event_key)
+-- so dispatchAlert can suppress same-day duplicates. last_state_signature is a
+-- truncated sha256 of (severity|title|reason); a state transition (e.g.
+-- severity escalation) bypasses the dedup window naturally because the
+-- signature differs. Steady-state row count is bounded by DEFAULT_RULES size
+-- (~25 rows) — no reaper needed.
+CREATE TABLE IF NOT EXISTS alert_emit_history (
+  rule_id     TEXT NOT NULL,
+  event_key   TEXT NOT NULL,
+  last_ts     INTEGER NOT NULL,
+  last_state_signature TEXT NOT NULL,
+  PRIMARY KEY (rule_id, event_key)
+);
 `;
 
 let db: Database.Database | null = null;
@@ -780,11 +795,71 @@ export function getLastAutopilotActivity(ruleId: string): AutopilotActivityRow |
   return row ?? null;
 }
 
-/** Count how many times a rule's action failed in the last N days. */
-export function countAutopilotFailures(ruleId: string, daysBack = 7): number {
+/**
+ * v2.4.49 (B49-NOTIF-2): count `error` rows for a rule that occurred AFTER its
+ * most recent `auto_run` success. Matches the user mental model "things broke
+ * recently and haven't recovered" — a single successful run resets the counter.
+ * The `daysBack` window is preserved as a backstop so old errors from a
+ * deleted-then-readded rule cannot haunt forever. Pre-2.4.49 the function was
+ * named `countAutopilotFailures` and counted ALL errors in the window, which
+ * caused the alert_action_repeated_failures detector to fire on Greg's box
+ * daily for three v2.4.45/46-era errors that long-since recovered. Renamed
+ * for compile-time visibility; legacy semantic is available via
+ * countAutopilotFailuresInWindow.
+ */
+export function countAutopilotFailuresSinceSuccess(ruleId: string, daysBack = 7): number {
+  const since = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+  const row = openDb().prepare(
+    `WITH last_success AS (
+       SELECT MAX(ts) AS ts FROM autopilot_activity
+       WHERE rule_id = ? AND outcome = 'auto_run'
+     )
+     SELECT COUNT(*) AS c FROM autopilot_activity
+     WHERE rule_id = ?
+       AND outcome = 'error'
+       AND ts >= ?
+       AND ts > COALESCE((SELECT ts FROM last_success), 0)`
+  ).get(ruleId, ruleId, since) as { c: number };
+  return row?.c ?? 0;
+}
+
+/**
+ * Legacy semantic: count ALL `error` rows for a rule in the last N days,
+ * regardless of intervening successes. Preserved for any caller (test/UI)
+ * that legitimately wants the raw window count.
+ */
+export function countAutopilotFailuresInWindow(ruleId: string, daysBack = 7): number {
   const since = Date.now() - daysBack * 24 * 60 * 60 * 1000;
   const row = openDb().prepare(
     `SELECT COUNT(*) as c FROM autopilot_activity WHERE rule_id = ? AND outcome = 'error' AND ts >= ?`
   ).get(ruleId, since) as { c: number };
   return row?.c ?? 0;
+}
+
+// ============== ALERT EMIT DEDUP (v2.4.49 B49-NOTIF-1) ==============
+
+export interface AlertEmitHistoryRow {
+  rule_id: string;
+  event_key: string;
+  last_ts: number;
+  last_state_signature: string;
+}
+
+/** Look up the most recent successful Telegram emission for (rule_id, event_key). */
+export function getAlertEmitHistory(ruleId: string, eventKey: string): AlertEmitHistoryRow | null {
+  const row = openDb().prepare(
+    `SELECT rule_id, event_key, last_ts, last_state_signature FROM alert_emit_history WHERE rule_id = ? AND event_key = ?`
+  ).get(ruleId, eventKey) as AlertEmitHistoryRow | undefined;
+  return row ?? null;
+}
+
+/** Record (or replace) the last successful emission for (rule_id, event_key). */
+export function recordAlertEmit(ruleId: string, eventKey: string, ts: number, signature: string): void {
+  openDb().prepare(
+    `INSERT INTO alert_emit_history (rule_id, event_key, last_ts, last_state_signature)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(rule_id, event_key) DO UPDATE SET
+       last_ts = excluded.last_ts,
+       last_state_signature = excluded.last_state_signature`
+  ).run(ruleId, eventKey, ts, signature);
 }

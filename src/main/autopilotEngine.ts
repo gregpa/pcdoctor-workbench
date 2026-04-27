@@ -15,6 +15,7 @@
  * for *threshold* evaluation from the main-process poll loop.
  */
 
+import { createHash } from 'node:crypto';
 import { getStatus } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
@@ -25,9 +26,11 @@ import {
   insertAutopilotActivity,
   listAutopilotActivity,
   getLastAutopilotActivity,
-  countAutopilotFailures,
+  countAutopilotFailuresSinceSuccess,
   queryMetricTrend,
   deleteAutopilotRule,
+  getAlertEmitHistory,
+  recordAlertEmit,
   type AutopilotRuleRow,
 } from './dataStore.js';
 import { sendTelegramMessage, makeCallbackData, type InlineButton } from './telegramBridge.js';
@@ -298,7 +301,7 @@ export function evaluateRule(
     case 'alert_action_repeated_failures': {
       const rules = listAutopilotRules();
       for (const other of rules) {
-        if (other.action_name && countAutopilotFailures(other.id, 7) >= 3) {
+        if (other.action_name && countAutopilotFailuresSinceSuccess(other.id, 7) >= 3) {
           return { ...base, alert, reason: `${other.action_name} failed 3+ times in 7 days` };
         }
       }
@@ -374,8 +377,34 @@ export async function dispatchDecision(d: AutopilotDecision, minGapMs = 6 * 60 *
   }
 }
 
+/**
+ * v2.4.49 (B49-NOTIF-1): truncated sha256 of (severity|title|reason). State
+ * transitions (e.g. severity escalates from 'important' to 'critical') change
+ * the signature so the next emission bypasses the dedup window naturally. If
+ * a future caller mutates a fourth field that should also break dedup, add it
+ * here and bump the slice — see plan §6 risk row.
+ */
+function stateSignature(d: AutopilotDecision): string {
+  const sev = d.alert?.severity ?? 'unknown';
+  const title = d.alert?.title ?? '';
+  return createHash('sha256').update(`${sev}|${title}|${d.reason}`).digest('hex').slice(0, 24);
+}
+
 async function dispatchAlert(d: AutopilotDecision): Promise<void> {
   if (!d.alert) return;
+
+  // v2.4.49 (B49-NOTIF-1): suppress same-state alerts emitted within 24h. The
+  // pre-2.4.49 dispatchAlert had no dedup gate and Greg's box received the
+  // same Telegram alert at 03:42 AND 09:42 the same day. Severity escalation
+  // and reason changes still fire because stateSignature() differs.
+  const eventKey = d.rule_id;
+  const sig = stateSignature(d);
+  const last = getAlertEmitHistory(d.rule_id, eventKey);
+  const dedupMs = 24 * 60 * 60 * 1000;
+  if (last && (Date.now() - last.last_ts) < dedupMs && last.last_state_signature === sig) {
+    return;
+  }
+
   const severityIcon = d.alert.severity === 'critical' ? '🔴' : d.alert.severity === 'important' ? '🟡' : 'ℹ️';
 
   const buttons: InlineButton[][] = [];
@@ -401,6 +430,11 @@ async function dispatchAlert(d: AutopilotDecision): Promise<void> {
     message: send.ok ? d.alert.title : (send.error ?? 'telegram send failed'),
     details: { severity: d.alert.severity, fix_actions: d.alert.fix_actions, reason: d.reason },
   });
+
+  // Only record on send-success so a failed send retries on the next tick.
+  if (send.ok) {
+    recordAlertEmit(d.rule_id, eventKey, Date.now(), sig);
+  }
 }
 
 // ============================================================
