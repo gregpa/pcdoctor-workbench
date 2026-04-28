@@ -15,6 +15,7 @@ const SETTINGS: Record<string, string | null> = {};
 
 vi.mock('../../src/main/dataStore.js', () => ({
   getSetting: (k: string) => (k in SETTINGS ? SETTINGS[k] : null),
+  setSetting: (k: string, v: string) => { SETTINGS[k] = v; },
   hasSeenFinding: () => false,
   markFindingSeen: () => {},
 }));
