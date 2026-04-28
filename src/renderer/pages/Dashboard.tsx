@@ -820,7 +820,7 @@ export function Dashboard() {
           toastVariant === 'noop' ? 'bg-status-info/10 border border-status-info/40 text-status-info' :
           toastVariant === 'error' ? 'bg-status-crit/10 border border-status-crit/40 text-status-crit' :
           toastVariant === 'admin' ? 'bg-status-warn/10 border border-status-warn/40 text-status-warn' :
-          'bg-surface-700 border border-surface-600'
+          'pcd-button'
         }`}>
           <span>{toast}</span>
           {toastVariant === 'admin' && (

@@ -152,7 +152,7 @@ export function SecurityDetailModal({
               {onUpdateDefenderDefs && (
                 <button
                   onClick={() => void onUpdateDefenderDefs()}
-                  className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 text-text-primary hover:border-surface-500"
+                  className="px-3 py-1.5 rounded-md text-xs pcd-button text-text-primary hover:border-surface-500"
                 >
                   Update Defs
                 </button>
@@ -160,7 +160,7 @@ export function SecurityDetailModal({
               {onOpenWindowsSecurity && (
                 <button
                   onClick={() => void onOpenWindowsSecurity()}
-                  className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 text-text-primary hover:border-surface-500"
+                  className="px-3 py-1.5 rounded-md text-xs pcd-button text-text-primary hover:border-surface-500"
                 >
                   Open Windows Security
                 </button>
@@ -194,7 +194,7 @@ export function SecurityDetailModal({
           )}
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Close
           </button>

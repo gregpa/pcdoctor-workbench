@@ -72,7 +72,7 @@ export function History() {
                   {canRevert ? (
                     <button
                       onClick={(ev) => { ev.stopPropagation(); doRevert(e.id, e.action_label); }}
-                      className="px-2 py-1 rounded bg-surface-700 border border-surface-600 hover:border-status-info/40 text-[10px]"
+                      className="px-2 py-1 rounded pcd-button hover:border-status-info/40 text-[10px]"
                     >
                       Revert
                     </button>
@@ -83,7 +83,7 @@ export function History() {
                         const ctx = `This action failed. Help me understand why and suggest a fix:\n- Action: ${e.action_label}\n- Status: ${e.status}\n- Error: ${e.error_message ?? 'unknown'}\n- Duration: ${e.duration_ms}ms\n- Triggered by: ${e.triggered_by}`;
                         await (window as any).api.investigateWithClaude(ctx);
                       }}
-                      className="px-2 py-1 rounded bg-surface-700 border border-surface-600 hover:border-status-info/40 text-[10px]"
+                      className="px-2 py-1 rounded pcd-button hover:border-status-info/40 text-[10px]"
                       title="Investigate failure in Claude"
                     >
                       🤖 Investigate
@@ -156,7 +156,7 @@ export function History() {
                   setToast(r?.ok ? 'Copied to clipboard' : `Copy failed: ${r?.error?.message ?? 'unknown'}`);
                   setTimeout(() => setToast(null), 3000);
                 }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
                 title="Copy this result as a plain-text report to the clipboard"
               >
                 📋 Copy
@@ -183,19 +183,19 @@ export function History() {
                   }
                   setTimeout(() => setToast(null), 5000);
                 }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
                 title="Save this result to C:\\ProgramData\\PCDoctor\\exports\\"
               >
                 💾 Save to File
               </button>
-              <button onClick={() => setDetailItem(null)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Close</button>
+              <button onClick={() => setDetailItem(null)} className="px-3 py-1.5 rounded-md text-xs pcd-button">Close</button>
             </div>
           </div>
         </div>
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">
           {toast}
         </div>
       )}

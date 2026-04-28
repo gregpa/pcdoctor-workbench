@@ -205,7 +205,7 @@ export function AlertCard({ finding, onApply, onOpenDetail }: AlertCardProps) {
             <span>🔍</span><span>Analyze Minidump</span>
           </button>
         ) : (
-          <span className="px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] text-text-secondary">
+          <span className="px-2.5 py-1.5 rounded-md pcd-button text-[11px] text-text-secondary">
             ℹ Info only
           </span>
         )}
@@ -216,7 +216,7 @@ export function AlertCard({ finding, onApply, onOpenDetail }: AlertCardProps) {
               const ctx = `Investigate this alert:\n- Area: ${finding.area}\n- Severity: ${finding.severity}\n- Message: ${finding.message}\n- Auto-fixed: ${finding.auto_fixed}\n\nExplain the root cause, describe what the "${actionDef.label}" action would do, and recommend whether to run it.`;
               await api.investigateWithClaude(ctx);
             }}
-            className="px-2 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] hover:border-status-info/40"
+            className="px-2 py-1.5 rounded-md pcd-button text-[11px] hover:border-status-info/40"
             title="Investigate this in Claude"
           >
             🤖

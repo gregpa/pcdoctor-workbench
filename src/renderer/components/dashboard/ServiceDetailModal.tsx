@@ -86,7 +86,7 @@ export function ServiceDetailModal({ service, actionBusy, onClose, onRestart }: 
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Close
           </button>

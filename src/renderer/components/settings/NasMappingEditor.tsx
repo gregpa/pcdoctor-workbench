@@ -188,7 +188,7 @@ export function NasMappingEditor({ value, onChange, onValidityChange }: NasMappi
               <button
                 onClick={() => removeRow(i)}
                 title="Remove this mapping"
-                className="flex-shrink-0 px-2 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-crit hover:text-status-crit transition"
+                className="flex-shrink-0 px-2 py-1.5 rounded-md text-xs pcd-button hover:border-status-crit hover:text-status-crit transition"
               >
                 ✕
               </button>
@@ -200,7 +200,7 @@ export function NasMappingEditor({ value, onChange, onValidityChange }: NasMappi
       <div className="flex items-center gap-3 mb-3">
         <button
           onClick={addRow}
-          className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info"
+          className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info"
         >
           + Add mapping
         </button>

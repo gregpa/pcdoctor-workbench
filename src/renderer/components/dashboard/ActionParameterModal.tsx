@@ -61,7 +61,7 @@ export function ActionParameterModal({ action, onSubmit, onCancel }: ActionParam
         </div>
 
         <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Cancel</button>
+          <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-xs pcd-button">Cancel</button>
           <button
             onClick={() => canSubmit && onSubmit(values, dryRun)}
             disabled={!canSubmit}

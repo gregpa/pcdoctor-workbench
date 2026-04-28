@@ -204,7 +204,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
                 </div>
 
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Cancel</button>
+                  <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs pcd-button">Cancel</button>
                   <button onClick={startClean} className="px-4 py-1.5 rounded-md text-xs bg-[#238636] text-white font-bold">Start Clean ({needed.length} steps)</button>
                 </div>
               </>
@@ -243,7 +243,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
                 </div>
                 {!running && (
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Close</button>
+                    <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs pcd-button">Close</button>
                   </div>
                 )}
               </>

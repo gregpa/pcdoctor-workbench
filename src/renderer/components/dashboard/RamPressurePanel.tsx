@@ -159,12 +159,12 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
                   </button>
                 )}
                 {p.kind === 'service' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 text-text-secondary">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary">
                     service
                   </span>
                 )}
                 {p.kind === 'system' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 text-text-secondary opacity-60">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary opacity-60">
                     system
                   </span>
                 )}

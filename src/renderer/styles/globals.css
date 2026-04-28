@@ -128,4 +128,26 @@
   .pcd-modal {
     @apply bg-surface-panel-translucent backdrop-blur-md border border-border-default rounded-lg shadow-2xl;
   }
+
+  /*
+   * v2.5.0 Stage 5 — buttons + inline chips.
+   *
+   * .pcd-button — neutral / default-style action buttons (Cancel, Close,
+   *               Re-analyze, Approve, Reject, etc). The translucent
+   *               navy chrome with violet hover glow is consistent with
+   *               .pcd-panel-interactive — clicking IS an action, so
+   *               the glow signals that. Sites layer their own
+   *               rounded/padding/font classes on top.
+   *
+   * Pre-2.5.0 these all used bg-surface-700 border border-surface-600
+   * which was visually flat. The new chrome doesn't change padding /
+   * rounding / sizing — only the surface + border + hover state.
+   *
+   * Semantic-color buttons (bg-status-good/warn/crit, the green primary
+   * action buttons) are NOT swept by this — those keep their semantic
+   * tones per Greg's D1 mandate.
+   */
+  .pcd-button {
+    @apply bg-surface-panel-translucent backdrop-blur-md border border-border-default hover:border-accent-violet/40 hover:shadow-glow-violet transition-colors transition-shadow;
+  }
 }

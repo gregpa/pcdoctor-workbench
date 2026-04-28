@@ -33,7 +33,7 @@ export function ConfirmModal({ title, body, confirmLabel = 'Run', cancelLabel = 
           {body}
         </div>
         <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
+          <button onClick={onCancel} className="px-3 py-1.5 rounded-md text-xs pcd-button">
             {cancelLabel}
           </button>
           <button onClick={onConfirm} className={`px-3 py-1.5 rounded-md text-xs font-semibold ${confirmColor}`}>

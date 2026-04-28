@@ -161,7 +161,7 @@ export function DiskSmartDetailModal({ entry, onClose, onRunSmartCheck }: DiskSm
             )}
             <button
               onClick={onClose}
-              className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+              className="px-3 py-1.5 rounded-md text-xs pcd-button"
             >
               Close
             </button>

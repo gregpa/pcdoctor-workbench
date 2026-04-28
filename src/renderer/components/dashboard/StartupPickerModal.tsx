@@ -206,7 +206,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
                 max={MAX_THRESHOLD}
                 value={thresholdInput}
                 onChange={(e) => setThresholdInput(e.target.value)}
-                className="w-16 px-2 py-1 rounded bg-surface-700 border border-surface-600 text-text-primary text-[11px]"
+                className="w-16 px-2 py-1 rounded pcd-button text-text-primary text-[11px]"
                 aria-label="Healthy startup threshold"
               />
               <span className="text-text-secondary">items ({MIN_THRESHOLD}-{MAX_THRESHOLD})</span>
@@ -382,7 +382,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
         <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-surface-700">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Cancel
           </button>

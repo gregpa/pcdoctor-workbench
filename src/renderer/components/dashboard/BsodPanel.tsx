@@ -42,7 +42,7 @@ export function BsodPanel() {
               <div className="text-[10px] text-text-secondary mt-2">{result.dump_path}</div>
             </>
           )}
-          <button onClick={analyze} className="mt-2 px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600">Re-analyze</button>
+          <button onClick={analyze} className="mt-2 px-2 py-1 rounded-md text-[10px] pcd-button">Re-analyze</button>
         </div>
       )}
     </div>

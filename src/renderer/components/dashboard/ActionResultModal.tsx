@@ -285,21 +285,21 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
               ].join('\n');
               await api.investigateWithClaude(ctx);
             }}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
             title="Open a Claude session with this result pre-loaded as context"
           >
             🤖 Investigate with Claude
           </button>
           <button
             onClick={saveResult}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
             title="Save to C:\\ProgramData\\PCDoctor\\exports\\"
           >
             💾 Save
           </button>
           <button
             onClick={copyResult}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:bg-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:bg-surface-600"
           >
             📋 Copy Result
           </button>

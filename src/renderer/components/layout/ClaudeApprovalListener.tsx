@@ -54,7 +54,7 @@ export function ClaudeApprovalListener() {
           )}
         </div>
         <div className="flex justify-end gap-2">
-          <button onClick={() => respond(false)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Reject</button>
+          <button onClick={() => respond(false)} className="px-3 py-1.5 rounded-md text-xs pcd-button">Reject</button>
           <button onClick={() => respond(true)} className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-bold">Approve</button>
         </div>
       </div>

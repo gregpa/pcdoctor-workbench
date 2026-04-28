@@ -77,13 +77,13 @@ export function Claude() {
         <div className="flex gap-2">
           <button
             onClick={() => setMode('embedded')}
-            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'embedded' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'bg-surface-700 border border-surface-600'}`}
+            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'embedded' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'pcd-button'}`}
           >
             Embedded
           </button>
           <button
             onClick={() => setMode('external')}
-            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'external' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'bg-surface-700 border border-surface-600'}`}
+            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'external' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'pcd-button'}`}
           >
             External Window
           </button>
@@ -139,7 +139,7 @@ export function Claude() {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

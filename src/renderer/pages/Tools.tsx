@@ -47,7 +47,7 @@ function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpg
               <div className="w-3 h-3 border-2 border-status-info/30 border-t-status-info rounded-full animate-spin"></div>
               <span>Installing via winget…</span>
             </div>
-            <button disabled className="w-full px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] opacity-50">
+            <button disabled className="w-full px-2.5 py-1.5 rounded-md pcd-button text-[11px] opacity-50">
               Installing…
             </button>
           </>
@@ -57,7 +57,7 @@ function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpg
               <div className="w-3 h-3 border-2 border-status-warn/30 border-t-status-warn rounded-full animate-spin"></div>
               <span>Upgrading via winget…</span>
             </div>
-            <button disabled className="w-full px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] opacity-50">
+            <button disabled className="w-full px-2.5 py-1.5 rounded-md pcd-button text-[11px] opacity-50">
               Upgrading…
             </button>
           </>
@@ -120,14 +120,14 @@ function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpg
               <button
                 onClick={onInstall}
                 disabled={working}
-                className="w-full px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px] hover:border-status-info/40 disabled:opacity-50"
+                className="w-full px-2.5 py-1.5 rounded-md pcd-button text-[11px] hover:border-status-info/40 disabled:opacity-50"
               >
                 Install via winget
               </button>
             ) : def.download_url ? (
               <button
                 onClick={() => { window.open(def.download_url!, '_blank'); }}
-                className="w-full px-2.5 py-1.5 rounded-md bg-surface-700 border border-surface-600 text-[11px]"
+                className="w-full px-2.5 py-1.5 rounded-md pcd-button text-[11px]"
               >
                 Download…
               </button>
@@ -301,7 +301,7 @@ export function Tools() {
           <button
             onClick={onCheckUpdates}
             disabled={checkingUpdates}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-50"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50"
             title="Run winget upgrade to refresh the update list. Weekly scheduled task also does this automatically."
           >
             {checkingUpdates ? 'Checking…' : '🔄 Check for Updates'}
@@ -315,7 +315,7 @@ export function Tools() {
               {bulkInstalling ? 'Installing all…' : `▶ Install All Missing (${notInstalledCount})`}
             </button>
           )}
-          <button onClick={refresh} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
+          <button onClick={refresh} className="px-3 py-1.5 rounded-md text-xs pcd-button">
             Refresh
           </button>
         </div>
@@ -401,7 +401,7 @@ export function Tools() {
       })}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

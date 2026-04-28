@@ -90,12 +90,12 @@ export function MemTest86() {
       </div>
 
       <div className="flex justify-between mt-3">
-        <button disabled={step === 0} onClick={() => setStep(step - 1)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-30">← Previous</button>
-        <button disabled={step === steps.length - 1} onClick={() => setStep(step + 1)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-30">Next →</button>
+        <button disabled={step === 0} onClick={() => setStep(step - 1)} className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-30">← Previous</button>
+        <button disabled={step === steps.length - 1} onClick={() => setStep(step + 1)} className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-30">Next →</button>
       </div>
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

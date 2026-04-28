@@ -265,13 +265,13 @@ export function Settings() {
               <span>Telegram notifications enabled</span>
             </label>
             <div className="flex gap-2 flex-wrap">
-              <button onClick={sendTest} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
+              <button onClick={sendTest} className="px-3 py-1.5 rounded-md text-xs pcd-button">
                 Send test message
               </button>
               <button
                 onClick={sendTestFull}
                 disabled={tgTestPending}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-50"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50"
                 title="Sends a message with inline buttons. Tap ✓ Received in Telegram to confirm the round-trip works."
               >
                 {tgTestPending ? 'Waiting for reply…' : 'Test with Buttons'}
@@ -311,11 +311,11 @@ export function Settings() {
                     showToast(`Reveal failed: ${r?.error?.message ?? 'unknown'}`);
                   }
                 }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button"
               >
                 Reveal Token
               </button>
-              <button onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-crit/40">
+              <button onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-crit/40">
                 Disconnect
               </button>
             </div>
@@ -401,7 +401,7 @@ export function Settings() {
                     setNasError(null);
                   }
                 }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button"
               >
                 Revert
               </button>
@@ -493,7 +493,7 @@ export function Settings() {
               const r = await api.flushBufferedNotifications();
               showToast(r.ok ? `Flushed ${r.data.sent} buffered notifications` : `Failed: ${r.error.message}`);
             }}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Flush Buffer Now
           </button>
@@ -522,7 +522,7 @@ export function Settings() {
                 <span className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-status-crit' : 'bg-surface-600'}`}></span>
                 <code className="flex-1 font-mono">{r.remote_address}</code>
                 <span className="text-[10px] text-text-secondary">{r.direction}</span>
-                <button onClick={() => unblockIp(r.remote_address)} className="px-2 py-1 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-good/40">Unblock</button>
+                <button onClick={() => unblockIp(r.remote_address)} className="px-2 py-1 rounded pcd-button text-[10px] hover:border-status-good/40">Unblock</button>
               </div>
             ))}
           </div>
@@ -562,8 +562,8 @@ export function Settings() {
                     {t.last_run && ` · Last: ${t.last_run}`}
                   </div>
                 </div>
-                <button onClick={() => runTaskNow(t.name)} className="px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40">Run now</button>
-                <button onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')} className="px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40">
+                <button onClick={() => runTaskNow(t.name)} className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40">Run now</button>
+                <button onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')} className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40">
                   {t.status === 'Disabled' ? 'Enable' : 'Disable'}
                 </button>
               </div>
@@ -618,7 +618,7 @@ export function Settings() {
           )}
         </div>
         <div className="flex gap-2">
-          <button onClick={checkForUpdatesNow} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Check Now</button>
+          <button onClick={checkForUpdatesNow} className="px-3 py-1.5 rounded-md text-xs pcd-button">Check Now</button>
           {updateStatus.state === 'available' && (
             <button onClick={downloadUpdate} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Download Update</button>
           )}
@@ -640,7 +640,7 @@ export function Settings() {
       </section>
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

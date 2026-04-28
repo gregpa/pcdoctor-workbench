@@ -174,7 +174,7 @@ export function EventLogDetailModal({ onClose }: EventLogDetailModalProps) {
               onClose();
             }}
             disabled={!data || data.total_errors === 0}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40 disabled:opacity-50"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40 disabled:opacity-50"
           >
             🤖 Investigate with Claude
           </button>
@@ -208,7 +208,7 @@ function EventLogRow({ entry, total }: { entry: EventLogBreakdownEntry; total: n
         <td className="py-2">
           <button
             onClick={() => setExpanded(v => !v)}
-            className="px-2 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-2 py-0.5 rounded text-[10px] pcd-button hover:border-status-info/40"
             title={expanded ? 'Hide sample message' : 'Show sample message'}
           >
             {expanded ? '−' : '+'}
