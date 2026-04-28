@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Continue'
 # missing (e.g. running from C:\ProgramData\PCDoctor where ..\package.json
 # doesn't exist), the hardcoded fallback below applies. The fallback literal
 # is updated alongside the package.json bump per release.
-$ScriptVersion = '2.4.53'
+$ScriptVersion = '2.4.54'
 try {
     $pkgPath = Join-Path $PSScriptRoot '..\package.json'
     if (Test-Path $pkgPath) {
@@ -247,6 +247,36 @@ function New-AutopilotTaskXml {
 "@
 }
 
+# v2.4.54 (B53-MIG-2 follow-up): one-shot COM enumeration of existing
+# tasks so the per-task existence pre-check is an O(1) HashSet lookup
+# instead of an O(N) `cmd.exe /c schtasks.exe /Query /TN <name>` spawn
+# per task. Pre-2.4.54 the v2.4.53 fix added a cmd.exe spawn per task
+# (19 tasks × ~3s = ~57s on slow machines) which blew the migration
+# block's 60s IPC timeout. The COM Schedule.Service API enumerates the
+# whole root folder in ~3 seconds total — a 19× speedup.
+#
+# Built once at script top; consulted by Register-PCDoctorTask via the
+# script-scope variable.
+$existingTaskNames = $null
+try {
+    $ts = New-Object -ComObject Schedule.Service
+    $ts.Connect()
+    $folder = $ts.GetFolder('\')
+    $existingTaskNames = New-Object System.Collections.Generic.HashSet[string] (
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    # GetTasks(1) includes hidden tasks. We only care about PCDoctor-*; capturing
+    # all of them is fine — the HashSet is a few dozen entries at most.
+    foreach ($t in $folder.GetTasks(1)) {
+        [void]$existingTaskNames.Add($t.Name)
+    }
+} catch {
+    # COM enumeration failed (very rare). Fall back to per-task /Query
+    # spawn — slow but correct. Setting the HashSet to $null signals
+    # Register-PCDoctorTask to use the fallback path.
+    $existingTaskNames = $null
+}
+
 function Register-PCDoctorTask {
     param(
         [Parameter(Mandatory)] [string]$Name,
@@ -275,18 +305,49 @@ function Register-PCDoctorTask {
     # `last_task_migration_version` stuck-at-stale-value bug was the same
     # mechanism manifesting under the upgrade-then-verify sub-path.
     #
-    # Two-tier existence check:
-    #   1. exit 0 → task exists (clear case)
-    #   2. exit 1 + stderr matches /Access is denied/ → task exists but the
-    #      caller can't read it (SYSTEM-context tasks queried from non-
-    #      elevated user — schtasks returns "ERROR: Access is denied"
-    #      instead of "ERROR: The system cannot find the file specified").
-    # Treat both as 'already_registered'. Only the third case (exit 1 +
-    # "cannot find" stderr) means the task is genuinely missing → try /Create.
+    # v2.4.54 (B53-MIG-2 fast path): consult the COM-enumerated HashSet
+    # built at script top. O(1) lookup; no cmd.exe spawn for the common
+    # case. The COM API enumerates user-context tasks reliably from a
+    # non-elevated session, but DOES NOT include SYSTEM-context tasks
+    # (verified empirically: 19 tasks total, COM sees 14, the 5 missing
+    # are all SYSTEM-context). For tasks NOT in the COM HashSet, fall
+    # back to cmd.exe /c schtasks.exe /Query /TN with the v2.4.53
+    # two-tier semantics — exit 0 OR stderr matches /Access is denied/
+    # both indicate the task exists. The fallback only fires for the
+    # ~5 SYSTEM-context tasks per launch, keeping the total spawn count
+    # to ~5 × ~3s = ~15s wall clock — well under the 60s IPC timeout.
     if (-not $ForceRecreate) {
-        $queryOut = cmd.exe /c "schtasks.exe /Query /TN `"$Name`" 2>&1" 2>&1 | Out-String
-        $queryExit = $LASTEXITCODE
-        if ($queryExit -eq 0 -or $queryOut -match 'Access is denied') {
+        $taskExists = $false
+        if ($null -ne $existingTaskNames -and $existingTaskNames.Contains($Name)) {
+            $taskExists = $true
+        } else {
+            # Per-task fallback for tasks the COM HashSet doesn't include
+            # (SYSTEM-context tasks aren't returned to non-elevated COM
+            # callers, even with GetTasks(1)). Use the PowerShell
+            # ScheduledTasks module's `Get-ScheduledTask` cmdlet — it's
+            # a managed API call (no cmd.exe spawn → no per-call Defender
+            # scan latency). 'NotPresent' or empty means the task is
+            # genuinely missing → fall through to /Create. Any other
+            # outcome (including the access-denied throw) means it exists
+            # → mark already_registered.
+            try {
+                $existing = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
+                $taskExists = $null -ne $existing
+            } catch [Microsoft.Management.Infrastructure.CimException] {
+                # CimException with HResult 0x80131500 typically wraps
+                # ERROR_ACCESS_DENIED for SYSTEM-context tasks. Treat as
+                # exists.
+                $taskExists = $true
+            } catch {
+                # Last-ditch fallback: cmd.exe /Query with the v2.4.53
+                # two-tier semantic. Only fires when both COM and
+                # Get-ScheduledTask are unavailable.
+                $queryOut = cmd.exe /c "schtasks.exe /Query /TN `"$Name`" 2>&1" 2>&1 | Out-String
+                $queryExit = $LASTEXITCODE
+                $taskExists = ($queryExit -eq 0) -or ($queryOut -match 'Access is denied')
+            }
+        }
+        if ($taskExists) {
             return @{ name = $Name; status = 'already_registered'; context = $Context }
         }
     }

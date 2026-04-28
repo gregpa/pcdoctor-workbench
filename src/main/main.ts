@@ -371,8 +371,17 @@ app.whenReady().then(() => {
         }
       } else {
         log.info('[migration] non-elevated Register-All-Tasks.ps1 (steady-state, no -ForceRecreate)');
+        // v2.4.54 (B53-MIG-2 follow-up): bumped from 60_000ms → 120_000ms.
+        // The v2.4.53 fix added a per-task existence pre-check that issues
+        // ~5 cmd.exe spawns for SYSTEM-context tasks the non-elevated COM
+        // enumeration doesn't see. Each spawn pays ~3-9s of Defender +
+        // process startup tax. v2.4.54 swapped most of those to native
+        // Get-ScheduledTask, but the IPC timeout still needs to be
+        // generous enough to absorb the once-per-launch tax on slower
+        // boxes. 120s is comfortable headroom over the empirical
+        // worst-case 44s we measured pre-Get-ScheduledTask.
         result = await runPowerShellScript<RegResult>(
-          'Register-All-Tasks.ps1', args, { timeoutMs: 60_000 },
+          'Register-All-Tasks.ps1', args, { timeoutMs: 120_000 },
         );
         log.info(`[migration] non-elevated Register-All-Tasks.ps1 returned (success=${(result as any)?.success})`);
       }
