@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Continue'
 # missing (e.g. running from C:\ProgramData\PCDoctor where ..\package.json
 # doesn't exist), the hardcoded fallback below applies. The fallback literal
 # is updated alongside the package.json bump per release.
-$ScriptVersion = '2.4.52'
+$ScriptVersion = '2.4.53'
 try {
     $pkgPath = Join-Path $PSScriptRoot '..\package.json'
     if (Test-Path $pkgPath) {
@@ -263,6 +263,33 @@ function Register-PCDoctorTask {
     }
     $today = Get-Date -Format 'yyyyMMdd'
     $log = Join-Path $LogDir "autopilot-$today.log"
+
+    # v2.4.53 (B53-MIG-2): steady-state idempotency. When NOT -ForceRecreate
+    # AND the task already exists, return 'already_registered' instead of
+    # blindly attempting /Create (which fails with "Access is denied" against
+    # tasks that were originally created elevated). Pre-2.4.53 every steady-
+    # state launch ran Register-All-Tasks.ps1 non-elevated, every task came
+    # back 'failed', the new B48-AS-3 exit-code logic surfaced exit 1, and
+    # the migration block's outer try/catch swallowed it without affecting
+    # behavior — but the silent E_PS_NONZERO_EXIT was real, and the v2.4.51
+    # `last_task_migration_version` stuck-at-stale-value bug was the same
+    # mechanism manifesting under the upgrade-then-verify sub-path.
+    #
+    # Two-tier existence check:
+    #   1. exit 0 → task exists (clear case)
+    #   2. exit 1 + stderr matches /Access is denied/ → task exists but the
+    #      caller can't read it (SYSTEM-context tasks queried from non-
+    #      elevated user — schtasks returns "ERROR: Access is denied"
+    #      instead of "ERROR: The system cannot find the file specified").
+    # Treat both as 'already_registered'. Only the third case (exit 1 +
+    # "cannot find" stderr) means the task is genuinely missing → try /Create.
+    if (-not $ForceRecreate) {
+        $queryOut = cmd.exe /c "schtasks.exe /Query /TN `"$Name`" 2>&1" 2>&1 | Out-String
+        $queryExit = $LASTEXITCODE
+        if ($queryExit -eq 0 -or $queryOut -match 'Access is denied') {
+            return @{ name = $Name; status = 'already_registered'; context = $Context }
+        }
+    }
 
     if ($RuleId -and $Tier -ge 1) {
         # v2.4.46 fix path: build full Task XML and register via /XML to bypass
