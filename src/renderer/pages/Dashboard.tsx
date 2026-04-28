@@ -340,23 +340,11 @@ export function Dashboard() {
               // redundant UI clutter. Gauges are now all non-clickable
               // data displays.
               //
-              // v2.5.0 Stage 2 (UI restyle): the CPU Load gauge tile is
-              // the **test tile** for the futuristic aesthetic. It sits
-              // next to the unstyled RAM/Disk gauges so the new style
-              // can be directly compared. New treatment:
-              //   - bg-surface-panel-translucent + backdrop-blur-md (8px)
-              //     → glassmorphism over the navy body + dotted grid
-              //   - border-border-default (subtle violet-toned border)
-              //   - hover:shadow-glow-violet + hover:border-accent-violet/40
-              //     → soft violet glow on mouseover (decorative only)
-              // The Gauge component itself is unchanged — semantic colors
-              // (severity → red/amber/green) preserved per Greg's D1.
-              const isTestTile = g.label === 'CPU Load';
-              const tileClass = isTestTile
-                ? 'bg-surface-panel-translucent backdrop-blur-md border border-border-default rounded-lg p-3 panel-contain hover:shadow-glow-violet hover:border-accent-violet/40 transition-colors transition-shadow'
-                : 'bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain';
+              // v2.5.0 Stage 3: gauges use .pcd-panel (static — no hover
+              // glow because they're not click targets). Semantic gauge
+              // colors (red/amber/green threshold) preserved.
               return (
-                <div key={g.label} className={tileClass}>
+                <div key={g.label} className="pcd-panel">
                   <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
                 </div>
               );
@@ -394,7 +382,7 @@ export function Dashboard() {
             onExpand={() => cpuTrend && setExpandedTrend({ title: 'CPU Load - 7 Day Trend', trend: cpuTrend, unit: '%', yDomain: [0, 100] })}
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex items-center justify-center text-text-secondary text-xs">Gathering CPU load trend…</div>
+          <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering CPU load trend…</div>
         )}
         {cpuTempTrend ? (
           <TrendLine
@@ -405,7 +393,7 @@ export function Dashboard() {
             onExpand={() => cpuTempTrend && setExpandedTrend({ title: 'CPU Temp - 7 Day Trend', trend: cpuTempTrend, unit: '°C', yDomain: [30, 100] })}
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex flex-col items-center justify-center text-text-secondary text-xs gap-2">
+          <div className="pcd-panel flex flex-col items-center justify-center text-text-secondary text-xs gap-2">
             <div>CPU temp trend</div>
             <div className="text-[10px] italic">admin required to seed - click Refresh above</div>
           </div>
@@ -419,7 +407,7 @@ export function Dashboard() {
             onExpand={() => gpuTempTrend && setExpandedTrend({ title: 'GPU Temp - 7 Day Trend', trend: gpuTempTrend, unit: '°C', yDomain: [30, 100] })}
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex items-center justify-center text-text-secondary text-xs">Gathering GPU temp trend…</div>
+          <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering GPU temp trend…</div>
         )}
       </div>
 
@@ -465,7 +453,7 @@ export function Dashboard() {
           // full width for readability on narrow windows.
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
             {/* Deep Clean panel */}
-            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+            <div className="pcd-panel">
               <div className="mb-2">
                 <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
                   <span>🧽</span><span>Deep Clean</span>
@@ -507,7 +495,7 @@ export function Dashboard() {
             </div>
 
             {/* Harden panel */}
-            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+            <div className="pcd-panel">
               <div className="mb-2">
                 <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
                   <span>🛡</span><span>Harden</span>
@@ -554,7 +542,7 @@ export function Dashboard() {
       {/* Services + Actions + Alerts row -- v2.4.39 (B45): stacks below lg
           so each of the three panels has full width on narrow windows. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+        <div className="pcd-panel">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Services & Processes</div>
           {/* v2.4.39 (B45): service pills widen to 2-up on phones, 3-up at sm
               so pill text has room to breathe instead of clipping to "S..." */}
@@ -565,7 +553,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+        <div className="pcd-panel">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2 flex items-center gap-1">
             <span>⚡</span><span>One-Click Actions</span>
           </div>
@@ -579,7 +567,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div id="active-alerts" className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain transition-all duration-500 scroll-mt-4">
+        <div id="active-alerts" className="pcd-panel transition-all duration-500 scroll-mt-4">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">
             Active Alerts {status.findings.length > 0 ? `(${status.findings.length})` : ''}
           </div>
@@ -629,9 +617,9 @@ export function Dashboard() {
             expandHint="Click to see which providers and event IDs are driving the count"
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
+          <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
         )}
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+        <div className="pcd-panel">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Security & Updates</div>
           {security ? (
             <div className="space-y-1.5 text-[11px]">

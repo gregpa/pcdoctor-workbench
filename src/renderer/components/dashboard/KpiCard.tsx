@@ -11,7 +11,7 @@ export function KpiCard({ kpi }: { kpi: KpiValue }) {
   const arrow = kpi.delta?.direction === 'up' ? '▲' : kpi.delta?.direction === 'down' ? '▼' : '-';
 
   return (
-    <div className={`bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain ${severityBorderClass[kpi.severity]}`}>
+    <div className={`pcd-panel ${severityBorderClass[kpi.severity]}`}>
       <div className="text-[10px] uppercase tracking-wider text-text-secondary">{kpi.label}</div>
       <div className={`text-2xl font-bold leading-tight mt-1 mb-0.5 ${severityColorClass[kpi.severity]}`}>
         {kpi.value}{kpi.unit ?? ''}

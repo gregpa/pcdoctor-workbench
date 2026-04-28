@@ -73,3 +73,35 @@
     contain: layout style paint;
   }
 }
+
+@layer components {
+  /*
+   * v2.5.0 (UI restyle, Stage 3): the futuristic-aesthetic panel base.
+   * Single source of truth for the chrome on every dashboard tile and
+   * sub-component panel — replaces the verbose
+   *   bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain
+   * pattern that was duplicated at ~14 sites pre-2.5.0.
+   *
+   * .pcd-panel              — static (data-display) tiles.
+   * .pcd-panel-interactive  — adds the violet hover glow + border tint;
+   *                           apply ONLY to tiles that have a real
+   *                           onClick handler so the affordance signals
+   *                           clickability accurately. Pure data tiles
+   *                           stay static (no hover state) to avoid
+   *                           visual noise.
+   *
+   * Both apply .panel-contain so the v2.4.42 layout/style/paint
+   * containment perf fix lands at every site automatically — no need
+   * to remember to add it manually.
+   *
+   * To tune the aesthetic across the whole app: edit the @apply rules
+   * here. Per-site tweaks are still possible via additional classes
+   * (e.g., `<div className="pcd-panel flex items-center …" />`).
+   */
+  .pcd-panel {
+    @apply bg-surface-panel-translucent backdrop-blur-md border border-border-default rounded-lg p-3 panel-contain transition-colors transition-shadow;
+  }
+  .pcd-panel-interactive {
+    @apply hover:shadow-glow-violet hover:border-accent-violet/40;
+  }
+}

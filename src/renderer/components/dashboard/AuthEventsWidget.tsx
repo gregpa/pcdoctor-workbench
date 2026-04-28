@@ -31,7 +31,7 @@ export function AuthEventsWidget() {
   }, []);
 
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+    <div className="pcd-panel">
       <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">🔐 Auth Events (recent)</div>
       {loading ? (
         <div className="text-xs text-text-secondary">Loading…</div>
