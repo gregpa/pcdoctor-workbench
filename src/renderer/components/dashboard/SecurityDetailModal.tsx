@@ -120,7 +120,7 @@ export function SecurityDetailModal({
       aria-label={`${title.label} details`}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto"
+        className="pcd-modal w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-3 flex items-center gap-2">

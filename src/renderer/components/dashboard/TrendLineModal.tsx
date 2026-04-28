@@ -39,7 +39,7 @@ export function TrendLineModal({ title, trend, severity = 'info', unit = '', yDo
   if (!points.length || !stats) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-6 max-w-md">
+        <div className="pcd-modal p-6 max-w-md">
           <div className="text-sm">No data available for this metric.</div>
           <button onClick={onClose} className="mt-3 px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Close</button>
         </div>
@@ -75,7 +75,7 @@ export function TrendLineModal({ title, trend, severity = 'info', unit = '', yDo
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="bg-surface-800 border border-surface-600 rounded-lg shadow-2xl w-full max-w-5xl" onClick={e => e.stopPropagation()}>
+      <div className="pcd-modal w-full max-w-5xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-surface-600">
           <div>
             <h2 className="text-base font-bold">{title}</h2>

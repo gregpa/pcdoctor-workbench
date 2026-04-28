@@ -27,7 +27,7 @@ export function TrendBar({ title, trend, warnAt, critAt, height = 120, onExpand,
   if (points.length === 0) {
     // Empty-state never becomes clickable — no data to expand into.
     return (
-      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+      <div className="pcd-panel">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary mb-1">{title}</div>
         <div className="h-24 flex items-center justify-center text-xs text-text-secondary">No data</div>
       </div>
@@ -47,7 +47,7 @@ export function TrendBar({ title, trend, warnAt, critAt, height = 120, onExpand,
   const clickable = typeof onExpand === 'function';
   return (
     <div
-      className={`bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain ${clickable ? 'cursor-pointer hover:border-status-info/60 transition-colors' : ''}`}
+      className={`pcd-panel ${clickable ? 'cursor-pointer hover:border-status-info/60 transition-colors' : ''}`}
       onClick={clickable ? onExpand : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand!(); } } : undefined}
       role={clickable ? 'button' : undefined}

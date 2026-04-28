@@ -84,7 +84,7 @@ export function MemTest86() {
         ))}
       </div>
 
-      <div className="bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <div className="pcd-section">
         <h2 className="text-base font-bold mb-3">{steps[step].title}</h2>
         <div className="text-sm">{steps[step].body}</div>
       </div>

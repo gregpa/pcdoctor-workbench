@@ -81,7 +81,7 @@ export function DiskSmartDetailModal({ entry, onClose, onRunSmartCheck }: DiskSm
       aria-label={`${entry.drive} SMART details`}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto"
+        className="pcd-modal w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-3">

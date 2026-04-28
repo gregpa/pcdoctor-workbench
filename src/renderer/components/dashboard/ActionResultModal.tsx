@@ -251,7 +251,7 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
       aria-label={`${action.label} result`}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl p-5 shadow-2xl max-h-[80vh] overflow-y-auto"
+        className="pcd-modal w-full max-w-2xl p-5 shadow-2xl max-h-[80vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-1 flex items-center gap-2">

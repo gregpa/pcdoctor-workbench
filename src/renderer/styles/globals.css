@@ -104,4 +104,28 @@
   .pcd-panel-interactive {
     @apply hover:shadow-glow-violet hover:border-accent-violet/40;
   }
+
+  /*
+   * v2.5.0 Stage 4 — variants for non-dashboard contexts.
+   *
+   * .pcd-section  — full-width section panels on Settings, Claude,
+   *                 MemTest86, etc. Larger padding (p-5), no
+   *                 panel-contain (they're stacked full-width, not
+   *                 in dense grids — the perf fix is unnecessary
+   *                 and would clip overflow content like dropdowns).
+   * .pcd-modal    — transient modal containers. Same chrome as
+   *                 .pcd-panel but with shadow-2xl for depth, no
+   *                 panel-contain (modals portal out of the page
+   *                 grid), no padding (modals stack their own
+   *                 padding via flex/etc.).
+   *
+   * Both can pair with .pcd-panel-interactive for the violet hover
+   * glow when the container itself is a click target.
+   */
+  .pcd-section {
+    @apply bg-surface-panel-translucent backdrop-blur-md border border-border-default rounded-lg p-5 transition-colors transition-shadow;
+  }
+  .pcd-modal {
+    @apply bg-surface-panel-translucent backdrop-blur-md border border-border-default rounded-lg shadow-2xl;
+  }
 }

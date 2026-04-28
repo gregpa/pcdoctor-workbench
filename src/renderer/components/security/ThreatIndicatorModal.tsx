@@ -122,7 +122,7 @@ export function ThreatIndicatorModal({ indicator, onClose, onDismissed }: Threat
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
+        className="pcd-modal w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

@@ -453,7 +453,7 @@ export function Dashboard() {
           // full width for readability on narrow windows.
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
             {/* Deep Clean panel */}
-            <div className="pcd-panel">
+            <div className="pcd-panel pcd-panel-interactive">
               <div className="mb-2">
                 <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
                   <span>🧽</span><span>Deep Clean</span>
@@ -495,7 +495,7 @@ export function Dashboard() {
             </div>
 
             {/* Harden panel */}
-            <div className="pcd-panel">
+            <div className="pcd-panel pcd-panel-interactive">
               <div className="mb-2">
                 <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
                   <span>🛡</span><span>Harden</span>
@@ -542,7 +542,7 @@ export function Dashboard() {
       {/* Services + Actions + Alerts row -- v2.4.39 (B45): stacks below lg
           so each of the three panels has full width on narrow windows. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">
-        <div className="pcd-panel">
+        <div className="pcd-panel pcd-panel-interactive">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Services & Processes</div>
           {/* v2.4.39 (B45): service pills widen to 2-up on phones, 3-up at sm
               so pill text has room to breathe instead of clipping to "S..." */}
@@ -553,7 +553,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="pcd-panel">
+        <div className="pcd-panel pcd-panel-interactive">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2 flex items-center gap-1">
             <span>⚡</span><span>One-Click Actions</span>
           </div>
@@ -567,7 +567,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div id="active-alerts" className="pcd-panel transition-all duration-500 scroll-mt-4">
+        <div id="active-alerts" className="pcd-panel pcd-panel-interactive transition-all duration-500 scroll-mt-4">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">
             Active Alerts {status.findings.length > 0 ? `(${status.findings.length})` : ''}
           </div>
@@ -619,7 +619,7 @@ export function Dashboard() {
         ) : (
           <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
         )}
-        <div className="pcd-panel">
+        <div className="pcd-panel pcd-panel-interactive">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Security & Updates</div>
           {security ? (
             <div className="space-y-1.5 text-[11px]">

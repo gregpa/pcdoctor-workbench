@@ -18,7 +18,7 @@ export function BsodPanel() {
   }
 
   return (
-    <div className="pcd-panel">
+    <div className="pcd-panel pcd-panel-interactive">
       <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">💥 BSOD Minidump Analyzer</div>
       {!result && !loading && (
         <button onClick={analyze} className="px-2.5 py-1.5 rounded-md bg-[#238636] text-white text-[11px] font-semibold">Analyze Latest</button>

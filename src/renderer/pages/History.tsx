@@ -102,7 +102,7 @@ export function History() {
 
       {detailItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setDetailItem(null)}>
-          <div className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-3xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(ev) => ev.stopPropagation()}>
+          <div className="pcd-modal w-full max-w-3xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(ev) => ev.stopPropagation()}>
             <h2 className="text-base font-semibold mb-3">{detailItem.action_label}</h2>
 
             <div className="text-sm text-text-secondary space-y-1 mb-4">

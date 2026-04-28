@@ -215,7 +215,7 @@ export function Autopilot() {
           {/* Activity log */}
           <div>
             <h2 className="text-sm font-semibold mb-2">Activity (last 30 days — {activity.length} entries)</h2>
-            <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-x-auto">
+            <div className="pcd-section overflow-x-auto p-0">
               <table className="w-full text-xs">
                 <thead className="bg-surface-700 text-text-secondary text-[10px] uppercase tracking-wider">
                   <tr>
@@ -278,7 +278,7 @@ export function Autopilot() {
           </div>
 
           {/* Rules table */}
-          <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-x-auto">
+          <div className="pcd-section overflow-x-auto p-0">
             <table className="w-full text-xs">
               <thead className="bg-surface-700 text-text-secondary text-[10px] uppercase tracking-wider">
                 <tr>
@@ -402,7 +402,7 @@ function FilterSelect<T extends string>({ label, value, onChange, options }: {
 function StatCard({ label, value, tone }: { label: string; value: string | number; tone?: 'warn' }) {
   const toneClass = tone === 'warn' ? 'text-status-warn' : 'text-text-primary';
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+    <div className="pcd-panel">
       <div className="text-[10px] uppercase tracking-wider text-text-secondary">{label}</div>
       <div className={`text-2xl font-bold mt-1 ${toneClass}`}>{value}</div>
     </div>

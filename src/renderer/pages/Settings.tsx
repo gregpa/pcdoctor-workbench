@@ -253,7 +253,7 @@ export function Settings() {
       <h1 className="text-lg font-bold mb-4">⚙ Settings</h1>
 
       {/* Telegram */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">📱 Telegram Notifications</h2>
         {tgConnected ? (
           <div>
@@ -351,7 +351,7 @@ export function Settings() {
       </section>
 
       {/* v2.4.6: NAS config (server IP + drive mappings) */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🌐 NAS / SMB Mappings</h2>
         <div className="text-xs text-text-secondary mb-3">
           Server IP and drive mappings used by the scanner and Remap NAS Drives action.
@@ -411,7 +411,7 @@ export function Settings() {
       </section>
 
       {/* Notification matrix */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🔔 Notification Matrix</h2>
         <table className="w-full text-xs">
           <thead>
@@ -444,7 +444,7 @@ export function Settings() {
       </section>
 
       {/* Quiet hours */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🌙 Quiet Hours</h2>
         <div className="text-xs text-text-secondary mb-3">Non-critical notifications are silenced during this window. Critical alerts always come through.</div>
         <div className="flex items-center gap-2 text-xs">
@@ -457,7 +457,7 @@ export function Settings() {
       </section>
 
       {/* Email digest */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">📧 Email Digest + Quiet Hours Buffering</h2>
         <div className="text-xs text-text-secondary mb-3">
           During quiet hours, non-critical notifications buffer and release as a single morning digest.
@@ -511,7 +511,7 @@ export function Settings() {
       </section>
 
       {/* Blocked IPs */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🚫 Blocked IP Addresses</h2>
         {blockedIPs.length === 0 ? (
           <div className="text-xs text-text-secondary">No PCDoctor-managed block rules. Use Security → Authentication → Block to add them.</div>
@@ -530,7 +530,7 @@ export function Settings() {
       </section>
 
       {/* Automatic Threat Response */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">⚔ Automatic Threat Response</h2>
         <label className="flex items-center gap-2 text-xs">
           <input
@@ -546,7 +546,7 @@ export function Settings() {
       </section>
 
       {/* Scheduled tasks */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">⏱ Scheduled Tasks</h2>
         {!tasks ? (
           <div className="text-xs text-text-secondary">Loading tasks…</div>
@@ -573,7 +573,7 @@ export function Settings() {
       </section>
 
       {/* Diagnostic bundle */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">📦 Diagnostic Bundle</h2>
         <p className="text-xs text-text-secondary mb-3">
           Export a zip of current settings (tokens redacted), last diagnostic report, recent weekly reviews, logs, and action history. Useful for bug reports.
@@ -591,7 +591,7 @@ export function Settings() {
       </section>
 
       {/* Auto-Update */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🔄 Auto-Update</h2>
         <div className="text-xs text-text-secondary mb-3">
           Checks <a href="https://github.com/gregpa/pcdoctor-workbench/releases" target="_blank" rel="noreferrer" className="text-status-info underline">GitHub Releases</a> every 6 hours.
@@ -629,7 +629,7 @@ export function Settings() {
       </section>
 
       {/* About */}
-      <section className="bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="pcd-section">
         <h2 className="text-sm font-bold mb-3">About</h2>
         <div className="text-xs text-text-secondary space-y-1">
           <div>PCDoctor Workbench <strong>v{appVersion}</strong></div>
