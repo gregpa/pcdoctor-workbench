@@ -9,10 +9,18 @@ export function useSecurityPosture() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await api.getSecurityPosture();
-    if (r.ok) { setData(r.data); setError(null); }
-    else setError(r.error.message);
-    setLoading(false);
+    try {
+      const r = await api.getSecurityPosture();
+      if (r.ok) { setData(r.data); setError(null); }
+      else setError(r.error.message);
+    } catch (e: any) {
+      // v2.4.51 (B51-HOOK-1): a thrown invoke (preload crashed, channel
+      // missing) used to leave loading=true forever. Now both states
+      // resolve and the user sees an actionable error.
+      setError(e?.message ?? 'Security posture invoke failed');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);

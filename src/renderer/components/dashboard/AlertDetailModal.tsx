@@ -79,7 +79,7 @@ export function AlertDetailModal({
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
+        className="pcd-modal w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -161,7 +161,7 @@ export function AlertDetailModal({
         <div className="flex justify-between gap-2 p-4 border-t border-surface-600 bg-surface-900/50">
           <button
             onClick={onDismiss}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-surface-500"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-surface-500"
             title="Suppress this alert until state changes"
           >
             🗑 Dismiss
@@ -169,7 +169,7 @@ export function AlertDetailModal({
           <div className="flex gap-2">
             <button
               onClick={onInvestigateWithClaude}
-              className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+              className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
             >
               🤖 Investigate with Claude
             </button>

@@ -13,12 +13,21 @@ import { useNavigate } from 'react-router-dom';
 type DetailKind = 'defender' | 'firewall' | 'wu' | 'auth' | 'bitlocker' | 'uac' | 'gpu' | null;
 
 function Panel({ title, children, severity, onClick }: { title: string; children: React.ReactNode; severity?: string; onClick?: () => void }) {
-  const border = severity === 'crit' ? 'border-status-crit/40' : severity === 'warn' ? 'border-status-warn/40' : 'border-surface-600';
+  // v2.5.0 Stage 4 patch: Security page's local Panel component now uses
+  // .pcd-section as its base chrome (translucent navy + backdrop-blur),
+  // overrides padding to p-4 (matches pre-2.5.0 size), and stacks a
+  // dynamic severity-tinted border on top (non-negotiable per Greg's D1
+  // — semantic colors stay). Interactive variant when onClick is set
+  // adds the violet hover glow via .pcd-panel-interactive (the alias
+  // class lives next to .pcd-panel in globals.css and applies to any
+  // pcd-* container).
+  const border = severity === 'crit' ? 'border-status-crit/40' : severity === 'warn' ? 'border-status-warn/40' : '';
   const clickable = !!onClick;
   return (
     <div
       onClick={onClick}
-      className={`bg-surface-800 border ${border} rounded-lg p-4 ${clickable ? 'hover:border-status-info/40 cursor-pointer transition' : ''}`}
+      className={`pcd-section ${border} ${clickable ? 'pcd-panel-interactive cursor-pointer' : ''}`}
+      style={{ padding: '1rem' }}
     >
       <div className="flex justify-between items-center mb-3">
         <div className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">{title}</div>
@@ -99,6 +108,30 @@ export function Security() {
         </div>
         <button onClick={refresh} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Re-scan</button>
       </div>
+
+      {/* v2.4.52 (B52-UI-1): partial-error banner. The B51-IPC-1 fix made
+          getSecurityPosture's sub-scan failures observable as a typed
+          partial_errors[] field instead of silently substituting empty
+          arrays. v2.4.51 shipped the field; v2.4.52 surfaces it. The
+          banner is a single warn-toned strip above the panels that
+          enumerates failed scans + their codes, so users know "no
+          threats" doesn't actually mean "the threat scan ran and found
+          nothing." */}
+      {Array.isArray(data.partial_errors) && data.partial_errors.length > 0 && (
+        <div className="mb-3 px-3 py-2 rounded-md bg-status-warn/15 border border-status-warn/40 text-[11px] text-status-warn">
+          <div className="font-semibold mb-1">⚠ Partial scan — {data.partial_errors.length} sub-scan{data.partial_errors.length === 1 ? '' : 's'} failed</div>
+          <ul className="text-text-secondary space-y-0.5 ml-3 list-disc">
+            {data.partial_errors.map((e) => (
+              <li key={e.name}>
+                <span className="font-mono text-text-primary">{e.name}</span>: <span className="font-mono text-status-warn">{e.code}</span> — {e.message}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-1 text-text-secondary/70">
+            Affected panels below show "data unavailable". Click <span className="text-status-info">Re-scan</span> to retry.
+          </div>
+        </div>
+      )}
 
       <DefenderScanStatus />
 
@@ -226,8 +259,8 @@ export function Security() {
                   </div>
                   {p.approved !== 1 && (
                     <>
-                      <button onClick={() => approve(p.identifier, true)} className="px-2 py-0.5 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-good/40">Approve</button>
-                      <button onClick={() => approve(p.identifier, false)} className="px-2 py-0.5 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-crit/40">Reject</button>
+                      <button onClick={() => approve(p.identifier, true)} className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-good/40">Approve</button>
+                      <button onClick={() => approve(p.identifier, false)} className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-crit/40">Reject</button>
                     </>
                   )}
                   <button
@@ -235,7 +268,7 @@ export function Security() {
                       const ctx = `Investigate this persistence item:\n- Kind: ${p.kind}\n- Name: ${p.name}\n- Path: ${p.path ?? 'unknown'}\n- Publisher: ${p.publisher ?? 'unknown'}\n- First seen: ${new Date(p.first_seen).toLocaleString()}\n- Signed: ${p.signed ?? 'unknown'}\n\nIs this legitimate? Should it be removed?`;
                       await (window as any).api.investigateWithClaude(ctx);
                     }}
-                    className="px-2 py-0.5 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-info/40"
+                    className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-info/40"
                     title="Investigate in Claude"
                   >
                     🤖
@@ -256,8 +289,8 @@ export function Security() {
           onClose={() => setDetail(null)}
           actions={
             <>
-              <button onClick={() => { setDetail(null); applyAction('update_defender_defs'); }} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Update Defs</button>
-              <button onClick={() => { setDetail(null); applyAction('defender_quick_scan'); }} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Quick Scan</button>
+              <button onClick={() => { setDetail(null); applyAction('update_defender_defs'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button">Update Defs</button>
+              <button onClick={() => { setDetail(null); applyAction('defender_quick_scan'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button">Quick Scan</button>
               <button onClick={() => { setDetail(null); applyAction('defender_full_scan'); }} className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-bold">Full Scan</button>
             </>
           }
@@ -289,7 +322,7 @@ export function Security() {
             <div className="flex gap-2">
               <button
                 onClick={() => { setDetail(null); applyAction('open_firewall_console'); }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
                 title="Launches Windows Firewall with Advanced Security (wf.msc) so you can review and edit rules manually. No state change."
               >
                 🧰 Open Firewall Rules
@@ -486,7 +519,7 @@ export function Security() {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

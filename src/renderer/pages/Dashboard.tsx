@@ -183,9 +183,17 @@ export function Dashboard() {
     if (scanning) return;
     setScanning(true);
     const beforeTs = status?.generated_at ?? 0;
-    const r = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
-    if (!r.ok) {
-      setToast(`Scan failed to start: ${r.error?.message ?? 'unknown'}`);
+    try {
+      const r = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
+      if (!r.ok) {
+        setToast(`Scan failed to start: ${r.error?.message ?? 'unknown'}`);
+        setTimeout(() => setToast(null), 5000);
+        setScanning(false);
+        return;
+      }
+    } catch (e: any) {
+      // v2.4.51 (B51-HOOK-1): thrown invoke leaves scanning stuck on true.
+      setToast(`Scan failed to start: ${e?.message ?? 'invoke threw'}`);
       setTimeout(() => setToast(null), 5000);
       setScanning(false);
       return;
@@ -200,16 +208,22 @@ export function Dashboard() {
         setTimeout(() => setToast(null), 5000);
         return;
       }
-      const fresh = await refetch();
-      if (fresh && fresh.generated_at > beforeTs) {
-        // v2.4.6: Scan Now also re-fetches the security posture so Harden
-        // recommendations reflect live state (previously cached from first
-        // mount, so PUA/CFA changes required an app restart to surface).
-        void refreshSecurity();
-        setScanning(false);
-        setToast(`Scan complete · ${fresh.findings.length} findings`);
-        setTimeout(() => setToast(null), 5000);
-        return;
+      try {
+        const fresh = await refetch();
+        if (fresh && fresh.generated_at > beforeTs) {
+          // v2.4.6: Scan Now also re-fetches the security posture so Harden
+          // recommendations reflect live state (previously cached from first
+          // mount, so PUA/CFA changes required an app restart to surface).
+          void refreshSecurity();
+          setScanning(false);
+          setToast(`Scan complete · ${fresh.findings.length} findings`);
+          setTimeout(() => setToast(null), 5000);
+          return;
+        }
+      } catch {
+        // v2.4.51 (B51-HOOK-1): single refetch failure: don't surface, just
+        // keep polling. If the 5-min deadline expires the existing path
+        // handles it.
       }
       setTimeout(tick, 3000);
     };
@@ -325,11 +339,12 @@ export function Dashboard() {
               // row below; opening the same modal from the gauge was
               // redundant UI clutter. Gauges are now all non-clickable
               // data displays.
+              //
+              // v2.5.0 Stage 3: gauges use .pcd-panel (static — no hover
+              // glow because they're not click targets). Semantic gauge
+              // colors (red/amber/green threshold) preserved.
               return (
-                <div
-                  key={g.label}
-                  className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain"
-                >
+                <div key={g.label} className="pcd-panel">
                   <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
                 </div>
               );
@@ -367,7 +382,7 @@ export function Dashboard() {
             onExpand={() => cpuTrend && setExpandedTrend({ title: 'CPU Load - 7 Day Trend', trend: cpuTrend, unit: '%', yDomain: [0, 100] })}
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex items-center justify-center text-text-secondary text-xs">Gathering CPU load trend…</div>
+          <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering CPU load trend…</div>
         )}
         {cpuTempTrend ? (
           <TrendLine
@@ -378,7 +393,7 @@ export function Dashboard() {
             onExpand={() => cpuTempTrend && setExpandedTrend({ title: 'CPU Temp - 7 Day Trend', trend: cpuTempTrend, unit: '°C', yDomain: [30, 100] })}
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex flex-col items-center justify-center text-text-secondary text-xs gap-2">
+          <div className="pcd-panel flex flex-col items-center justify-center text-text-secondary text-xs gap-2">
             <div>CPU temp trend</div>
             <div className="text-[10px] italic">admin required to seed - click Refresh above</div>
           </div>
@@ -392,7 +407,7 @@ export function Dashboard() {
             onExpand={() => gpuTempTrend && setExpandedTrend({ title: 'GPU Temp - 7 Day Trend', trend: gpuTempTrend, unit: '°C', yDomain: [30, 100] })}
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex items-center justify-center text-text-secondary text-xs">Gathering GPU temp trend…</div>
+          <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering GPU temp trend…</div>
         )}
       </div>
 
@@ -438,7 +453,7 @@ export function Dashboard() {
           // full width for readability on narrow windows.
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
             {/* Deep Clean panel */}
-            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+            <div className="pcd-panel pcd-panel-interactive">
               <div className="mb-2">
                 <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
                   <span>🧽</span><span>Deep Clean</span>
@@ -480,7 +495,7 @@ export function Dashboard() {
             </div>
 
             {/* Harden panel */}
-            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+            <div className="pcd-panel pcd-panel-interactive">
               <div className="mb-2">
                 <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold flex items-center gap-1">
                   <span>🛡</span><span>Harden</span>
@@ -527,7 +542,7 @@ export function Dashboard() {
       {/* Services + Actions + Alerts row -- v2.4.39 (B45): stacks below lg
           so each of the three panels has full width on narrow windows. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+        <div className="pcd-panel pcd-panel-interactive">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Services & Processes</div>
           {/* v2.4.39 (B45): service pills widen to 2-up on phones, 3-up at sm
               so pill text has room to breathe instead of clipping to "S..." */}
@@ -538,7 +553,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+        <div className="pcd-panel pcd-panel-interactive">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2 flex items-center gap-1">
             <span>⚡</span><span>One-Click Actions</span>
           </div>
@@ -552,7 +567,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div id="active-alerts" className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain transition-all duration-500 scroll-mt-4">
+        <div id="active-alerts" className="pcd-panel pcd-panel-interactive transition-all duration-500 scroll-mt-4">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">
             Active Alerts {status.findings.length > 0 ? `(${status.findings.length})` : ''}
           </div>
@@ -602,9 +617,9 @@ export function Dashboard() {
             expandHint="Click to see which providers and event IDs are driving the count"
           />
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
+          <div className="pcd-panel flex items-center justify-center text-text-secondary text-xs">Gathering event trend…</div>
         )}
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+        <div className="pcd-panel pcd-panel-interactive">
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Security & Updates</div>
           {security ? (
             <div className="space-y-1.5 text-[11px]">
@@ -618,6 +633,26 @@ export function Dashboard() {
               {security.persistence_new_count > 0 && (
                 <div className="pt-2 mt-2 border-t border-surface-700 text-[10px] text-status-warn">
                   ⚠ {security.persistence_new_count} new persistence item{security.persistence_new_count === 1 ? '' : 's'} - review in Security page
+                </div>
+              )}
+              {/* v2.4.55 (B55-UI-1 / Tier 2 #2): partial-scan-error chip on
+                  Dashboard. Mirror of the v2.4.52 Security-page banner but
+                  compact for the tighter dashboard cell. The B51-IPC-1 field
+                  surfaces sub-scan failures (Audit-Persistence,
+                  Get-ThreatIndicators, Get-SMART) as typed errors; the
+                  Dashboard now flags them so a row that silently shows
+                  "data unavailable" doesn't leave the user thinking the
+                  scan ran clean. Title attribute carries the full
+                  per-scan list for hover detail; the click takes the user
+                  to the Security page where the v2.4.52 banner enumerates
+                  every entry. */}
+              {Array.isArray(security.partial_errors) && security.partial_errors.length > 0 && (
+                <div
+                  className="pt-2 mt-2 border-t border-surface-700 text-[10px] text-status-warn cursor-pointer"
+                  title={security.partial_errors.map(e => `${e.name}: ${e.code} — ${e.message}`).join('\n')}
+                  onClick={() => navigate('/security')}
+                >
+                  ⚠ {security.partial_errors.length} sub-scan{security.partial_errors.length === 1 ? '' : 's'} failed - panels above may show "data unavailable" - click for details →
                 </div>
               )}
             </div>
@@ -785,7 +820,7 @@ export function Dashboard() {
           toastVariant === 'noop' ? 'bg-status-info/10 border border-status-info/40 text-status-info' :
           toastVariant === 'error' ? 'bg-status-crit/10 border border-status-crit/40 text-status-crit' :
           toastVariant === 'admin' ? 'bg-status-warn/10 border border-status-warn/40 text-status-warn' :
-          'bg-surface-700 border border-surface-600'
+          'pcd-button'
         }`}>
           <span>{toast}</span>
           {toastVariant === 'admin' && (

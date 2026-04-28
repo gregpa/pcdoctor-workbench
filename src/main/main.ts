@@ -11,10 +11,30 @@ if (!process.env.UV_THREADPOOL_SIZE) {
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { access, constants as fsConstants, stat } from 'node:fs/promises';
+import log from 'electron-log/main';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
 import { getStatus } from './pcdoctorBridge.js';
-import { POLL_INTERVAL_MS } from './constants.js';
+import { POLL_INTERVAL_MS, LOG_DIR } from './constants.js';
+
+// v2.4.52 (B52-MIG-1): wire electron-log for the main process. Pre-2.4.52
+// the LOG_DIR constant was defined but never used — console.warn / console.log
+// flowed to nowhere observable post-launch. After v2.4.51 shipped a real
+// migration-flag bug we couldn't diagnose without a single observable
+// log line, so the diagnostic infra finally graduates from TODO.
+//
+// Output file: %APPDATA%\PCDoctor\logs\main.log (path matches LOG_DIR
+// constant; pre-existing perf logs at C:\ProgramData\PCDoctor\logs\ are
+// unrelated and stay separate).
+//
+// Default log levels: warn + above to file. The migration / ACL blocks
+// below explicitly bump to info via log.info(...) so the per-step trace
+// always lands regardless of the global level.
+log.transports.file.resolvePathFn = () => path.join(LOG_DIR, 'main.log');
+log.transports.file.maxSize = 5 * 1024 * 1024;  // 5 MB rolling
+log.transports.file.level = 'info';
+log.transports.console.level = 'warn';
+log.initialize();
 import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMessageText, sendTelegramMessage } from './telegramBridge.js';
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
@@ -253,16 +273,25 @@ app.whenReady().then(() => {
   //    left at its previous value and the next launch retries -- exactly
   //    the self-healing v2.4.45 lacked.
   (async () => {
+    // v2.4.52 (B52-MIG-1): every step in this migration block now logs to
+    // main.log (electron-log file transport). Pre-2.4.52 a real bug shipped
+    // in v2.4.51 (migration ran successfully — tasks registered with v2.4.51
+    // Author — but the setSetting flag write silently failed; outer
+    // try/catch swallowed) and we had no way to tell which step had failed.
+    // The log.info pairs let us bisect on the next occurrence.
+    log.info('[migration] block start');
     try {
       // Order: NAS + Startup sidecars + ACL/bundle-sync first so that
       // Register-All-Tasks sees a fully-populated C:\ProgramData\PCDoctor\.
       await Promise.allSettled([nasSyncPromise, startupSyncPromise, bundleSyncPromise]);
+      log.info('[migration] sidecar promises settled');
 
       const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
-      const TASK_MIGRATION_VERSION = '2.4.47';
+      const TASK_MIGRATION_VERSION = '2.4.51';
       const lastMigration = getSetting('last_task_migration_version');
       const isUpgrade = lastMigration !== TASK_MIGRATION_VERSION;
+      log.info(`[migration] lastMigration=${JSON.stringify(lastMigration)} target=${TASK_MIGRATION_VERSION} isUpgrade=${isUpgrade}`);
 
       // v2.4.47 (B46-1): if (a) we are mid-upgrade, (b) the bundle-sync probe
       // said elevation is needed, AND (c) at least one of the autopilot
@@ -294,12 +323,68 @@ app.whenReady().then(() => {
       if (isUpgrade) {
         args.push('-ForceRecreate');
       }
-      // runPowerShellScript returns the parsed JSON object (see
-      // scriptRunner.ts -- JSON.parse(stdout.trim())), not a string.
+      // v2.4.48 (B48-MIG-1a): on upgrade, Register-All-Tasks.ps1 MUST run
+      // elevated. The /Delete /TN /F leg fails non-elevated against tasks
+      // originally created elevated (root cause of Greg's box stuck at
+      // last_task_migration_version='2.4.45' for two releases -- every
+      // subsequent migration tried non-elevated, every /Delete returned
+      // ERROR: Access is denied, /Create then collided with the still-present
+      // task and reported `failed`, the `some()` predicate happened to find
+      // the one row that succeeded, and the flag advanced anyway).
+      //
+      // UAC budget on upgrade:
+      //  - Best case (1 prompt): bundle-sync IIFE did NOT already prompt
+      //    (its `last_acl_repair_version` short-circuit suppressed the
+      //    elevated copy), so this is the only elevation in the boot path.
+      //  - Worst case (2 prompts): bundle-sync IIFE already prompted for
+      //    its elevated Sync. We still need a second prompt because the
+      //    sync/register pair cannot be merged after the fact -- the bundle
+      //    is already on disk by the time we get here. Loud `console.warn`
+      //    so the dual-prompt frequency is visible in main.log post-ship.
+      //  - Steady-state launch (`isUpgrade === false`): no UAC, runs
+      //    non-elevated without -ForceRecreate (existing tasks are queried
+      //    via /Query, not deleted -- non-elevated is fine).
+      //
+      // E_UAC_CANCELLED on the elevated call leaves the migration flag
+      // unwritten, so the next launch retries. Every other elevated-path
+      // failure (E_ELEVATION_FAILED, E_TIMEOUT_KILLED) does the same -- we
+      // catch and let the function fall through; the flag is written only
+      // inside the `if (verifyAutopilotMigration(...))` guard below.
       type RegResult = import('./taskMigrationVerify.js').RegisterAllTasksResult;
-      const result = await runPowerShellScript<RegResult>(
-        'Register-All-Tasks.ps1', args, { timeoutMs: 60_000 },
-      );
+      let result: RegResult;
+      if (isUpgrade) {
+        if (bundleElevatedSyncAttempted) {
+          log.warn('[migration] dual UAC required (sync already attempted)');
+        }
+        log.info('[migration] elevated Register-All-Tasks.ps1 starting');
+        try {
+          result = await runElevatedPowerShellScript<RegResult>(
+            'Register-All-Tasks.ps1', args, { timeoutMs: 120_000 },
+          );
+          log.info(`[migration] elevated Register-All-Tasks.ps1 returned (success=${(result as any)?.success}, results=${(result as any)?.results?.length ?? 'unknown'})`);
+        } catch (err: any) {
+          // Elevation declined / failed. Returns from THIS async IIFE
+          // (not from app.whenReady's then-callback). Leaves the
+          // migration flag unwritten so the next launch retries.
+          log.warn(`[migration] elevated Register-All-Tasks.ps1 threw: code=${err?.code} message=${err?.message}`);
+          return;
+        }
+      } else {
+        log.info('[migration] non-elevated Register-All-Tasks.ps1 (steady-state, no -ForceRecreate)');
+        // v2.4.54 (B53-MIG-2 follow-up): bumped from 60_000ms → 120_000ms.
+        // The v2.4.53 fix added a per-task existence pre-check that issues
+        // ~5 cmd.exe spawns for SYSTEM-context tasks the non-elevated COM
+        // enumeration doesn't see. Each spawn pays ~3-9s of Defender +
+        // process startup tax. v2.4.54 swapped most of those to native
+        // Get-ScheduledTask, but the IPC timeout still needs to be
+        // generous enough to absorb the once-per-launch tax on slower
+        // boxes. 120s is comfortable headroom over the empirical
+        // worst-case 44s we measured pre-Get-ScheduledTask.
+        result = await runPowerShellScript<RegResult>(
+          'Register-All-Tasks.ps1', args, { timeoutMs: 120_000 },
+        );
+        log.info(`[migration] non-elevated Register-All-Tasks.ps1 returned (success=${(result as any)?.success})`);
+      }
       if (isUpgrade) {
         // Verification (B45-4 self-heal): require at least one autopilot row
         // to be both `registered` and carry the dispatcher reference. If the
@@ -330,13 +415,30 @@ app.whenReady().then(() => {
           }
         } catch { /* non-fatal: skip the size check on stat failure */ }
 
-        if (verifyAutopilotMigration(result, sizes)) {
-          setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);
+        const verified = verifyAutopilotMigration(result, sizes);
+        log.info(`[migration] verifyAutopilotMigration returned ${verified} (sizes=${JSON.stringify(sizes)})`);
+        if (verified) {
+          try {
+            setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);
+            log.info(`[migration] setSetting('last_task_migration_version', '${TASK_MIGRATION_VERSION}') succeeded`);
+          } catch (err: any) {
+            // v2.4.52 (B52-MIG-1): pre-2.4.52 this throw was silently
+            // swallowed by the outer try/catch and the flag stayed at the
+            // old value, leaving the migration to silently re-run + prompt
+            // UAC on every launch. Surfacing the error finally lets us see
+            // why on the next failure.
+            log.error(`[migration] setSetting threw: code=${err?.code} message=${err?.message} stack=${err?.stack}`);
+          }
         }
         // If !verified, deliberately do NOT write the flag -- next launch
         // will retry. This is the desired self-healing property.
       }
-    } catch { /* non-fatal */ }
+    } catch (err: any) {
+      // v2.4.52 (B52-MIG-1): pre-2.4.52 this catch was a silent eraser.
+      // Now it logs so a future investigation can find the failure point.
+      // Still non-fatal — the migration block must never crash the app.
+      log.error(`[migration] outer catch swallowed: code=${err?.code} message=${err?.message} stack=${err?.stack}`);
+    }
   })();
 
   // v2.3.15 + v2.4.3: ACL self-healer. Two-phase:
@@ -421,23 +523,39 @@ app.whenReady().then(() => {
       const { getSetting, setSetting } = await import('./dataStore.js');
       const thisVersion = app.getVersion();
       const lastRepair = getSetting('last_acl_repair_version');
+      log.info(`[acl] block start lastRepair=${JSON.stringify(lastRepair)} thisVersion=${thisVersion} bundleNeedsElevatedCopy=${bundleNeedsElevatedCopy}`);
 
       const aclResult = await runPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
       const aclNeedsElevation = !!aclResult?.needs_elevation;
+      log.info(`[acl] aclNeedsElevation=${aclNeedsElevation}`);
 
       if ((bundleNeedsElevatedCopy || aclNeedsElevation) && lastRepair !== thisVersion) {
         try {
           if (aclNeedsElevation) {
+            log.info('[acl] elevated Repair-ScriptAcls.ps1 starting');
             await runElevatedPowerShellScript<any>('Repair-ScriptAcls.ps1', ['-JsonOutput', '-Elevated'], { timeoutMs: 60_000 });
+            log.info('[acl] elevated Repair-ScriptAcls.ps1 returned');
           }
           // v2.4.10: only mark this version repaired if the elevation chain
           // actually completed.
           setSetting('last_acl_repair_version', thisVersion);
-        } catch { /* user declined UAC; we'll try again next upgrade */ }
+          log.info(`[acl] setSetting('last_acl_repair_version', '${thisVersion}') succeeded (post-elevation path)`);
+        } catch (err: any) {
+          log.warn(`[acl] elevation/setSetting threw: code=${err?.code} message=${err?.message}`);
+        }
       } else {
-        setSetting('last_acl_repair_version', thisVersion);
+        try {
+          setSetting('last_acl_repair_version', thisVersion);
+          log.info(`[acl] setSetting('last_acl_repair_version', '${thisVersion}') succeeded (no-elevation path)`);
+        } catch (err: any) {
+          // v2.4.52 (B52-MIG-1): pre-2.4.52 the outer catch ate this. Log it.
+          log.error(`[acl] setSetting threw: code=${err?.code} message=${err?.message} stack=${err?.stack}`);
+        }
       }
-    } catch { /* non-fatal; most users will never hit this path */ }
+    } catch (err: any) {
+      // v2.4.52 (B52-MIG-1): the outer catch is no longer silent.
+      log.error(`[acl] outer catch swallowed: code=${err?.code} message=${err?.message} stack=${err?.stack}`);
+    }
   })();
 
   // v2.4.9: runtime ACL self-heal. Belt-and-suspenders on top of the

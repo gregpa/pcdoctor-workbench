@@ -53,6 +53,41 @@ export const AUTOPILOT_SCRIPT_NAMES = [
 ] as const;
 
 /**
+ * v2.4.48 (B48-MIG-1b): canonical 11-row set of autopilot scheduled-task
+ * names sourced verbatim from `Register-All-Tasks.ps1`. Drives the
+ * full-set verification predicate in `verifyAutopilotMigration`: the
+ * migration flag is only flipped when EVERY one of these tasks comes back
+ * `registered` AND dispatcher-backed.
+ *
+ * Pre-2.4.48 the verifier used `rows.some(...)` — i.e. ONE registered +
+ * dispatcher-wrapped autopilot row was enough to declare success. That is
+ * the v2.4.45 silent-failure mode: schtasks happens to register the first
+ * task on the list, the next 10 fail with /TR overflow, the verifier sees
+ * one passing row, flips the flag, and the install never retries.
+ *
+ * v2.4.51 (B49-NAS-2): added `PCDoctor-Autopilot-RefreshNasRecycleSizes`,
+ * bringing the canonical set to 12 names.
+ *
+ * Drift guard: if Register-All-Tasks.ps1 grows or shrinks an autopilot row,
+ * `tests/main/taskMigrationVerify.fullSet.test.ts` regex-extracts the live
+ * list and asserts setEqual against this constant. Update both in lockstep.
+ */
+export const EXPECTED_AUTOPILOT_TASK_NAMES = [
+  'PCDoctor-Autopilot-EmptyRecycleBins',
+  'PCDoctor-Autopilot-ClearBrowserCaches',
+  'PCDoctor-Autopilot-DefenderQuickScan',
+  'PCDoctor-Autopilot-UpdateDefenderDefs',
+  'PCDoctor-Autopilot-MalwarebytesCli',
+  'PCDoctor-Autopilot-AdwCleanerScan',
+  'PCDoctor-Autopilot-HwinfoLog',
+  'PCDoctor-Autopilot-SafetyScanner',
+  'PCDoctor-Autopilot-ShrinkComponentStore',
+  'PCDoctor-Autopilot-SmartCheck',
+  'PCDoctor-Autopilot-UpdateHostsStevenBlack',
+  'PCDoctor-Autopilot-RefreshNasRecycleSizes',
+] as const;
+
+/**
  * v2.4.47 (B46-1): given the parsed Sync-ScriptsFromBundle.ps1 mismatch
  * list (each entry is a relative path string like 'Register-All-Tasks.ps1'
  * or 'actions\\Foo.ps1'), return true if any entry references one of the
@@ -94,6 +129,23 @@ export function shouldFireElevatedAutopilotSync(opts: {
   return autopilotScriptsAreStale(opts.bundleMismatches);
 }
 
+/**
+ * v2.4.48 (B48-MIG-1b): full-set verification.
+ *
+ * Returns true ONLY when EVERY name in `EXPECTED_AUTOPILOT_TASK_NAMES`
+ * appears in `result.results` with `status === 'registered'` AND a
+ * `command` or `output` field that references the dispatcher. Pre-2.4.48
+ * the predicate used `rows.some(...)` — one registered + dispatcher-wrapped
+ * autopilot row was enough to flip the migration flag. That is the
+ * v2.4.45 silent-failure mode root cause: 1 of 11 rows registers, the
+ * other 10 fail (e.g. /TR overflow), `some()` reports success, flag is
+ * persisted, install never retries.
+ *
+ * The size-mismatch belt-and-braces (B46-1) is preserved at the top: if
+ * the caller provided both `deployedSize` and `bundledSize` and they
+ * differ, we fail regardless of dispatcher content (catches the
+ * stale-deployed-script-but-happens-to-emit-dispatcher-needle case).
+ */
 export function verifyAutopilotMigration(
   result: RegisterAllTasksResult | null | undefined,
   sizes?: MigrationVerifySizes,
@@ -112,13 +164,17 @@ export function verifyAutopilotMigration(
   }
 
   const rows = result?.results ?? [];
-  return rows.some(r =>
-    typeof r?.name === 'string'
-    && r.name.startsWith('PCDoctor-Autopilot-')
-    && r.status === 'registered'
-    && (
-      (typeof r.command === 'string' && r.command.includes(DISPATCHER_NEEDLE))
-      || (typeof r.output === 'string' && r.output.includes(DISPATCHER_NEEDLE))
-    ),
-  );
+
+  // v2.4.48: Walk EXPECTED_AUTOPILOT_TASK_NAMES, demand each one is present
+  // and dispatcher-backed. Extra rows (Workbench-Autostart, weekly review,
+  // forecast, etc.) are ignored — they're not autopilot rows.
+  for (const expectedName of EXPECTED_AUTOPILOT_TASK_NAMES) {
+    const row = rows.find(r => r?.name === expectedName);
+    if (!row) return false;
+    if (row.status !== 'registered') return false;
+    const cmdHasNeedle = typeof row.command === 'string' && row.command.includes(DISPATCHER_NEEDLE);
+    const outHasNeedle = typeof row.output === 'string' && row.output.includes(DISPATCHER_NEEDLE);
+    if (!cmdHasNeedle && !outHasNeedle) return false;
+  }
+  return true;
 }

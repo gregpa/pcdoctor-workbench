@@ -68,21 +68,23 @@ try {
         $stdout = & powershell.exe @psArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
 
-        if ($exitCode -eq 0 -and ($stdout -notmatch 'PCDOCTOR_ERROR:')) {
-            $outcome = 'auto_run'
-        }
-        else {
-            $outcome = 'error'
-        }
-
-        # Best-effort message + bytes_freed extraction. The autopilot action
-        # convention is to emit a compact JSON object on stdout. We take the
-        # last JSON line (scripts sometimes print banner lines above it).
+        # v2.4.48 (B48-AS-2): parse the structured JSON BEFORE classifying
+        # the outcome. The autopilot action convention is to emit a compact
+        # JSON object on stdout (last JSON line; scripts sometimes print
+        # banner lines above it). Pre-2.4.48 the outcome was decided purely
+        # on exit code + 'PCDOCTOR_ERROR:' substring; scripts that emit
+        # exit 0 + `{"success":false,"message":"..."}` (Run-DISM,
+        # Cleanup-WinSxS, Reset-Firewall, Reset-WinSock) appeared as
+        # 'auto_run' in autopilot_activity. The new precedence:
+        #   1. parsed.success === false  -> 'error' (regardless of exit)
+        #   2. exit 0 && no 'PCDOCTOR_ERROR:' -> 'auto_run'
+        #   3. everything else            -> 'error'
         $jsonLine = $null
         foreach ($line in ($stdout -split "`r?`n")) {
             $t = $line.Trim()
             if ($t.StartsWith('{') -and $t.EndsWith('}')) { $jsonLine = $t }
         }
+        $parsed = $null
         if ($jsonLine) {
             try {
                 $parsed = $jsonLine | ConvertFrom-Json -ErrorAction Stop
@@ -93,8 +95,20 @@ try {
                     $bytesFreed = [int64]$parsed.bytes_freed
                 }
             } catch {
-                # Malformed JSON from action script -> leave defaults.
+                # Malformed JSON from action script -> $parsed stays $null,
+                # outcome decision falls through to the exit-code rule.
+                $parsed = $null
             }
+        }
+
+        if ($null -ne $parsed -and $parsed.PSObject.Properties.Name -contains 'success' -and $parsed.success -eq $false) {
+            $outcome = 'error'
+        }
+        elseif ($exitCode -eq 0 -and ($stdout -notmatch 'PCDOCTOR_ERROR:')) {
+            $outcome = 'auto_run'
+        }
+        else {
+            $outcome = 'error'
         }
 
         # PCDOCTOR_ERROR lines override message.

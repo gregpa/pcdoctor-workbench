@@ -97,10 +97,10 @@ export function WeeklyReview() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button disabled={!prevDate} onClick={() => setPickedDate(prevDate!)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-30">
+          <button disabled={!prevDate} onClick={() => setPickedDate(prevDate!)} className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-30">
             ← Prev
           </button>
-          <button disabled={!nextDate} onClick={() => setPickedDate(nextDate!)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-30">
+          <button disabled={!nextDate} onClick={() => setPickedDate(nextDate!)} className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-30">
             Next →
           </button>
           {review.has_pending_flag && (
@@ -120,9 +120,9 @@ export function WeeklyReview() {
           <div className="text-[10px] text-text-secondary mt-1">{applied} of {total} items acted on</div>
         </div>
         <div className="flex gap-1.5">
-          <button onClick={() => onExport('obsidian')} className="px-2.5 py-1.5 rounded-md text-[11px] bg-surface-700 border border-surface-600">Archive to Obsidian</button>
-          <button onClick={() => onExport('print')} className="px-2.5 py-1.5 rounded-md text-[11px] bg-surface-700 border border-surface-600">Print</button>
-          <button onClick={() => onExport('md')} className="px-2.5 py-1.5 rounded-md text-[11px] bg-surface-700 border border-surface-600">Show MD Path</button>
+          <button onClick={() => onExport('obsidian')} className="px-2.5 py-1.5 rounded-md text-[11px] pcd-button">Archive to Obsidian</button>
+          <button onClick={() => onExport('print')} className="px-2.5 py-1.5 rounded-md text-[11px] pcd-button">Print</button>
+          <button onClick={() => onExport('md')} className="px-2.5 py-1.5 rounded-md text-[11px] pcd-button">Show MD Path</button>
         </div>
       </div>
 
@@ -166,7 +166,7 @@ export function WeeklyReview() {
       </section>
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">
           {toast}
         </div>
       )}
@@ -205,12 +205,12 @@ function Item({ item, onApply, onState, running }: {
         )}
         {!done && (
           <>
-            <button onClick={() => onState('dismissed')} className="px-2.5 py-1 rounded-md bg-surface-700 border border-surface-600 text-[10px]">Dismiss</button>
-            <button onClick={() => onState('snoozed')} className="px-2.5 py-1 rounded-md bg-surface-700 border border-surface-600 text-[10px]">Snooze</button>
+            <button onClick={() => onState('dismissed')} className="px-2.5 py-1 rounded-md pcd-button text-[10px]">Dismiss</button>
+            <button onClick={() => onState('snoozed')} className="px-2.5 py-1 rounded-md pcd-button text-[10px]">Snooze</button>
           </>
         )}
         {done && (
-          <button onClick={() => onState('pending')} className="px-2.5 py-1 rounded-md bg-surface-700 border border-surface-600 text-[10px]">Reset</button>
+          <button onClick={() => onState('pending')} className="px-2.5 py-1 rounded-md pcd-button text-[10px]">Reset</button>
         )}
       </div>
     </div>

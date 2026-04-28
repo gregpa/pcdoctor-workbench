@@ -253,7 +253,7 @@ export function Settings() {
       <h1 className="text-lg font-bold mb-4">⚙ Settings</h1>
 
       {/* Telegram */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">📱 Telegram Notifications</h2>
         {tgConnected ? (
           <div>
@@ -265,13 +265,13 @@ export function Settings() {
               <span>Telegram notifications enabled</span>
             </label>
             <div className="flex gap-2 flex-wrap">
-              <button onClick={sendTest} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
+              <button onClick={sendTest} className="px-3 py-1.5 rounded-md text-xs pcd-button">
                 Send test message
               </button>
               <button
                 onClick={sendTestFull}
                 disabled={tgTestPending}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-50"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50"
                 title="Sends a message with inline buttons. Tap ✓ Received in Telegram to confirm the round-trip works."
               >
                 {tgTestPending ? 'Waiting for reply…' : 'Test with Buttons'}
@@ -311,11 +311,11 @@ export function Settings() {
                     showToast(`Reveal failed: ${r?.error?.message ?? 'unknown'}`);
                   }
                 }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button"
               >
                 Reveal Token
               </button>
-              <button onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-crit/40">
+              <button onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-crit/40">
                 Disconnect
               </button>
             </div>
@@ -351,7 +351,7 @@ export function Settings() {
       </section>
 
       {/* v2.4.6: NAS config (server IP + drive mappings) */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🌐 NAS / SMB Mappings</h2>
         <div className="text-xs text-text-secondary mb-3">
           Server IP and drive mappings used by the scanner and Remap NAS Drives action.
@@ -401,7 +401,7 @@ export function Settings() {
                     setNasError(null);
                   }
                 }}
-                className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+                className="px-3 py-1.5 rounded-md text-xs pcd-button"
               >
                 Revert
               </button>
@@ -411,7 +411,7 @@ export function Settings() {
       </section>
 
       {/* Notification matrix */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🔔 Notification Matrix</h2>
         <table className="w-full text-xs">
           <thead>
@@ -444,7 +444,7 @@ export function Settings() {
       </section>
 
       {/* Quiet hours */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🌙 Quiet Hours</h2>
         <div className="text-xs text-text-secondary mb-3">Non-critical notifications are silenced during this window. Critical alerts always come through.</div>
         <div className="flex items-center gap-2 text-xs">
@@ -457,7 +457,7 @@ export function Settings() {
       </section>
 
       {/* Email digest */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">📧 Email Digest + Quiet Hours Buffering</h2>
         <div className="text-xs text-text-secondary mb-3">
           During quiet hours, non-critical notifications buffer and release as a single morning digest.
@@ -493,7 +493,7 @@ export function Settings() {
               const r = await api.flushBufferedNotifications();
               showToast(r.ok ? `Flushed ${r.data.sent} buffered notifications` : `Failed: ${r.error.message}`);
             }}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Flush Buffer Now
           </button>
@@ -511,7 +511,7 @@ export function Settings() {
       </section>
 
       {/* Blocked IPs */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🚫 Blocked IP Addresses</h2>
         {blockedIPs.length === 0 ? (
           <div className="text-xs text-text-secondary">No PCDoctor-managed block rules. Use Security → Authentication → Block to add them.</div>
@@ -522,7 +522,7 @@ export function Settings() {
                 <span className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-status-crit' : 'bg-surface-600'}`}></span>
                 <code className="flex-1 font-mono">{r.remote_address}</code>
                 <span className="text-[10px] text-text-secondary">{r.direction}</span>
-                <button onClick={() => unblockIp(r.remote_address)} className="px-2 py-1 rounded bg-surface-700 border border-surface-600 text-[10px] hover:border-status-good/40">Unblock</button>
+                <button onClick={() => unblockIp(r.remote_address)} className="px-2 py-1 rounded pcd-button text-[10px] hover:border-status-good/40">Unblock</button>
               </div>
             ))}
           </div>
@@ -530,7 +530,7 @@ export function Settings() {
       </section>
 
       {/* Automatic Threat Response */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">⚔ Automatic Threat Response</h2>
         <label className="flex items-center gap-2 text-xs">
           <input
@@ -546,7 +546,7 @@ export function Settings() {
       </section>
 
       {/* Scheduled tasks */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">⏱ Scheduled Tasks</h2>
         {!tasks ? (
           <div className="text-xs text-text-secondary">Loading tasks…</div>
@@ -562,8 +562,8 @@ export function Settings() {
                     {t.last_run && ` · Last: ${t.last_run}`}
                   </div>
                 </div>
-                <button onClick={() => runTaskNow(t.name)} className="px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40">Run now</button>
-                <button onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')} className="px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600 hover:border-status-info/40">
+                <button onClick={() => runTaskNow(t.name)} className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40">Run now</button>
+                <button onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')} className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40">
                   {t.status === 'Disabled' ? 'Enable' : 'Disable'}
                 </button>
               </div>
@@ -573,7 +573,7 @@ export function Settings() {
       </section>
 
       {/* Diagnostic bundle */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">📦 Diagnostic Bundle</h2>
         <p className="text-xs text-text-secondary mb-3">
           Export a zip of current settings (tokens redacted), last diagnostic report, recent weekly reviews, logs, and action history. Useful for bug reports.
@@ -591,7 +591,7 @@ export function Settings() {
       </section>
 
       {/* Auto-Update */}
-      <section className="mb-6 bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">🔄 Auto-Update</h2>
         <div className="text-xs text-text-secondary mb-3">
           Checks <a href="https://github.com/gregpa/pcdoctor-workbench/releases" target="_blank" rel="noreferrer" className="text-status-info underline">GitHub Releases</a> every 6 hours.
@@ -618,7 +618,7 @@ export function Settings() {
           )}
         </div>
         <div className="flex gap-2">
-          <button onClick={checkForUpdatesNow} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Check Now</button>
+          <button onClick={checkForUpdatesNow} className="px-3 py-1.5 rounded-md text-xs pcd-button">Check Now</button>
           {updateStatus.state === 'available' && (
             <button onClick={downloadUpdate} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Download Update</button>
           )}
@@ -629,7 +629,7 @@ export function Settings() {
       </section>
 
       {/* About */}
-      <section className="bg-surface-800 border border-surface-600 rounded-lg p-5">
+      <section className="pcd-section">
         <h2 className="text-sm font-bold mb-3">About</h2>
         <div className="text-xs text-text-secondary space-y-1">
           <div>PCDoctor Workbench <strong>v{appVersion}</strong></div>
@@ -640,7 +640,7 @@ export function Settings() {
       </section>
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

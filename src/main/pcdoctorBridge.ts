@@ -456,19 +456,29 @@ function mapToSystemStatus(r: any): SystemStatus {
   if (cDrive) {
     const sev = classifyDiskFree(cDrive.free_pct);
     const cDelta = safeWeekDelta('disk', 'free_pct', 'C:');
+    // v2.4.51 (B51-BR-1): scanner emits cDrive.free_gb / size_gb as numbers,
+    // but a partial scan output (build error, scanner crash mid-write) can
+    // leave them missing or string-typed. Pre-2.4.51 the .toFixed() call
+    // threw and the renderer received an opaque error — the dashboard panel
+    // went blank. Validate first; show '-' on invalid.
+    const freeGb = Number.isFinite(cDrive.free_gb) ? Number(cDrive.free_gb) : null;
+    const sizeGb = Number.isFinite(cDrive.size_gb) ? Number(cDrive.size_gb) : null;
+    const freeStr = freeGb !== null ? freeGb.toFixed(0) : '-';
+    const sizeStr = sizeGb !== null ? sizeGb.toFixed(0) : '-';
+    const usedStr = (freeGb !== null && sizeGb !== null) ? (sizeGb - freeGb).toFixed(0) : '-';
     kpis.push({
       label: 'C: Drive Free',
       value: Math.round(cDrive.free_pct),
       unit: '%',
       severity: sev,
-      sub: `${cDrive.free_gb.toFixed(0)} of ${cDrive.size_gb.toFixed(0)} GB`,
+      sub: `${freeStr} of ${sizeStr} GB`,
       delta: computeDelta(cDrive.free_pct, cDelta.week_ago, 'down'),
     });
     gauges.push({
       label: 'C: Drive Used',
       value: Math.max(0, Math.min(100, 100 - cDrive.free_pct)),
       display: `${Math.round(100 - cDrive.free_pct)}%`,
-      subtext: `${(cDrive.size_gb - cDrive.free_gb).toFixed(0)} / ${cDrive.size_gb.toFixed(0)} GB`,
+      subtext: `${usedStr} / ${sizeStr} GB`,
       severity: sev,
     });
   }

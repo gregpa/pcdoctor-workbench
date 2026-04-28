@@ -124,7 +124,7 @@ export function Forecast() {
       </div>
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">
           {toast}
         </div>
       )}

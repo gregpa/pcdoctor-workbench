@@ -435,6 +435,13 @@ export interface SecurityPosture {
   threat_indicators: ThreatIndicator[];
   smart: SmartEntry[];
   overall_severity: 'good' | 'warn' | 'crit';
+  /**
+   * v2.4.51 (B51-IPC-1): per-sub-scan failure detail emitted when one of the
+   * non-primary PS scans (Audit-Persistence, Get-ThreatIndicators, Get-SMART)
+   * rejects. Optional so older saved postures that pre-date the field
+   * deserialize unchanged. Renderer UI for the badge ships in v2.4.52.
+   */
+  partial_errors?: Array<{ name: string; code: string; message: string }>;
 }
 
 export interface ToolStatus {

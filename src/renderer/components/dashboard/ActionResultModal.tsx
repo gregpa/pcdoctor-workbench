@@ -251,7 +251,7 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
       aria-label={`${action.label} result`}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl p-5 shadow-2xl max-h-[80vh] overflow-y-auto"
+        className="pcd-modal w-full max-w-2xl p-5 shadow-2xl max-h-[80vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-1 flex items-center gap-2">
@@ -285,21 +285,21 @@ export function ActionResultModal({ action, result, onClose }: ActionResultModal
               ].join('\n');
               await api.investigateWithClaude(ctx);
             }}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
             title="Open a Claude session with this result pre-loaded as context"
           >
             🤖 Investigate with Claude
           </button>
           <button
             onClick={saveResult}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
             title="Save to C:\\ProgramData\\PCDoctor\\exports\\"
           >
             💾 Save
           </button>
           <button
             onClick={copyResult}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:bg-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:bg-surface-600"
           >
             📋 Copy Result
           </button>

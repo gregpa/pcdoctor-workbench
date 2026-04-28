@@ -6,18 +6,41 @@ import AdmZip from 'adm-zip';
 import { spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-// Windows-quirk: schtasks.exe hangs when invoked directly via spawn/execFile
-// from a Node child_process (it expects an attached console and times out
-// otherwise — observed under both spawnSync and execFile). Wrapping the call
-// in powershell.exe avoids the hang because PowerShell handles the console
-// attachment correctly. Every schtasks call below goes through this helper.
+// v2.4.48 (B48-SEC-1): direct execFile of schtasks.exe with array-form
+// args (no shell interpolation). Pre-2.4.48 this helper concatenated
+// `['schtasks', ...args].join(' ')` into a powershell.exe -Command string
+// at the three callsites that pass renderer-controlled task names. A name
+// containing shell metachars (e.g. `'PCDoctor-Foo$(Remove-Item ...)'`)
+// would have been parsed and executed by PowerShell. The renderer-side
+// allowlist regex below is the primary defence; switching to direct
+// execFile is defence-in-depth so a future regex weakening cannot reach
+// a shell parser.
+//
+// Historical Windows-quirk: schtasks.exe hung under direct
+// spawn/execFile when invoked via `/Query` WITHOUT `/TN` against a
+// machine with a corrupted Microsoft task entry (it expected an
+// attached console and timed out). The three callsites here all pass
+// `/TN <name>` (Query, Change /ENABLE|/DISABLE, Run) and have NOT been
+// observed to hang. If a future regression surfaces the hang we can
+// fall back to wrapping in powershell.exe -Command, but each user-
+// supplied arg must be emitted as a single-quoted PS literal (mirrors
+// scriptRunner.ts:269-279). Do NOT regress to .join(' ').
 const pExecFile = promisify(execFile);
 
+// v2.4.48 (B48-SEC-1): allowlist regex extracted to scheduledTaskNames.ts
+// so tests/main/ipc.runSchtasksAllowlist.test.ts can import the constant
+// without pulling the entire IPC handler module (which transitively
+// loads electron-updater + better-sqlite3 -- not loadable from vitest
+// node env).
+import { SCHEDULED_TASK_NAME_RE } from './scheduledTaskNames.js';
+// v2.4.49 (B48-AUDIT-1/2): renderer-supplied reviewDate validator. Extracted
+// to a leaf module so tests can import the constant without booting IPC.
+import { REVIEW_DATE_RE } from './reviewDateRe.js';
+
 async function runSchtasks(args: string[], timeoutMs = 5000): Promise<{ stdout: string; stderr: string }> {
-  const psCmd = ['schtasks', ...args].join(' ');
   return pExecFile(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+    'schtasks.exe',
+    args,
     { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, maxBuffer: 256 * 1024 }
   );
 }
@@ -30,7 +53,11 @@ import {
   setSetting, getAllSettings, getSetting,
   setReviewItemState, getReviewItemStates,
   listToolResults,
+  getNasRecycleSizes, upsertNasRecycleSize,
 } from './dataStore.js';
+// v2.4.51 (B51-IPC-3): import the action registry so the rule-import validator
+// can enforce action_name ∈ KNOWN_ACTION_NAMES.
+import { ACTIONS as ACTIONS_INDEX } from '@shared/actions.js';
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
 import { PCDOCTOR_ROOT } from './constants.js';
@@ -53,6 +80,138 @@ import type {
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
+
+// v2.4.51 (B51-IPC-3): defense-in-depth validation for the renderer-
+// controlled api:importAutopilotRules payload. Pre-2.4.51 the handler
+// accepted `rules: any[]` and cast `Number(r.tier) as 1|2|3` without
+// checking the value. A malformed import (tier 99, unknown action_name,
+// 50MB alert_json) wrote garbage into autopilot_rules. Reject early.
+const KNOWN_ACTION_NAMES = new Set<string>(Object.keys(ACTIONS_INDEX));
+const ALERT_JSON_MAX_BYTES = 4 * 1024;  // 4 KB; live default rules are <500 B each
+const VALID_CADENCE_RE = /^(daily:\d{1,2}:\d{2}|weekly:(mon|tue|wed|thu|fri|sat|sun):\d{1,2}:\d{2}|monthly:(\d{1,2}|first|second|third|fourth|last)(sat|sun|mon|tue|wed|thu|fri)?:\d{1,2}:\d{2})$/i;
+
+export interface ValidatedImportedRule {
+  id: string;
+  tier: 1 | 2 | 3;
+  description: string;
+  trigger: 'schedule' | 'threshold';
+  cadence: string | null;
+  action_name: string | null;
+  alert_json: string | null;
+  enabled: boolean;
+}
+
+/**
+ * v2.4.51 (B51-IPC-3): validate one imported rule. Returns either
+ * { ok: true, rule } with a coerced rule, or { ok: false, reason } with a
+ * human-readable rejection reason. Cadence regex is strict — any valid
+ * future cadence form must be added here AND to DEFAULT_RULES in
+ * autopilotEngine.ts in lockstep so drift is visible.
+ */
+export function validateImportedRule(raw: unknown): { ok: true; rule: ValidatedImportedRule } | { ok: false; reason: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'rule must be an object' };
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || !r.id || r.id.length > 128) return { ok: false, reason: 'invalid id' };
+  if (!/^[a-z0-9_-]+$/i.test(r.id)) return { ok: false, reason: 'id must be alnum/underscore/hyphen' };
+  const tierNum = Number(r.tier);
+  if (tierNum !== 1 && tierNum !== 2 && tierNum !== 3) return { ok: false, reason: 'tier must be 1, 2, or 3' };
+  if (typeof r.description !== 'string' || !r.description || r.description.length > 256) return { ok: false, reason: 'invalid description' };
+  if (r.trigger !== 'schedule' && r.trigger !== 'threshold') return { ok: false, reason: 'trigger must be schedule|threshold' };
+  let cadence: string | null = null;
+  if (r.cadence !== null && r.cadence !== undefined) {
+    if (typeof r.cadence !== 'string' || r.cadence.length > 64) return { ok: false, reason: 'invalid cadence' };
+    if (!VALID_CADENCE_RE.test(r.cadence)) return { ok: false, reason: 'cadence pattern unrecognised' };
+    cadence = r.cadence;
+  }
+  let action_name: string | null = null;
+  if (r.action_name !== null && r.action_name !== undefined) {
+    if (typeof r.action_name !== 'string') return { ok: false, reason: 'invalid action_name type' };
+    if (!KNOWN_ACTION_NAMES.has(r.action_name)) return { ok: false, reason: `unknown action_name: ${r.action_name}` };
+    action_name = r.action_name;
+  }
+  let alert_json: string | null = null;
+  if (r.alert_json !== null && r.alert_json !== undefined) {
+    if (typeof r.alert_json !== 'string') return { ok: false, reason: 'alert_json must be a JSON string' };
+    if (Buffer.byteLength(r.alert_json, 'utf8') > ALERT_JSON_MAX_BYTES) return { ok: false, reason: 'alert_json exceeds 4 KB' };
+    try {
+      const parsed = JSON.parse(r.alert_json);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, reason: 'alert_json must be a JSON object' };
+      if (typeof (parsed as any).title !== 'string') return { ok: false, reason: 'alert_json.title must be string' };
+      const sev = (parsed as any).severity;
+      if (sev !== 'critical' && sev !== 'important' && sev !== 'info') return { ok: false, reason: 'alert_json.severity invalid' };
+      const fix = (parsed as any).fix_actions;
+      if (!Array.isArray(fix)) return { ok: false, reason: 'alert_json.fix_actions must be array' };
+      for (const f of fix) {
+        if (typeof f !== 'string' || !KNOWN_ACTION_NAMES.has(f)) return { ok: false, reason: `alert_json.fix_actions has unknown action: ${f}` };
+      }
+    } catch (e: any) {
+      return { ok: false, reason: `alert_json parse error: ${e?.message}` };
+    }
+    alert_json = r.alert_json;
+  }
+  return {
+    ok: true,
+    rule: {
+      id: r.id,
+      tier: tierNum as 1 | 2 | 3,
+      description: r.description,
+      trigger: r.trigger,
+      cadence,
+      action_name,
+      alert_json,
+      enabled: r.enabled !== false,
+    },
+  };
+}
+
+// v2.4.51 (B49-NAS-2): drain JSON queue files left by
+// Refresh-NasRecycleSizes.ps1 into the nas_recycle_sizes cache table.
+// Called from api:getNasDrives so the cache stays warm without requiring
+// the in-app bridge to be reachable from the scheduled task. Bounded
+// per-call so a stuck queue dir can't block the IPC handler.
+const NAS_RECYCLE_QUEUE_DIR = 'C:\\ProgramData\\PCDoctor\\queue';
+const NAS_RECYCLE_QUEUE_MAX_FILES = 50;
+
+interface QueueRow {
+  letter: unknown;
+  recycle_bytes: unknown;
+  scan_duration_ms?: unknown;
+}
+
+async function drainNasRecycleQueue(): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(NAS_RECYCLE_QUEUE_DIR);
+  } catch {
+    return; // queue dir doesn't exist; nothing to drain
+  }
+  const queueFiles = entries
+    .filter(n => n.startsWith('nas-recycle-') && n.endsWith('.json'))
+    .sort()
+    .slice(0, NAS_RECYCLE_QUEUE_MAX_FILES);
+  for (const name of queueFiles) {
+    const filePath = path.join(NAS_RECYCLE_QUEUE_DIR, name);
+    try {
+      const txt = await readFile(filePath, 'utf8');
+      const payload = JSON.parse(txt) as { rows?: QueueRow[] };
+      if (Array.isArray(payload?.rows)) {
+        for (const row of payload.rows) {
+          const letter = typeof row?.letter === 'string' ? row.letter : null;
+          const bytes = typeof row?.recycle_bytes === 'number' && Number.isFinite(row.recycle_bytes)
+            ? Number(row.recycle_bytes) : null;
+          if (letter && bytes !== null) {
+            const dur = typeof row?.scan_duration_ms === 'number' && Number.isFinite(row.scan_duration_ms)
+              ? Number(row.scan_duration_ms) : null;
+            try { upsertNasRecycleSize(letter, bytes, dur); } catch {}
+          }
+        }
+      }
+    } catch {
+      // malformed queue file — skip and unlink so it doesn't accumulate
+    }
+    try { await unlink(filePath); } catch {}
+  }
+}
 
 export function registerIpcHandlers() {
   ipcMain.handle('api:getAppVersion', (): IpcResult<string> => {
@@ -286,6 +445,13 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:getWeeklyReview', async (_evt, reviewDate?: string): Promise<IpcResult<WeeklyReview | null>> => {
     try {
+      // v2.4.49 (B48-AUDIT-2): refuse any renderer-supplied reviewDate that
+      // doesn't match YYYY-MM-DD. Even though the existing files.find
+      // existsSync path is filesystem-bounded, defence-in-depth: validate
+      // at the handler boundary, not the sink.
+      if (reviewDate !== undefined && !REVIEW_DATE_RE.test(reviewDate)) {
+        return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+      }
       if (!existsSync(weeklyDir)) return { ok: true, data: null };
       const files = (await readdir(weeklyDir)).filter(f => f.endsWith('.json')).sort().reverse();
       if (files.length === 0) return { ok: true, data: null };
@@ -324,6 +490,14 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:setWeeklyReviewItemState', async (_evt, reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<{}>> => {
+    // v2.4.49 (B48-AUDIT-3): third reviewDate callsite. better-sqlite3 binds
+    // parameters so SQL injection is not the threat, but the unvalidated
+    // string lands in `weekly_review_states` as a TEXT primary key. Future
+    // code that reads this back and feeds it to `path.join` would re-open
+    // the traversal that B48-AUDIT-1/2 closed. Same allowlist for parity.
+    if (!REVIEW_DATE_RE.test(reviewDate)) {
+      return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+    }
     try {
       setReviewItemState(reviewDate, itemId, state as any, appliedActionId);
       return { ok: true, data: {} };
@@ -334,6 +508,14 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:archiveWeeklyReviewToObsidian', async (_evt, reviewDate: string): Promise<IpcResult<{ archive_path: string }>> => {
     try {
+      // v2.4.49 (B48-AUDIT-1): reject path-traversal payloads at the handler
+      // boundary. Without this, '../../etc/passwd' would let `${reviewDate}.md`
+      // resolve OUTSIDE weeklyDir and a maliciously named source file would
+      // satisfy the existsSync check, causing a copyFile to an attacker-
+      // chosen destination.
+      if (!REVIEW_DATE_RE.test(reviewDate)) {
+        return { ok: false, error: { code: 'E_INVALID_DATE', message: 'reviewDate must match YYYY-MM-DD' } };
+      }
       const sourceMd = path.join(weeklyDir, `${reviewDate}.md`);
       if (!existsSync(sourceMd)) return { ok: false, error: { code: 'E_NOT_FOUND', message: 'Review markdown not found' } };
       // Reviewer P2: path was hardcoded to greg_'s dev box. Read from a
@@ -366,12 +548,54 @@ export function registerIpcHandlers() {
     try {
       // Run all four PS scans in parallel; combined worst-case latency drops
       // from ~300s sequential to ~120s (bounded by the slowest probe).
-      const [posture, audit, threats, smart] = await Promise.all([
+      // v2.4.51 (B51-IPC-1): switch from Promise.all + per-call .catch to
+      // Promise.allSettled so we can surface per-scan failure to the
+      // renderer via `partial_errors` instead of silently substituting
+      // empty arrays. The primary Get-SecurityPosture.ps1 stays
+      // hard-required (no posture data → return ok:false).
+      const settled = await Promise.allSettled([
         runPowerShellScript<any>('security/Get-SecurityPosture.ps1', ['-JsonOutput'], { timeoutMs: 120_000 }),
-        runPowerShellScript<any>('security/Audit-Persistence.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ items: [] })),
-        runPowerShellScript<any>('security/Get-ThreatIndicators.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ indicators: [] })),
-        runPowerShellScript<any>('security/Get-SMART.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }).catch(() => ({ drives: [] })),
+        runPowerShellScript<any>('security/Audit-Persistence.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }),
+        runPowerShellScript<any>('security/Get-ThreatIndicators.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }),
+        runPowerShellScript<any>('security/Get-SMART.ps1', ['-JsonOutput'], { timeoutMs: 60_000 }),
       ]);
+
+      const partial_errors: Array<{ name: string; code: string; message: string }> = [];
+      const settledPosture = settled[0];
+      const settledAudit = settled[1];
+      const settledThreats = settled[2];
+      const settledSmart = settled[3];
+
+      if (settledPosture.status === 'rejected') {
+        // Hard failure — no posture data to return.
+        const err: any = settledPosture.reason;
+        return { ok: false, error: { code: err?.code ?? 'E_INTERNAL', message: err?.message ?? 'Security scan failed' } };
+      }
+      const posture = settledPosture.value;
+      let audit: any;
+      if (settledAudit.status === 'fulfilled') {
+        audit = settledAudit.value;
+      } else {
+        const err: any = settledAudit.reason;
+        partial_errors.push({ name: 'audit-persistence', code: err?.code ?? 'E_INTERNAL', message: err?.message ?? 'Audit-Persistence failed' });
+        audit = { items: [] };
+      }
+      let threats: any;
+      if (settledThreats.status === 'fulfilled') {
+        threats = settledThreats.value;
+      } else {
+        const err: any = settledThreats.reason;
+        partial_errors.push({ name: 'threat-indicators', code: err?.code ?? 'E_INTERNAL', message: err?.message ?? 'Get-ThreatIndicators failed' });
+        threats = { indicators: [] };
+      }
+      let smart: any;
+      if (settledSmart.status === 'fulfilled') {
+        smart = settledSmart.value;
+      } else {
+        const err: any = settledSmart.reason;
+        partial_errors.push({ name: 'smart', code: err?.code ?? 'E_INTERNAL', message: err?.message ?? 'Get-SMART failed' });
+        smart = { drives: [] };
+      }
 
       // Upsert persistence items into baseline and compute is_new flag
       const persistenceItems: PersistenceItem[] = [];
@@ -418,6 +642,7 @@ export function registerIpcHandlers() {
           needs_admin: d.needs_admin === true,
         })),
         overall_severity: posture.overall_severity ?? 'good',
+        partial_errors,  // v2.4.51 (B51-IPC-1)
       };
       setCachedSmart(data.smart);
 
@@ -704,14 +929,19 @@ export function registerIpcHandlers() {
     'PCDoctor-Autopilot-HwinfoLog',
     'PCDoctor-Autopilot-UpdateHostsStevenBlack',
     'PCDoctor-Autopilot-ShrinkComponentStore',
+    // v2.4.51 (B49-NAS-2): Settings page Run-Now / Enable / Disable on the
+    // new daily NAS @Recycle refresh task.
+    'PCDoctor-Autopilot-RefreshNasRecycleSizes',
   ]);
 
   ipcMain.handle('api:listScheduledTasks', async (): Promise<IpcResult<ScheduledTaskInfo[]>> => {
-    // Delegate to a single PowerShell script that wraps schtasks.exe one-task-
-    // at-a-time. Calling schtasks via Node child_process directly hangs (it
-    // expects an attached console). Calling /Query without /TN to enumerate
-    // everything also fails on this machine because of a corrupted Microsoft
-    // task entry under the root.
+    // Delegate to Get-ScheduledTasksStatus.ps1 (COM-based enumeration via
+    // Schedule.Service). The hang note here applies ONLY to schtasks /Query
+    // WITHOUT /TN — that's why this enumerator goes via COM. The two
+    // schtasks /Change /TN and /Run /TN handlers below were hardened in
+    // v2.4.48 (B48-SEC-1) to call schtasks.exe directly via execFile +
+    // an allowlist regex, since the /TN-bearing path doesn't trip the hang.
+    // See runSchtasks at the top of this file.
     try {
       const r = await runPowerShellScript<{ success: boolean; tasks: ScheduledTaskInfo[] }>(
         'Get-ScheduledTasksStatus.ps1', ['-JsonOutput'], { timeoutMs: 30_000 }
@@ -730,6 +960,14 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:setScheduledTaskEnabled', async (_evt, name: string, enabled: boolean): Promise<IpcResult<{}>> => {
+    // v2.4.48 (B48-SEC-1): regex allowlist BEFORE the MANAGED_TASKS.has
+    // check. The regex catches shell-metachar smuggling regardless of
+    // whether MANAGED_TASKS is later weakened. A name like
+    // `PCDoctor-Foo; rm -rf /` would have failed MANAGED_TASKS.has
+    // anyway, but two-layer defence costs nothing.
+    if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
+    }
     if (!MANAGED_TASKS.has(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
     }
@@ -742,6 +980,10 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<{}>> => {
+    // v2.4.48 (B48-SEC-1): see api:setScheduledTaskEnabled comment.
+    if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
+      return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
+    }
     if (!MANAGED_TASKS.has(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
     }
@@ -869,25 +1111,29 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:importAutopilotRules', async (_evt, payload: { rules: any[] }): Promise<IpcResult<{ imported: number }>> => {
+  ipcMain.handle('api:importAutopilotRules', async (_evt, payload: { rules: any[] }): Promise<IpcResult<{ imported: number; rejected: number; errors: string[] }>> => {
     try {
       const { upsertAutopilotRule } = await import('./dataStore.js');
       let imported = 0;
-      for (const r of (payload?.rules ?? [])) {
-        if (!r || !r.id || !r.tier || !r.description || !r.trigger) continue;
-        upsertAutopilotRule({
-          id: String(r.id),
-          tier: Number(r.tier) as 1 | 2 | 3,
-          description: String(r.description),
-          trigger: r.trigger === 'schedule' ? 'schedule' : 'threshold',
-          cadence: r.cadence ?? null,
-          action_name: r.action_name ?? null,
-          alert_json: r.alert_json ?? null,
-          enabled: r.enabled !== false,
-        });
+      let rejected = 0;
+      const errors: string[] = [];
+      const incoming = Array.isArray(payload?.rules) ? payload.rules : [];
+      // v2.4.51 (B51-IPC-3): hard cap on payload size. Prevents a 10k-rule
+      // import from blocking the main thread; 200 is ~10x DEFAULT_RULES.
+      if (incoming.length > 200) {
+        return { ok: false, error: { code: 'E_INVALID_RULE_IMPORT', message: 'too many rules (max 200)' } };
+      }
+      for (const raw of incoming) {
+        const v = validateImportedRule(raw);
+        if (!v.ok) {
+          rejected++;
+          if (errors.length < 20) errors.push(`${(raw as any)?.id ?? '<unnamed>'}: ${v.reason}`);
+          continue;
+        }
+        upsertAutopilotRule(v.rule);
         imported++;
       }
-      return { ok: true, data: { imported } };
+      return { ok: true, data: { imported, rejected, errors } };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }
@@ -1004,23 +1250,44 @@ export function registerIpcHandlers() {
     }
   });
 
+  // v2.4.51 (B51-IPC-2): the four update-check IPC handlers were bare; an
+  // electron-updater exception escaped as an unhandled rejection on the
+  // renderer side and the UI showed a generic IPC error. Wrap each in
+  // try/catch with E_UPDATE_* error codes so the UI can render an actionable
+  // message.
   ipcMain.handle('api:getUpdateStatus', async (): Promise<IpcResult<UpdateStatus>> => {
-    return { ok: true, data: getUpdaterStatus() };
+    try {
+      return { ok: true, data: getUpdaterStatus() };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_UPDATE_STATUS', message: e?.message ?? 'Failed to read update status' } };
+    }
   });
 
   ipcMain.handle('api:checkForUpdates', async (): Promise<IpcResult<UpdateStatus>> => {
-    await checkForUpdates();
-    return { ok: true, data: getUpdaterStatus() };
+    try {
+      await checkForUpdates();
+      return { ok: true, data: getUpdaterStatus() };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_UPDATE_CHECK', message: e?.message ?? 'Update check failed' } };
+    }
   });
 
   ipcMain.handle('api:downloadUpdate', async (): Promise<IpcResult<UpdateStatus>> => {
-    await downloadUpdate();
-    return { ok: true, data: getUpdaterStatus() };
+    try {
+      await downloadUpdate();
+      return { ok: true, data: getUpdaterStatus() };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_UPDATE_DOWNLOAD', message: e?.message ?? 'Update download failed' } };
+    }
   });
 
   ipcMain.handle('api:installUpdateNow', async (): Promise<IpcResult<{}>> => {
-    installNow();
-    return { ok: true, data: {} };
+    try {
+      installNow();
+      return { ok: true, data: {} };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_UPDATE_INSTALL', message: e?.message ?? 'Update install failed' } };
+    }
   });
 
   // v2.4.6: NAS config settings (server IP + drive mappings). Read is
@@ -1087,11 +1354,31 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:getNasDrives', async (): Promise<IpcResult<Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }>>> => {
+  ipcMain.handle('api:getNasDrives', async (): Promise<IpcResult<Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; recycle_bytes_cache_age_ms: number | null; reachable: boolean }>>> => {
     try {
       const { runPowerShellScript } = await import('./scriptRunner.js');
+      // v2.4.51 (B49-NAS-2): drain any pending JSON queue files left by the
+      // Refresh-NasRecycleSizes.ps1 scheduled task before reading the cache.
+      // The PS task drops queue files when the in-app node bridge isn't
+      // reachable (e.g. during a scheduled run while Workbench was closed);
+      // the next IPC call upserts rows into nas_recycle_sizes.
+      await drainNasRecycleQueue();
       const r = await runPowerShellScript<{ drives?: Array<{ letter: string; unc: string | null; volume_name: string | null; kind: 'network' | 'local' | 'removable'; used_bytes: number | null; free_bytes: number | null; total_bytes: number | null; recycle_bytes: number | null; reachable: boolean }> }>('Get-NasDrives.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
-      return { ok: true, data: r?.drives ?? [] };
+      const drives = r?.drives ?? [];
+      // v2.4.51 (B49-NAS-2): merge cached @Recycle sizes from
+      // nas_recycle_sizes. Get-NasDrives.ps1 still emits recycle_bytes:null
+      // per the v2.4.50 hot-path fix; the cache fills it in when fresh.
+      // recycle_bytes_cache_age_ms = null when no cache row exists.
+      const cache = getNasRecycleSizes();
+      const now = Date.now();
+      const enriched = drives.map(d => {
+        const cached = cache.get(d.letter.toUpperCase());
+        if (cached) {
+          return { ...d, recycle_bytes: cached.recycle_bytes, recycle_bytes_cache_age_ms: now - cached.last_scanned_ts };
+        }
+        return { ...d, recycle_bytes_cache_age_ms: null };
+      });
+      return { ok: true, data: enriched };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to enumerate drives' } };
     }

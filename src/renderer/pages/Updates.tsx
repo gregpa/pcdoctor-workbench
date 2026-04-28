@@ -94,10 +94,10 @@ export function Updates() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => install('repair_windows_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 disabled:opacity-50">
+          <button onClick={() => install('repair_windows_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50">
             Repair WU
           </button>
-          <button onClick={load} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">
+          <button onClick={load} className="px-3 py-1.5 rounded-md text-xs pcd-button">
             Refresh
           </button>
         </div>
@@ -198,7 +198,7 @@ export function Updates() {
                   </div>
                 ))}
               </div>
-              <button onClick={checkReadiness} className="mt-3 px-2.5 py-1 rounded-md text-[11px] bg-surface-700 border border-surface-600">Re-check</button>
+              <button onClick={checkReadiness} className="mt-3 px-2.5 py-1 rounded-md text-[11px] pcd-button">Re-check</button>
             </div>
           )}
         </div>
@@ -210,13 +210,13 @@ export function Updates() {
           <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
             <div className="font-semibold text-sm mb-1">🎮 Nvidia</div>
             {!nvInfo ? (
-              <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Check Latest Version</button>
+              <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs pcd-button">Check Latest Version</button>
             ) : (
               <div className="text-xs space-y-1">
                 <div>Installed: <code>{nvInfo.installed_version ?? '-'}</code></div>
                 <div>Latest: <code>{nvInfo.latest_version ?? 'unknown'}</code></div>
                 <div className="text-text-secondary text-[10px] mt-2">{nvInfo.message}</div>
-                <button onClick={checkNvidia} className="mt-2 px-2.5 py-1 rounded-md text-[11px] bg-surface-700 border border-surface-600">Re-check</button>
+                <button onClick={checkNvidia} className="mt-2 px-2.5 py-1 rounded-md text-[11px] pcd-button">Re-check</button>
               </div>
             )}
           </div>
@@ -229,7 +229,7 @@ export function Updates() {
       </section>
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

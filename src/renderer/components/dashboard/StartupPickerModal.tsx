@@ -181,7 +181,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
       aria-label="Disable startup items"
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-6xl p-5 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="pcd-modal w-full max-w-6xl p-5 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-1 flex items-center gap-2">
@@ -206,7 +206,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
                 max={MAX_THRESHOLD}
                 value={thresholdInput}
                 onChange={(e) => setThresholdInput(e.target.value)}
-                className="w-16 px-2 py-1 rounded bg-surface-700 border border-surface-600 text-text-primary text-[11px]"
+                className="w-16 px-2 py-1 rounded pcd-button text-text-primary text-[11px]"
                 aria-label="Healthy startup threshold"
               />
               <span className="text-text-secondary">items ({MIN_THRESHOLD}-{MAX_THRESHOLD})</span>
@@ -382,7 +382,7 @@ export function StartupPickerModal({ items, onClose, onDisable, threshold = 20 }
         <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-surface-700">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Cancel
           </button>

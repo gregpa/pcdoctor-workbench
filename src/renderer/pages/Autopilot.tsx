@@ -215,7 +215,7 @@ export function Autopilot() {
           {/* Activity log */}
           <div>
             <h2 className="text-sm font-semibold mb-2">Activity (last 30 days — {activity.length} entries)</h2>
-            <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-x-auto">
+            <div className="pcd-section overflow-x-auto p-0">
               <table className="w-full text-xs">
                 <thead className="bg-surface-700 text-text-secondary text-[10px] uppercase tracking-wider">
                   <tr>
@@ -265,20 +265,20 @@ export function Autopilot() {
             <div className="flex-1" />
             <button
               onClick={exportRules}
-              className="px-2.5 py-1 rounded bg-surface-700 border border-surface-600 hover:border-status-info/40"
+              className="px-2.5 py-1 rounded pcd-button hover:border-status-info/40"
             >
               ⬇ Export
             </button>
             <button
               onClick={importRules}
-              className="px-2.5 py-1 rounded bg-surface-700 border border-surface-600 hover:border-status-info/40"
+              className="px-2.5 py-1 rounded pcd-button hover:border-status-info/40"
             >
               ⬆ Import
             </button>
           </div>
 
           {/* Rules table */}
-          <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-x-auto">
+          <div className="pcd-section overflow-x-auto p-0">
             <table className="w-full text-xs">
               <thead className="bg-surface-700 text-text-secondary text-[10px] uppercase tracking-wider">
                 <tr>
@@ -335,7 +335,7 @@ export function Autopilot() {
                               e.target.value = '';
                             }}
                             disabled={busyRule === r.id}
-                            className="bg-surface-700 border border-surface-600 rounded px-1.5 py-0.5 text-[10px]"
+                            className="pcd-button rounded px-1.5 py-0.5 text-[10px]"
                             defaultValue=""
                           >
                             <option value="">Snooze…</option>
@@ -363,7 +363,7 @@ export function Autopilot() {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-2 text-sm shadow-xl">
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-2 text-sm shadow-xl">
           {toast}
         </div>
       )}
@@ -391,7 +391,7 @@ function FilterSelect<T extends string>({ label, value, onChange, options }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-surface-700 border border-surface-600 rounded px-1.5 py-0.5 text-[11px]"
+        className="pcd-button rounded px-1.5 py-0.5 text-[11px]"
       >
         {options.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
       </select>
@@ -402,7 +402,7 @@ function FilterSelect<T extends string>({ label, value, onChange, options }: {
 function StatCard({ label, value, tone }: { label: string; value: string | number; tone?: 'warn' }) {
   const toneClass = tone === 'warn' ? 'text-status-warn' : 'text-text-primary';
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3">
+    <div className="pcd-panel">
       <div className="text-[10px] uppercase tracking-wider text-text-secondary">{label}</div>
       <div className={`text-2xl font-bold mt-1 ${toneClass}`}>{value}</div>
     </div>

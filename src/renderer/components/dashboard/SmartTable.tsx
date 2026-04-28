@@ -11,7 +11,7 @@ interface SmartTableProps {
 export function SmartTable({ entries, onRunSmartCheck, onRowClick }: SmartTableProps) {
   if (entries.length === 0) {
     return (
-      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+      <div className="pcd-panel">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary mb-2">Disk SMART Health</div>
         <div className="text-xs text-text-secondary">No SMART data yet. Run Full PC Scan or install smartmontools.</div>
       </div>
@@ -28,10 +28,10 @@ export function SmartTable({ entries, onRunSmartCheck, onRowClick }: SmartTableP
   const anyNeedsAdmin = entries.some(e => e.needs_admin);
   const buttonClass = anyNeedsAdmin
     ? 'px-2 py-0.5 rounded text-[10px] bg-status-warn/15 border border-status-warn/40 text-status-warn hover:bg-status-warn/25'
-    : 'px-2 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 text-text-secondary hover:text-text-primary hover:border-surface-500';
+    : 'px-2 py-0.5 rounded text-[10px] pcd-button text-text-secondary hover:text-text-primary hover:border-surface-500';
   const buttonLabel = anyNeedsAdmin ? '💾 Run SMART Check (admin)' : '🔄 Refresh SMART (admin)';
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+    <div className="pcd-panel">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary">Disk SMART Health</div>
         {onRunSmartCheck && (

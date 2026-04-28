@@ -77,13 +77,13 @@ export function Claude() {
         <div className="flex gap-2">
           <button
             onClick={() => setMode('embedded')}
-            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'embedded' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'bg-surface-700 border border-surface-600'}`}
+            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'embedded' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'pcd-button'}`}
           >
             Embedded
           </button>
           <button
             onClick={() => setMode('external')}
-            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'external' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'bg-surface-700 border border-surface-600'}`}
+            className={`px-3 py-1.5 rounded-md text-xs ${mode === 'external' ? 'bg-status-info/20 border border-status-info/60 text-status-info font-semibold' : 'pcd-button'}`}
           >
             External Window
           </button>
@@ -92,7 +92,7 @@ export function Claude() {
 
       {mode === 'embedded' ? (
         !embeddedStarted ? (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-5">
+          <div className="pcd-section">
             <p className="text-sm mb-3">
               Embedded terminal runs Claude inside this window with full system context pre-loaded.
               Type commands directly in the terminal below.
@@ -113,7 +113,7 @@ export function Claude() {
             )}
           </div>
         ) : (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 200px)' }}>
+          <div className="pcd-section overflow-hidden p-0" style={{ height: 'calc(100vh - 200px)' }}>
             {pendingContext && (
               <div className="px-3 py-1.5 bg-status-info/10 border-b border-status-info/30 text-[10px] text-status-info">
                 📎 Pre-loaded PCDoctor report ({Math.round(pendingContext.length / 1024)} KB) available as context. Ask Claude to read it.
@@ -123,7 +123,7 @@ export function Claude() {
           </div>
         )
       ) : (
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-5">
+        <div className="pcd-section">
           <p className="text-sm mb-3">
             External mode launches Claude Code in a new Windows Terminal window with context pre-loaded.
             Use this if the embedded terminal has issues with rendering or input.
@@ -139,7 +139,7 @@ export function Claude() {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-surface-700 border border-surface-600 rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
+        <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
   );

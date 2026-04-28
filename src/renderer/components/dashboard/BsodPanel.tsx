@@ -18,7 +18,7 @@ export function BsodPanel() {
   }
 
   return (
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+    <div className="pcd-panel pcd-panel-interactive">
       <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold mb-2">💥 BSOD Minidump Analyzer</div>
       {!result && !loading && (
         <button onClick={analyze} className="px-2.5 py-1.5 rounded-md bg-[#238636] text-white text-[11px] font-semibold">Analyze Latest</button>
@@ -42,7 +42,7 @@ export function BsodPanel() {
               <div className="text-[10px] text-text-secondary mt-2">{result.dump_path}</div>
             </>
           )}
-          <button onClick={analyze} className="mt-2 px-2 py-1 rounded-md text-[10px] bg-surface-700 border border-surface-600">Re-analyze</button>
+          <button onClick={analyze} className="mt-2 px-2 py-1 rounded-md text-[10px] pcd-button">Re-analyze</button>
         </div>
       )}
     </div>

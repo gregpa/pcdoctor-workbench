@@ -36,6 +36,13 @@ export function useAction(options: UseActionOptions = {}) {
         err = r.error;
         setLastError(err);
       }
+    } catch (e: any) {
+      // v2.4.51 (B51-HOOK-1): a thrown invoke (channel missing, preload
+      // crashed) was leaving `running` stuck on the action name forever
+      // because the existing finally only reset it but no catch surfaced
+      // the error. Now both states resolve.
+      err = { code: 'E_INVOKE_FAILED', message: e?.message ?? 'IPC invoke threw' };
+      setLastError(err);
     } finally {
       setRunning(null);
     }
@@ -43,28 +50,45 @@ export function useAction(options: UseActionOptions = {}) {
     // Auto-refresh: kick off a background scan and poll for new generated_at (max 90s).
     if (actionSucceeded && autoRefresh && !req.dry_run) {
       setRefreshing(true);
-      const scanResult = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
-      if (scanResult.ok) {
-        const beforeStatus = await api.getStatus();
-        const beforeTs = beforeStatus.ok ? beforeStatus.data.generated_at : 0;
-        const deadline = Date.now() + 90_000;
-        const poll = async (): Promise<void> => {
-          if (Date.now() > deadline) {
-            setRefreshing(false);
-            return;
+      try {
+        const scanResult = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
+        if (scanResult.ok) {
+          let beforeTs = 0;
+          try {
+            const beforeStatus = await api.getStatus();
+            beforeTs = beforeStatus.ok ? beforeStatus.data.generated_at : 0;
+          } catch {
+            // v2.4.51 (B51-HOOK-1): if the initial getStatus throws, treat
+            // the baseline as 0 so the first successful poll wins.
+            beforeTs = 0;
           }
-          const fresh = await api.getStatus();
-          if (fresh.ok && fresh.data.generated_at > beforeTs) {
-            setRefreshing(false);
-            // Dispatch a custom event so parent components can react
-            window.dispatchEvent(new CustomEvent('statusRefreshed', { detail: fresh.data }));
-            if (onRefresh) onRefresh(fresh.data);
-            return;
-          }
+          const deadline = Date.now() + 90_000;
+          const poll = async (): Promise<void> => {
+            if (Date.now() > deadline) {
+              setRefreshing(false);
+              return;
+            }
+            try {
+              const fresh = await api.getStatus();
+              if (fresh.ok && fresh.data.generated_at > beforeTs) {
+                setRefreshing(false);
+                window.dispatchEvent(new CustomEvent('statusRefreshed', { detail: fresh.data }));
+                if (onRefresh) onRefresh(fresh.data);
+                return;
+              }
+            } catch {
+              // v2.4.51 (B51-HOOK-1): single-poll throw shouldn't kill the
+              // refresh state; deadline-exceeded path will resolve.
+            }
+            setTimeout(poll, 3_000);
+          };
           setTimeout(poll, 3_000);
-        };
-        setTimeout(poll, 3_000);
-      } else {
+        } else {
+          setRefreshing(false);
+        }
+      } catch {
+        // v2.4.51 (B51-HOOK-1): thrown invoke during auto-refresh setup.
+        // Never leave `refreshing` stuck on true.
         setRefreshing(false);
       }
     }

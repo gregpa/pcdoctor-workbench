@@ -141,7 +141,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
 
   return (
     <>
-      <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+      <div className="pcd-panel pcd-panel-interactive">
         <div className="flex justify-between items-start gap-2 mb-2">
           <div>
             <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold">🧼 Clean My PC</div>
@@ -172,7 +172,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !running && setModalOpen(false)}>
-          <div className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="pcd-modal w-full max-w-2xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-base font-semibold mb-3">🧼 Clean My PC - Suite</h2>
 
             {!running && steps.length === 0 && (
@@ -204,7 +204,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
                 </div>
 
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Cancel</button>
+                  <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs pcd-button">Cancel</button>
                   <button onClick={startClean} className="px-4 py-1.5 rounded-md text-xs bg-[#238636] text-white font-bold">Start Clean ({needed.length} steps)</button>
                 </div>
               </>
@@ -243,7 +243,7 @@ export function CleanMyPC({ status }: CleanMyPCProps) {
                 </div>
                 {!running && (
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600">Close</button>
+                    <button onClick={() => setModalOpen(false)} className="px-3 py-1.5 rounded-md text-xs pcd-button">Close</button>
                   </div>
                 )}
               </>

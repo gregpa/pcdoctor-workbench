@@ -117,7 +117,7 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
     // total to 4 cols in a 3-col grid which wrapped RAM onto its own
     // row below the gauges. Single col is slightly denser but
     // matches the requested CPU | Disk | RAM layout.
-    <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain">
+    <div className="pcd-panel pcd-panel-interactive">
       <div className="flex items-baseline justify-between">
         <div>
           <div className="text-[9.5px] uppercase tracking-wider text-text-secondary font-semibold">RAM Pressure</div>
@@ -159,12 +159,12 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
                   </button>
                 )}
                 {p.kind === 'service' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 text-text-secondary">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary">
                     service
                   </span>
                 )}
                 {p.kind === 'system' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-700 border border-surface-600 text-text-secondary opacity-60">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary opacity-60">
                     system
                   </span>
                 )}

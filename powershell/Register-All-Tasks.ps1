@@ -8,6 +8,26 @@ param([switch]$DryRun, [switch]$JsonOutput, [switch]$ForceRecreate)
 # (Test-Path failures, file IO, etc.). Local 'Stop' is reapplied around
 # those small islands.
 $ErrorActionPreference = 'Continue'
+
+# v2.4.49 (B47-2): read script version from package.json so the registered
+# task XML's <Author> field tracks the live release. Pre-2.4.49 the Author
+# string was hardcoded to 'PCDoctor v2.4.46' and drifted across releases,
+# making it impossible to tell from a registered task which version of the
+# installer last touched it. The read is best-effort: if package.json is
+# missing (e.g. running from C:\ProgramData\PCDoctor where ..\package.json
+# doesn't exist), the hardcoded fallback below applies. The fallback literal
+# is updated alongside the package.json bump per release.
+$ScriptVersion = '2.5.0'
+try {
+    $pkgPath = Join-Path $PSScriptRoot '..\package.json'
+    if (Test-Path $pkgPath) {
+        $pkg = Get-Content -Path $pkgPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($pkg.version) { $ScriptVersion = [string]$pkg.version }
+    }
+} catch {
+    # Fallback already set above; swallow.
+}
+
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -64,6 +84,11 @@ $userAutopilotTasks = @(
     @{ name = 'PCDoctor-Autopilot-AdwCleanerScan';            sched = '/SC MONTHLY /D 1 /ST 04:00';               script = "$root\actions\Run-AdwCleanerScan.ps1";         ruleId = 'run_adwcleaner_scan_monthly';     tier = 1 }
     @{ name = 'PCDoctor-Autopilot-HwinfoLog';                 sched = '/SC MONTHLY /MO FIRST /D SAT /ST 23:00';    script = "$root\actions\Run-HwinfoLog.ps1";              ruleId = 'run_hwinfo_log_monthly';          tier = 1 }
     @{ name = 'PCDoctor-Autopilot-SafetyScanner';             sched = '/SC MONTHLY /MO THIRD /D SAT /ST 04:00';    script = "$root\actions\Run-SafetyScanner.ps1";          ruleId = 'run_safety_scanner_monthly';      tier = 1 }
+    # v2.4.51 (B49-NAS-2): nightly refresh of per-NAS-drive @Recycle folder
+    # sizes. Top-level Refresh-NasRecycleSizes.ps1 (NOT actions/...) because
+    # this is a maintenance task that writes to the DB cache directly via
+    # the node-script bridge / queue file -- no actionRunner routing.
+    @{ name = 'PCDoctor-Autopilot-RefreshNasRecycleSizes';     sched = '/SC DAILY /ST 03:00';                       script = "$root\Refresh-NasRecycleSizes.ps1";            ruleId = 'refresh_nas_recycle_sizes_daily'; tier = 1 }
     # v2.4.0 tool updates: weekly winget upgrade check (reports only; user
     # presses Upgrade in the Tools page to actually apply).
     # No ruleId -- not an autopilot rule; remains unwrapped.
@@ -194,7 +219,7 @@ function New-AutopilotTaskXml {
     return @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Author>PCDoctor v2.4.46</Author></RegistrationInfo>
+  <RegistrationInfo><Author>PCDoctor v$ScriptVersion</Author></RegistrationInfo>
   <Triggers>$triggerXml</Triggers>
   <Principals>$principalXml</Principals>
   <Settings>
@@ -222,6 +247,36 @@ function New-AutopilotTaskXml {
 "@
 }
 
+# v2.4.54 (B53-MIG-2 follow-up): one-shot COM enumeration of existing
+# tasks so the per-task existence pre-check is an O(1) HashSet lookup
+# instead of an O(N) `cmd.exe /c schtasks.exe /Query /TN <name>` spawn
+# per task. Pre-2.4.54 the v2.4.53 fix added a cmd.exe spawn per task
+# (19 tasks × ~3s = ~57s on slow machines) which blew the migration
+# block's 60s IPC timeout. The COM Schedule.Service API enumerates the
+# whole root folder in ~3 seconds total — a 19× speedup.
+#
+# Built once at script top; consulted by Register-PCDoctorTask via the
+# script-scope variable.
+$existingTaskNames = $null
+try {
+    $ts = New-Object -ComObject Schedule.Service
+    $ts.Connect()
+    $folder = $ts.GetFolder('\')
+    $existingTaskNames = New-Object System.Collections.Generic.HashSet[string] (
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    # GetTasks(1) includes hidden tasks. We only care about PCDoctor-*; capturing
+    # all of them is fine — the HashSet is a few dozen entries at most.
+    foreach ($t in $folder.GetTasks(1)) {
+        [void]$existingTaskNames.Add($t.Name)
+    }
+} catch {
+    # COM enumeration failed (very rare). Fall back to per-task /Query
+    # spawn — slow but correct. Setting the HashSet to $null signals
+    # Register-PCDoctorTask to use the fallback path.
+    $existingTaskNames = $null
+}
+
 function Register-PCDoctorTask {
     param(
         [Parameter(Mandatory)] [string]$Name,
@@ -238,6 +293,64 @@ function Register-PCDoctorTask {
     }
     $today = Get-Date -Format 'yyyyMMdd'
     $log = Join-Path $LogDir "autopilot-$today.log"
+
+    # v2.4.53 (B53-MIG-2): steady-state idempotency. When NOT -ForceRecreate
+    # AND the task already exists, return 'already_registered' instead of
+    # blindly attempting /Create (which fails with "Access is denied" against
+    # tasks that were originally created elevated). Pre-2.4.53 every steady-
+    # state launch ran Register-All-Tasks.ps1 non-elevated, every task came
+    # back 'failed', the new B48-AS-3 exit-code logic surfaced exit 1, and
+    # the migration block's outer try/catch swallowed it without affecting
+    # behavior — but the silent E_PS_NONZERO_EXIT was real, and the v2.4.51
+    # `last_task_migration_version` stuck-at-stale-value bug was the same
+    # mechanism manifesting under the upgrade-then-verify sub-path.
+    #
+    # v2.4.54 (B53-MIG-2 fast path): consult the COM-enumerated HashSet
+    # built at script top. O(1) lookup; no cmd.exe spawn for the common
+    # case. The COM API enumerates user-context tasks reliably from a
+    # non-elevated session, but DOES NOT include SYSTEM-context tasks
+    # (verified empirically: 19 tasks total, COM sees 14, the 5 missing
+    # are all SYSTEM-context). For tasks NOT in the COM HashSet, fall
+    # back to cmd.exe /c schtasks.exe /Query /TN with the v2.4.53
+    # two-tier semantics — exit 0 OR stderr matches /Access is denied/
+    # both indicate the task exists. The fallback only fires for the
+    # ~5 SYSTEM-context tasks per launch, keeping the total spawn count
+    # to ~5 × ~3s = ~15s wall clock — well under the 60s IPC timeout.
+    if (-not $ForceRecreate) {
+        $taskExists = $false
+        if ($null -ne $existingTaskNames -and $existingTaskNames.Contains($Name)) {
+            $taskExists = $true
+        } else {
+            # Per-task fallback for tasks the COM HashSet doesn't include
+            # (SYSTEM-context tasks aren't returned to non-elevated COM
+            # callers, even with GetTasks(1)). Use the PowerShell
+            # ScheduledTasks module's `Get-ScheduledTask` cmdlet — it's
+            # a managed API call (no cmd.exe spawn → no per-call Defender
+            # scan latency). 'NotPresent' or empty means the task is
+            # genuinely missing → fall through to /Create. Any other
+            # outcome (including the access-denied throw) means it exists
+            # → mark already_registered.
+            try {
+                $existing = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
+                $taskExists = $null -ne $existing
+            } catch [Microsoft.Management.Infrastructure.CimException] {
+                # CimException with HResult 0x80131500 typically wraps
+                # ERROR_ACCESS_DENIED for SYSTEM-context tasks. Treat as
+                # exists.
+                $taskExists = $true
+            } catch {
+                # Last-ditch fallback: cmd.exe /Query with the v2.4.53
+                # two-tier semantic. Only fires when both COM and
+                # Get-ScheduledTask are unavailable.
+                $queryOut = cmd.exe /c "schtasks.exe /Query /TN `"$Name`" 2>&1" 2>&1 | Out-String
+                $queryExit = $LASTEXITCODE
+                $taskExists = ($queryExit -eq 0) -or ($queryOut -match 'Access is denied')
+            }
+        }
+        if ($taskExists) {
+            return @{ name = $Name; status = 'already_registered'; context = $Context }
+        }
+    }
 
     if ($RuleId -and $Tier -ge 1) {
         # v2.4.46 fix path: build full Task XML and register via /XML to bypass
@@ -365,11 +478,23 @@ if (Test-Path $autostartExe) {
 
 $sw.Stop()
 $totalCount = @($userContextTasks).Count + @($systemContextTasks).Count + @($userAutopilotTasks).Count + @($systemAutopilotTasks).Count + 1
+
+# v2.4.48 (B48-AS-3): emit success=false + exit 1 when any required task
+# registration fails. Pre-2.4.48 this script unconditionally wrote
+# success=$true regardless of how many rows reported `failed` -- the
+# migration block in main.ts saw success and trusted it. The Autostart
+# task is excluded from the required set because it legitimately reports
+# `skipped` on a fresh install (line ~363 above) before the workbench
+# .exe is in %LOCALAPPDATA%; every other failed row is load-bearing.
+$failedRequired = @($results | Where-Object {
+    $_.status -eq 'failed' -and $_.name -ne 'PCDoctor-Workbench-Autostart'
+}).Count
+$overallSuccess = ($failedRequired -eq 0)
 $result = @{
-    success     = $true
+    success     = $overallSuccess
     duration_ms = $sw.ElapsedMilliseconds
     results     = $results
-    message     = "Processed $totalCount tasks"
+    message     = if ($overallSuccess) { "Processed $totalCount tasks" } else { "Processed $totalCount tasks; $failedRequired required tasks failed" }
 }
 $result | ConvertTo-Json -Depth 5 -Compress
-exit 0
+if ($overallSuccess) { exit 0 } else { exit 1 }

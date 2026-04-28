@@ -122,7 +122,7 @@ export function ThreatIndicatorModal({ indicator, onClose, onDismissed }: Threat
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
+        className="pcd-modal w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -179,19 +179,19 @@ export function ThreatIndicatorModal({ indicator, onClose, onDismissed }: Threat
         <div className="flex items-center justify-end gap-2 p-4 border-t border-surface-600">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
           >
             Close
           </button>
           <button
             onClick={handleInvestigate}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
           >
             🤖 Investigate with Claude
           </button>
           <button
             onClick={() => handleDismiss('false_positive')}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600 hover:border-status-info/40"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-info/40"
             title="Dismiss and mark as a false positive so future identical detections are suppressed"
           >
             Mark as false positive

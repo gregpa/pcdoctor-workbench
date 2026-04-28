@@ -153,6 +153,34 @@ CREATE TABLE IF NOT EXISTS autopilot_activity (
 );
 CREATE INDEX IF NOT EXISTS idx_autopilot_activity_ts ON autopilot_activity(ts);
 CREATE INDEX IF NOT EXISTS idx_autopilot_activity_rule ON autopilot_activity(rule_id, ts);
+
+-- ============== ALERT EMIT DEDUP (v2.4.49 B49-NOTIF-1) ==============
+-- Records the last successful Telegram alert emission per (rule_id, event_key)
+-- so dispatchAlert can suppress same-day duplicates. last_state_signature is a
+-- truncated sha256 of (severity|title|reason); a state transition (e.g.
+-- severity escalation) bypasses the dedup window naturally because the
+-- signature differs. Steady-state row count is bounded by DEFAULT_RULES size
+-- (~25 rows) — no reaper needed.
+CREATE TABLE IF NOT EXISTS alert_emit_history (
+  rule_id     TEXT NOT NULL,
+  event_key   TEXT NOT NULL,
+  last_ts     INTEGER NOT NULL,
+  last_state_signature TEXT NOT NULL,
+  PRIMARY KEY (rule_id, event_key)
+);
+
+-- ============== NAS RECYCLE SIZE CACHE (v2.4.51 B49-NAS-2) ==============
+-- Per-NAS-drive cache of @Recycle folder size. Populated by the
+-- Refresh-NasRecycleSizes.ps1 scheduled task at 03:00 daily so the
+-- IPC handler can return cached sizes without doing the slow
+-- recursive SMB scan in the hot path. v2.4.50 removed that scan
+-- because it blew the 30s IPC budget.
+CREATE TABLE IF NOT EXISTS nas_recycle_sizes (
+  letter TEXT PRIMARY KEY,
+  recycle_bytes INTEGER NOT NULL,
+  last_scanned_ts INTEGER NOT NULL,
+  scan_duration_ms INTEGER
+);
 `;
 
 let db: Database.Database | null = null;
@@ -406,15 +434,20 @@ export function recordStatusSnapshot(s: {
 
 export function saveForecasts(data: { generated_at: number; projections: any[] }): void {
   const db = openDb();
-  // Wipe previous forecasts - we want the latest set only
-  db.prepare(`DELETE FROM forecasts`).run();
   const stmt = db.prepare(
     `INSERT INTO forecasts (generated_at, metric, projection_json, preventive_action, due_date) VALUES (?, ?, ?, ?, ?)`
   );
-  for (const p of data.projections) {
-    const dueMs = p.projected_critical_date ? Date.parse(p.projected_critical_date) : null;
-    stmt.run(data.generated_at * 1000, p.metric, JSON.stringify(p), p.preventive_action?.action_name ?? null, dueMs);
-  }
+  // v2.4.51 (B51-DB-1): wrap DELETE+INSERT in a transaction so a crash
+  // or SQLITE_BUSY between the two doesn't leave the table empty until
+  // the next 24h forecast cycle.
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM forecasts`).run();
+    for (const p of data.projections) {
+      const dueMs = p.projected_critical_date ? Date.parse(p.projected_critical_date) : null;
+      stmt.run(data.generated_at * 1000, p.metric, JSON.stringify(p), p.preventive_action?.action_name ?? null, dueMs);
+    }
+  });
+  tx();
 }
 
 export function loadForecasts(): { generated_at: number; projections: any[] } | null {
@@ -650,6 +683,15 @@ export function upsertAutopilotRule(rule: {
   enabled?: boolean;
 }): void {
   openDb().prepare(
+    // v2.4.52 (B52-LOW-2 deferred): the Codex audit flagged that this
+    // upsert omits `enabled` from the on-conflict update — so an explicit
+    // user import (api:importAutopilotRules) silently drops the imported
+    // `enabled` value. Naive fix (adding `enabled = excluded.enabled`) is
+    // a regression: seedDefaultRulesOnce re-asserts `enabled: true` for
+    // every DEFAULT_RULE on every launch, which would re-enable
+    // user-disabled rules on every boot. Proper fix needs a SEPARATE
+    // import path (e.g., `importAutopilotRule()` that does the full
+    // upsert) so seed and import diverge cleanly. Deferred to v2.4.53.
     `INSERT INTO autopilot_rules (id, tier, description, trigger, cadence, action_name, alert_json, enabled, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
@@ -780,11 +822,117 @@ export function getLastAutopilotActivity(ruleId: string): AutopilotActivityRow |
   return row ?? null;
 }
 
-/** Count how many times a rule's action failed in the last N days. */
-export function countAutopilotFailures(ruleId: string, daysBack = 7): number {
+/**
+ * v2.4.49 (B49-NOTIF-2): count `error` rows for a rule that occurred AFTER its
+ * most recent `auto_run` success. Matches the user mental model "things broke
+ * recently and haven't recovered" — a single successful run resets the counter.
+ * The `daysBack` window is preserved as a backstop so old errors from a
+ * deleted-then-readded rule cannot haunt forever. Pre-2.4.49 the function was
+ * named `countAutopilotFailures` and counted ALL errors in the window, which
+ * caused the alert_action_repeated_failures detector to fire on Greg's box
+ * daily for three v2.4.45/46-era errors that long-since recovered. Renamed
+ * for compile-time visibility; legacy semantic is available via
+ * countAutopilotFailuresInWindow.
+ */
+export function countAutopilotFailuresSinceSuccess(ruleId: string, daysBack = 7): number {
+  const since = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+  const row = openDb().prepare(
+    `WITH last_success AS (
+       SELECT MAX(ts) AS ts FROM autopilot_activity
+       WHERE rule_id = ? AND outcome = 'auto_run'
+     )
+     SELECT COUNT(*) AS c FROM autopilot_activity
+     WHERE rule_id = ?
+       AND outcome = 'error'
+       AND ts >= ?
+       AND ts > COALESCE((SELECT ts FROM last_success), 0)`
+  ).get(ruleId, ruleId, since) as { c: number };
+  return row?.c ?? 0;
+}
+
+/**
+ * Legacy semantic: count ALL `error` rows for a rule in the last N days,
+ * regardless of intervening successes. Preserved for any caller (test/UI)
+ * that legitimately wants the raw window count.
+ */
+export function countAutopilotFailuresInWindow(ruleId: string, daysBack = 7): number {
   const since = Date.now() - daysBack * 24 * 60 * 60 * 1000;
   const row = openDb().prepare(
     `SELECT COUNT(*) as c FROM autopilot_activity WHERE rule_id = ? AND outcome = 'error' AND ts >= ?`
   ).get(ruleId, since) as { c: number };
   return row?.c ?? 0;
+}
+
+// ============== ALERT EMIT DEDUP (v2.4.49 B49-NOTIF-1) ==============
+
+export interface AlertEmitHistoryRow {
+  rule_id: string;
+  event_key: string;
+  last_ts: number;
+  last_state_signature: string;
+}
+
+/** Look up the most recent successful Telegram emission for (rule_id, event_key). */
+export function getAlertEmitHistory(ruleId: string, eventKey: string): AlertEmitHistoryRow | null {
+  const row = openDb().prepare(
+    `SELECT rule_id, event_key, last_ts, last_state_signature FROM alert_emit_history WHERE rule_id = ? AND event_key = ?`
+  ).get(ruleId, eventKey) as AlertEmitHistoryRow | undefined;
+  return row ?? null;
+}
+
+/** Record (or replace) the last successful emission for (rule_id, event_key). */
+export function recordAlertEmit(ruleId: string, eventKey: string, ts: number, signature: string): void {
+  openDb().prepare(
+    `INSERT INTO alert_emit_history (rule_id, event_key, last_ts, last_state_signature)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(rule_id, event_key) DO UPDATE SET
+       last_ts = excluded.last_ts,
+       last_state_signature = excluded.last_state_signature`
+  ).run(ruleId, eventKey, ts, signature);
+}
+
+// ============== NAS RECYCLE SIZE CACHE (v2.4.51 B49-NAS-2) ==============
+
+export interface NasRecycleSizeRow {
+  letter: string;            // 'M', 'Z', etc. (no colon)
+  recycle_bytes: number;
+  last_scanned_ts: number;
+  scan_duration_ms: number | null;
+}
+
+/**
+ * Read all cached @Recycle sizes. Returns Map keyed on uppercase drive
+ * letter WITH trailing colon ('M:'), so callers can do
+ * `cache.get(d.letter)` where `d.letter` is the 'M:' form emitted by
+ * Get-NasDrives.ps1.
+ */
+export function getNasRecycleSizes(): Map<string, { recycle_bytes: number; last_scanned_ts: number }> {
+  const rows = openDb().prepare(
+    `SELECT letter, recycle_bytes, last_scanned_ts FROM nas_recycle_sizes`,
+  ).all() as Array<{ letter: string; recycle_bytes: number; last_scanned_ts: number }>;
+  const out = new Map<string, { recycle_bytes: number; last_scanned_ts: number }>();
+  for (const r of rows) {
+    const upper = r.letter.toUpperCase();
+    const key = upper.endsWith(':') ? upper : `${upper}:`;
+    out.set(key, { recycle_bytes: r.recycle_bytes, last_scanned_ts: r.last_scanned_ts });
+  }
+  return out;
+}
+
+/**
+ * Upsert one drive's cached @Recycle size. Called by the
+ * refresh-nas-recycle-bridge CJS entry point invoked from
+ * Refresh-NasRecycleSizes.ps1, and by the queue-drain path in
+ * api:getNasDrives.
+ */
+export function upsertNasRecycleSize(letter: string, recycleBytes: number, scanDurationMs: number | null): void {
+  const normalized = letter.toUpperCase().replace(/:$/, '');
+  openDb().prepare(
+    `INSERT INTO nas_recycle_sizes (letter, recycle_bytes, last_scanned_ts, scan_duration_ms)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(letter) DO UPDATE SET
+       recycle_bytes = excluded.recycle_bytes,
+       last_scanned_ts = excluded.last_scanned_ts,
+       scan_duration_ms = excluded.scan_duration_ms`,
+  ).run(normalized, recycleBytes, Date.now(), scanDurationMs);
 }

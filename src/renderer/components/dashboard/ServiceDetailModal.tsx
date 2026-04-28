@@ -53,7 +53,7 @@ export function ServiceDetailModal({ service, actionBusy, onClose, onRestart }: 
       aria-label={`${service.display} details`}
     >
       <div
-        className="bg-surface-800 border border-surface-600 rounded-lg w-full max-w-md p-5 shadow-2xl"
+        className="pcd-modal w-full max-w-md p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
@@ -86,7 +86,7 @@ export function ServiceDetailModal({ service, actionBusy, onClose, onRestart }: 
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-xs bg-surface-700 border border-surface-600"
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
           >
             Close
           </button>

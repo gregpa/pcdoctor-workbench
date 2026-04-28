@@ -15,6 +15,7 @@
  * for *threshold* evaluation from the main-process poll loop.
  */
 
+import { createHash } from 'node:crypto';
 import { getStatus } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
@@ -25,9 +26,11 @@ import {
   insertAutopilotActivity,
   listAutopilotActivity,
   getLastAutopilotActivity,
-  countAutopilotFailures,
+  countAutopilotFailuresSinceSuccess,
   queryMetricTrend,
   deleteAutopilotRule,
+  getAlertEmitHistory,
+  recordAlertEmit,
   type AutopilotRuleRow,
 } from './dataStore.js';
 import { sendTelegramMessage, makeCallbackData, type InlineButton } from './telegramBridge.js';
@@ -69,6 +72,13 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { id: 'run_hwinfo_log_monthly',         tier: 1, description: '2-hour sensor log monthly',       trigger: 'schedule', cadence: 'monthly:1sat:23:00', action_name: 'run_hwinfo_log' },
   { id: 'shrink_component_store_monthly', tier: 1, description: 'Shrink component store monthly', trigger: 'schedule', cadence: 'monthly:2sat:04:00', action_name: 'shrink_component_store' },
   { id: 'run_safety_scanner_monthly',     tier: 1, description: 'Safety Scanner monthly',          trigger: 'schedule', cadence: 'monthly:3sat:04:00', action_name: 'run_safety_scanner' },
+  // v2.4.51 (B49-NAS-2): daily NAS @Recycle cache refresh. The
+  // Refresh-NasRecycleSizes.ps1 task writes directly to the DB cache via the
+  // node-script bridge / queue file; no actionRunner routing. action_name is
+  // intentionally omitted -- seedDefaultRulesOnce coerces missing values to
+  // null and evaluateAutopilot filters schedule rules out of the threshold
+  // tick (Task Scheduler dispatches it).
+  { id: 'refresh_nas_recycle_sizes_daily', tier: 1, description: 'Refresh NAS @Recycle sizes daily', trigger: 'schedule', cadence: 'daily:03:00', action_name: undefined as any },
   { id: 'remove_feature_update_leftovers_low_disk', tier: 1, description: 'Remove feature-update leftovers when disk C <15% free', trigger: 'threshold', action_name: 'remove_feature_update_leftovers' },
 
   // ---- Tier 2: auto-execute + notify ----
@@ -298,7 +308,7 @@ export function evaluateRule(
     case 'alert_action_repeated_failures': {
       const rules = listAutopilotRules();
       for (const other of rules) {
-        if (other.action_name && countAutopilotFailures(other.id, 7) >= 3) {
+        if (other.action_name && countAutopilotFailuresSinceSuccess(other.id, 7) >= 3) {
           return { ...base, alert, reason: `${other.action_name} failed 3+ times in 7 days` };
         }
       }
@@ -374,8 +384,44 @@ export async function dispatchDecision(d: AutopilotDecision, minGapMs = 6 * 60 *
   }
 }
 
+/**
+ * v2.4.49 (B49-NOTIF-1): truncated sha256 of (severity|title|reason). State
+ * transitions (e.g. severity escalates from 'important' to 'critical') change
+ * the signature so the next emission bypasses the dedup window naturally. If
+ * a future caller mutates a fourth field that should also break dedup, add it
+ * here and bump the slice — see plan §6 risk row.
+ *
+ * STABILITY REQUIREMENT (code-review S1): every component of the hash MUST be
+ * stable across consecutive evaluations of the same logical alert state. In
+ * particular, `d.reason` MUST NOT include numeric counts that change every
+ * tick (e.g., "3 errors in 7 days" is fine; "disk usage at 87.4%" is not —
+ * the float drifts, signature differs, the 24h dedup gate becomes a no-op
+ * and Telegram fires every tick). Today's only Tier-3 reason strings (see
+ * `evaluateRule` cases) are all stable. If you add a Tier-3 alert whose
+ * reason is dynamic, EITHER drop reason from this hash OR bucket the dynamic
+ * value (e.g., `Math.floor(pct/10)`) before constructing the reason.
+ */
+function stateSignature(d: AutopilotDecision): string {
+  const sev = d.alert?.severity ?? 'unknown';
+  const title = d.alert?.title ?? '';
+  return createHash('sha256').update(`${sev}|${title}|${d.reason}`).digest('hex').slice(0, 24);
+}
+
 async function dispatchAlert(d: AutopilotDecision): Promise<void> {
   if (!d.alert) return;
+
+  // v2.4.49 (B49-NOTIF-1): suppress same-state alerts emitted within 24h. The
+  // pre-2.4.49 dispatchAlert had no dedup gate and Greg's box received the
+  // same Telegram alert at 03:42 AND 09:42 the same day. Severity escalation
+  // and reason changes still fire because stateSignature() differs.
+  const eventKey = d.rule_id;
+  const sig = stateSignature(d);
+  const last = getAlertEmitHistory(d.rule_id, eventKey);
+  const dedupMs = 24 * 60 * 60 * 1000;
+  if (last && (Date.now() - last.last_ts) < dedupMs && last.last_state_signature === sig) {
+    return;
+  }
+
   const severityIcon = d.alert.severity === 'critical' ? '🔴' : d.alert.severity === 'important' ? '🟡' : 'ℹ️';
 
   const buttons: InlineButton[][] = [];
@@ -401,6 +447,11 @@ async function dispatchAlert(d: AutopilotDecision): Promise<void> {
     message: send.ok ? d.alert.title : (send.error ?? 'telegram send failed'),
     details: { severity: d.alert.severity, fix_actions: d.alert.fix_actions, reason: d.reason },
   });
+
+  // Only record on send-success so a failed send retries on the next tick.
+  if (send.ok) {
+    recordAlertEmit(d.rule_id, eventKey, Date.now(), sig);
+  }
 }
 
 // ============================================================
@@ -447,7 +498,18 @@ let evalTimer: ReturnType<typeof setInterval> | null = null;
 export function startAutopilotEngine(intervalMs = 60_000): void {
   seedDefaultRulesOnce();
   if (evalTimer) return;
+  // v2.4.51 (B51-ENG-1): in-flight guard. Pre-2.4.51 a long IPC sub-call
+  // (Telegram, getStatus) could overrun the 60s interval and the next
+  // setInterval tick fired concurrently with the still-running prior
+  // tick — duplicate dispatch + thrashing. Closure-scoped so a stop +
+  // restart cleanly resets the guard.
+  let tickInFlight = false;
   const tick = async () => {
+    if (tickInFlight) {
+      console.warn('[autopilotEngine] tick skipped: prior tick still in flight');
+      return;
+    }
+    tickInFlight = true;
     try {
       const decisions = await evaluateAutopilot();
       for (const d of decisions) {
@@ -455,6 +517,8 @@ export function startAutopilotEngine(intervalMs = 60_000): void {
       }
     } catch {
       // never let evaluation crash the main process
+    } finally {
+      tickInFlight = false;
     }
   };
   // Small initial delay so we don't hit backend before it's ready
