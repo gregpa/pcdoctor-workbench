@@ -100,6 +100,30 @@ export function Security() {
         <button onClick={refresh} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">Re-scan</button>
       </div>
 
+      {/* v2.4.52 (B52-UI-1): partial-error banner. The B51-IPC-1 fix made
+          getSecurityPosture's sub-scan failures observable as a typed
+          partial_errors[] field instead of silently substituting empty
+          arrays. v2.4.51 shipped the field; v2.4.52 surfaces it. The
+          banner is a single warn-toned strip above the panels that
+          enumerates failed scans + their codes, so users know "no
+          threats" doesn't actually mean "the threat scan ran and found
+          nothing." */}
+      {Array.isArray(data.partial_errors) && data.partial_errors.length > 0 && (
+        <div className="mb-3 px-3 py-2 rounded-md bg-status-warn/15 border border-status-warn/40 text-[11px] text-status-warn">
+          <div className="font-semibold mb-1">⚠ Partial scan — {data.partial_errors.length} sub-scan{data.partial_errors.length === 1 ? '' : 's'} failed</div>
+          <ul className="text-text-secondary space-y-0.5 ml-3 list-disc">
+            {data.partial_errors.map((e) => (
+              <li key={e.name}>
+                <span className="font-mono text-text-primary">{e.name}</span>: <span className="font-mono text-status-warn">{e.code}</span> — {e.message}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-1 text-text-secondary/70">
+            Affected panels below show "data unavailable". Click <span className="text-status-info">Re-scan</span> to retry.
+          </div>
+        </div>
+      )}
+
       <DefenderScanStatus />
 
       <div className="grid grid-cols-2 gap-3 mb-3">

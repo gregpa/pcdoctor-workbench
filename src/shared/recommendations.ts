@@ -19,13 +19,21 @@ export interface LastRunFetcher {
 
 const DAY_S = 86_400;
 
-function daysSince(unixSeconds: number | null, nowS: number): number | null {
-  if (unixSeconds === null) return null;
+// v2.4.52 (B52-LOW-1): defensive numeric coercion. Pre-2.4.52 these helpers
+// only special-cased `null` — a value of NaN, undefined, '0' (string), or
+// a millisecond-scale number from a buggy ingestor would still pass the
+// guard and produce an absurd number of "days ago" downstream (e.g.
+// `Math.floor((1700000000 - 1700000000000) / 86400)` yields a huge
+// negative). The Codex audit flagged the Defender-scan fields specifically;
+// applying the same `Number.isFinite` guard here keeps every caller safe
+// without a per-callsite refactor.
+function daysSince(unixSeconds: number | null | undefined, nowS: number): number | null {
+  if (typeof unixSeconds !== 'number' || !Number.isFinite(unixSeconds)) return null;
   return Math.floor((nowS - unixSeconds) / DAY_S);
 }
 
-function hoursSince(unixSeconds: number | null, nowS: number): number | null {
-  if (unixSeconds === null) return null;
+function hoursSince(unixSeconds: number | null | undefined, nowS: number): number | null {
+  if (typeof unixSeconds !== 'number' || !Number.isFinite(unixSeconds)) return null;
   return Math.floor((nowS - unixSeconds) / 3600);
 }
 

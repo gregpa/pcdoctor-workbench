@@ -683,6 +683,15 @@ export function upsertAutopilotRule(rule: {
   enabled?: boolean;
 }): void {
   openDb().prepare(
+    // v2.4.52 (B52-LOW-2 deferred): the Codex audit flagged that this
+    // upsert omits `enabled` from the on-conflict update — so an explicit
+    // user import (api:importAutopilotRules) silently drops the imported
+    // `enabled` value. Naive fix (adding `enabled = excluded.enabled`) is
+    // a regression: seedDefaultRulesOnce re-asserts `enabled: true` for
+    // every DEFAULT_RULE on every launch, which would re-enable
+    // user-disabled rules on every boot. Proper fix needs a SEPARATE
+    // import path (e.g., `importAutopilotRule()` that does the full
+    // upsert) so seed and import diverge cleanly. Deferred to v2.4.53.
     `INSERT INTO autopilot_rules (id, tier, description, trigger, cadence, action_name, alert_json, enabled, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET

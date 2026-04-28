@@ -181,6 +181,10 @@ describe('main.ts migration IIFE elevates on upgrade (B48-MIG-1a)', () => {
   });
 
   it('logs a warning when both bundle-sync and migration would prompt for UAC (dual-prompt path)', () => {
-    expect(mainSource).toContain('migration: dual UAC required (sync already attempted)');
+    // v2.4.52 (B52-MIG-1): migrated from console.warn → log.warn with the
+    // [migration] prefix as part of the electron-log instrumentation pass.
+    // The dual-UAC warning still fires on the same code path; only the
+    // sink + tag changed.
+    expect(mainSource).toContain('[migration] dual UAC required (sync already attempted)');
   });
 });
