@@ -339,11 +339,24 @@ export function Dashboard() {
               // row below; opening the same modal from the gauge was
               // redundant UI clutter. Gauges are now all non-clickable
               // data displays.
+              //
+              // v2.5.0 Stage 2 (UI restyle): the CPU Load gauge tile is
+              // the **test tile** for the futuristic aesthetic. It sits
+              // next to the unstyled RAM/Disk gauges so the new style
+              // can be directly compared. New treatment:
+              //   - bg-surface-panel-translucent + backdrop-blur-md (8px)
+              //     → glassmorphism over the navy body + dotted grid
+              //   - border-border-default (subtle violet-toned border)
+              //   - hover:shadow-glow-violet + hover:border-accent-violet/40
+              //     → soft violet glow on mouseover (decorative only)
+              // The Gauge component itself is unchanged — semantic colors
+              // (severity → red/amber/green) preserved per Greg's D1.
+              const isTestTile = g.label === 'CPU Load';
+              const tileClass = isTestTile
+                ? 'bg-surface-panel-translucent backdrop-blur-md border border-border-default rounded-lg p-3 panel-contain hover:shadow-glow-violet hover:border-accent-violet/40 transition-colors transition-shadow'
+                : 'bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain';
               return (
-                <div
-                  key={g.label}
-                  className="bg-surface-800 border border-surface-600 rounded-lg p-3 panel-contain"
-                >
+                <div key={g.label} className={tileClass}>
                   <Gauge label={g.label} value={g.value} display={g.display} subtext={g.subtext} severity={g.severity} />
                 </div>
               );

@@ -33,7 +33,22 @@
   }
 
   body {
-    @apply bg-surface-900 text-text-primary;
+    /*
+     * v2.5.0 (UI restyle, Stage 2): swap body bg from #0d1117 to deep
+     * navy #0a0e1a + a layered dotted-grid pattern at 4% violet opacity
+     * on a 24px grid (per Greg's D3=b — both glassmorphism + dotted
+     * grid, subtle). `background-attachment: fixed` keeps the pattern
+     * static against the viewport so it doesn't scroll with content
+     * on long pages (History, Tools, Forecast).
+     *
+     * The pattern variable is declared at :root above. If you want to
+     * tune intensity, edit --pcd-grid-dot opacity (0.04 → 0.08 doubles
+     * visibility) without touching this file.
+     */
+    background-color: var(--pcd-grid-bg);
+    background-image: var(--pcd-grid-pattern);
+    background-attachment: fixed;
+    @apply text-text-primary;
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
   }
