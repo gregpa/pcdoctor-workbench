@@ -634,6 +634,26 @@ export function Dashboard() {
                   ⚠ {security.persistence_new_count} new persistence item{security.persistence_new_count === 1 ? '' : 's'} - review in Security page
                 </div>
               )}
+              {/* v2.4.55 (B55-UI-1 / Tier 2 #2): partial-scan-error chip on
+                  Dashboard. Mirror of the v2.4.52 Security-page banner but
+                  compact for the tighter dashboard cell. The B51-IPC-1 field
+                  surfaces sub-scan failures (Audit-Persistence,
+                  Get-ThreatIndicators, Get-SMART) as typed errors; the
+                  Dashboard now flags them so a row that silently shows
+                  "data unavailable" doesn't leave the user thinking the
+                  scan ran clean. Title attribute carries the full
+                  per-scan list for hover detail; the click takes the user
+                  to the Security page where the v2.4.52 banner enumerates
+                  every entry. */}
+              {Array.isArray(security.partial_errors) && security.partial_errors.length > 0 && (
+                <div
+                  className="pt-2 mt-2 border-t border-surface-700 text-[10px] text-status-warn cursor-pointer"
+                  title={security.partial_errors.map(e => `${e.name}: ${e.code} — ${e.message}`).join('\n')}
+                  onClick={() => navigate('/security')}
+                >
+                  ⚠ {security.partial_errors.length} sub-scan{security.partial_errors.length === 1 ? '' : 's'} failed - panels above may show "data unavailable" - click for details →
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-xs text-text-secondary">Loading security posture…</div>
