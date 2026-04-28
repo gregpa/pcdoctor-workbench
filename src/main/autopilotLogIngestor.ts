@@ -202,13 +202,37 @@ async function ingestFileFromOffset(file: string, startOffset: number): Promise<
       return startOffset;
     }
     const complete = text.slice(0, lastNl + 1);
-    const advance = Buffer.byteLength(complete, 'utf8');
 
-    const lines = complete.split('\n');
+    // v2.4.51 (B51-LOG-1): track byte cursor of LAST successful insert so a
+    // failed insert halts cursor advance. Pre-2.4.51 the cursor advanced past
+    // the failed line and the row was permanently lost on the next pass.
+    // Tradeoff: a deterministic insert-failing line will block ingest forever
+    // — strictly better than silently dropping data; warn-once-per-day
+    // surfaces a chronically-broken DB.
+    //
+    // `complete` ends in '\n' (the lastNl boundary). Splitting on '\n'
+    // therefore gives N actual lines plus one trailing empty string we
+    // discard with .slice(0, -1) — every kept element corresponds to a real
+    // line whose terminating '\n' contributes the +1 to lineBytes.
+    const lines = complete.split('\n').slice(0, -1);
+    let cursor = startOffset;
+    let lastGoodCursor = startOffset;
+    let halted = false;
     for (const line of lines) {
-      if (!line.trim()) continue;
+      const lineBytes = Buffer.byteLength(line + '\n', 'utf8');
+      cursor += lineBytes;
+      if (!line.trim()) {
+        // Empty line — not a failed insert, advance unconditionally.
+        lastGoodCursor = cursor;
+        continue;
+      }
       const parsed = parseAutopilotLogLine(line);
-      if (!parsed) continue;
+      if (!parsed) {
+        // Malformed line — not retryable; advance past it (matches
+        // pre-2.4.51 behavior; only insert failures halt the cursor).
+        lastGoodCursor = cursor;
+        continue;
+      }
       try {
         insertAutopilotActivity({
           rule_id: parsed.rule_id,
@@ -220,17 +244,27 @@ async function ingestFileFromOffset(file: string, startOffset: number): Promise<
           message: parsed.message,
           ts: parsed.ts,
         });
+        lastGoodCursor = cursor;
       } catch (err) {
-        // Per-line insert failure (corrupt db, FK, shutdown). Warn once per
-        // day to avoid log spam when the db is unavailable.
+        // v2.4.51 (B51-LOG-1): db insert failed (corrupt db, FK, shutdown).
+        // STOP advancing the cursor here. The next ingestOnce() pass will
+        // re-attempt this line and every subsequent line. Pre-2.4.51 the
+        // cursor advanced past the failed line and the row was permanently
+        // lost.
         const today = dayStamp();
         if (!_warnedOncePerDate.has(today)) {
           _warnedOncePerDate.add(today);
-          console.warn('[autopilotLogIngestor] insert failed:', err instanceof Error ? err.message : String(err));
+          console.warn('[autopilotLogIngestor] insert failed; halting cursor advance:', err instanceof Error ? err.message : String(err));
         }
+        halted = true;
+        break;  // do not advance past a failed insert
       }
     }
-    return startOffset + advance;
+    // When no insert failed, the cursor walk finishes at startOffset +
+    // Buffer.byteLength(complete), preserving the prior return semantics
+    // (offset advances past every consumed line). When halted, lastGoodCursor
+    // sits at the byte just past the last successfully-inserted line.
+    return halted ? lastGoodCursor : (startOffset + Buffer.byteLength(complete, 'utf8'));
   } finally {
     await fh.close();
   }

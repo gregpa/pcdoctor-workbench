@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Empties the Recycle Bin on all FIXED (local) drives only.
+    Empties the Recycle Bin on local fixed and removable drives.
 .DESCRIPTION
     v2.2.0 rewrite: reports honestly.
 
-    * Targets only Win32_LogicalDisk DriveType=3 (fixed local drives). Network drives
+    * Targets fixed (DriveType=3) and removable (DriveType=2) drives. Network drives
       (G:, J:, NAS mappings) are skipped.
     * Per-drive `Clear-RecycleBin` exception messages are captured and returned.
     * Per-drive status is one of: empty / cleared / partial / blocked / error.
@@ -53,8 +53,11 @@ function Get-RecycleBinSize {
     } catch { return 0 }
 }
 
-# Fixed local drives only (DriveType = 3). Uses CIM so removable / network / RAM drives are filtered out.
-$fixedDrives = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)
+# v2.4.51: include removable drives (DriveType=2, USB sticks etc.) in
+# addition to fixed (DriveType=3). Network (4), CD-ROM (5), RAM (6) stay
+# excluded -- Clear-RecycleBin doesn't apply to them. Aligns with
+# Get-NasDrives.ps1 which enumerates DriveType=2,3,4 for the dashboard panel.
+$fixedDrives = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=2 OR DriveType=3' -ErrorAction SilentlyContinue)
 
 $perDrive      = @()
 $totalFreed    = [int64]0

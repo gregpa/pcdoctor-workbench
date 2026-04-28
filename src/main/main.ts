@@ -260,7 +260,7 @@ app.whenReady().then(() => {
 
       const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
-      const TASK_MIGRATION_VERSION = '2.4.48';
+      const TASK_MIGRATION_VERSION = '2.4.51';
       const lastMigration = getSetting('last_task_migration_version');
       const isUpgrade = lastMigration !== TASK_MIGRATION_VERSION;
 

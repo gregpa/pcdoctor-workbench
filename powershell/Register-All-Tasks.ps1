@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Continue'
 # missing (e.g. running from C:\ProgramData\PCDoctor where ..\package.json
 # doesn't exist), the hardcoded fallback below applies. The fallback literal
 # is updated alongside the package.json bump per release.
-$ScriptVersion = '2.4.50'
+$ScriptVersion = '2.4.51'
 try {
     $pkgPath = Join-Path $PSScriptRoot '..\package.json'
     if (Test-Path $pkgPath) {
@@ -84,6 +84,11 @@ $userAutopilotTasks = @(
     @{ name = 'PCDoctor-Autopilot-AdwCleanerScan';            sched = '/SC MONTHLY /D 1 /ST 04:00';               script = "$root\actions\Run-AdwCleanerScan.ps1";         ruleId = 'run_adwcleaner_scan_monthly';     tier = 1 }
     @{ name = 'PCDoctor-Autopilot-HwinfoLog';                 sched = '/SC MONTHLY /MO FIRST /D SAT /ST 23:00';    script = "$root\actions\Run-HwinfoLog.ps1";              ruleId = 'run_hwinfo_log_monthly';          tier = 1 }
     @{ name = 'PCDoctor-Autopilot-SafetyScanner';             sched = '/SC MONTHLY /MO THIRD /D SAT /ST 04:00';    script = "$root\actions\Run-SafetyScanner.ps1";          ruleId = 'run_safety_scanner_monthly';      tier = 1 }
+    # v2.4.51 (B49-NAS-2): nightly refresh of per-NAS-drive @Recycle folder
+    # sizes. Top-level Refresh-NasRecycleSizes.ps1 (NOT actions/...) because
+    # this is a maintenance task that writes to the DB cache directly via
+    # the node-script bridge / queue file -- no actionRunner routing.
+    @{ name = 'PCDoctor-Autopilot-RefreshNasRecycleSizes';     sched = '/SC DAILY /ST 03:00';                       script = "$root\Refresh-NasRecycleSizes.ps1";            ruleId = 'refresh_nas_recycle_sizes_daily'; tier = 1 }
     # v2.4.0 tool updates: weekly winget upgrade check (reports only; user
     # presses Upgrade in the Tools page to actually apply).
     # No ruleId -- not an autopilot rule; remains unwrapped.

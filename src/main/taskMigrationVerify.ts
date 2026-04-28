@@ -54,16 +54,19 @@ export const AUTOPILOT_SCRIPT_NAMES = [
 
 /**
  * v2.4.48 (B48-MIG-1b): canonical 11-row set of autopilot scheduled-task
- * names sourced verbatim from `Register-All-Tasks.ps1` (lines 59-66, 75,
- * 77, 80). Drives the full-set verification predicate in
- * `verifyAutopilotMigration`: the migration flag is only flipped when EVERY
- * one of these 11 tasks comes back `registered` AND dispatcher-backed.
+ * names sourced verbatim from `Register-All-Tasks.ps1`. Drives the
+ * full-set verification predicate in `verifyAutopilotMigration`: the
+ * migration flag is only flipped when EVERY one of these tasks comes back
+ * `registered` AND dispatcher-backed.
  *
  * Pre-2.4.48 the verifier used `rows.some(...)` — i.e. ONE registered +
  * dispatcher-wrapped autopilot row was enough to declare success. That is
  * the v2.4.45 silent-failure mode: schtasks happens to register the first
  * task on the list, the next 10 fail with /TR overflow, the verifier sees
  * one passing row, flips the flag, and the install never retries.
+ *
+ * v2.4.51 (B49-NAS-2): added `PCDoctor-Autopilot-RefreshNasRecycleSizes`,
+ * bringing the canonical set to 12 names.
  *
  * Drift guard: if Register-All-Tasks.ps1 grows or shrinks an autopilot row,
  * `tests/main/taskMigrationVerify.fullSet.test.ts` regex-extracts the live
@@ -81,6 +84,7 @@ export const EXPECTED_AUTOPILOT_TASK_NAMES = [
   'PCDoctor-Autopilot-ShrinkComponentStore',
   'PCDoctor-Autopilot-SmartCheck',
   'PCDoctor-Autopilot-UpdateHostsStevenBlack',
+  'PCDoctor-Autopilot-RefreshNasRecycleSizes',
 ] as const;
 
 /**

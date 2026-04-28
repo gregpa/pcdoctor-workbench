@@ -326,15 +326,22 @@ describe('insertAutopilotActivity call shape', () => {
     }));
   });
 
-  it('per-line insert failure does not stop the batch', async () => {
+  // v2.4.51 (B51-LOG-1): contract change. A per-line insert failure now
+  // halts cursor advance so the failed line + everything after it gets
+  // retried on the next pass. Pre-2.4.51 the batch continued past the
+  // failure and the failed line was permanently lost.
+  it('per-line insert failure halts the batch (cursor stops at last good)', async () => {
     insertAutopilotActivity
       .mockImplementationOnce(() => { throw new Error('db is closed'); })
       .mockImplementation(() => 1);
     const file = path.join(logsDir, 'autopilot-scheduled-20260424.log');
     const body = line({}) + '\n' + line({ rule_id: 'run_smart_check_daily' }) + '\n';
     await writeFile(file, body, 'utf8');
-    await hooks.ingestFileFromOffset(file, 0);
-    expect(insertAutopilotActivity).toHaveBeenCalledTimes(2);
+    const newOffset = await hooks.ingestFileFromOffset(file, 0);
+    // First insert threw; second line never attempted.
+    expect(insertAutopilotActivity).toHaveBeenCalledTimes(1);
+    // Cursor stayed at startOffset (no successful insert before the throw).
+    expect(newOffset).toBe(0);
   });
 });
 

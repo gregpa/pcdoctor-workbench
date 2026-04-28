@@ -183,9 +183,17 @@ export function Dashboard() {
     if (scanning) return;
     setScanning(true);
     const beforeTs = status?.generated_at ?? 0;
-    const r = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
-    if (!r.ok) {
-      setToast(`Scan failed to start: ${r.error?.message ?? 'unknown'}`);
+    try {
+      const r = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
+      if (!r.ok) {
+        setToast(`Scan failed to start: ${r.error?.message ?? 'unknown'}`);
+        setTimeout(() => setToast(null), 5000);
+        setScanning(false);
+        return;
+      }
+    } catch (e: any) {
+      // v2.4.51 (B51-HOOK-1): thrown invoke leaves scanning stuck on true.
+      setToast(`Scan failed to start: ${e?.message ?? 'invoke threw'}`);
       setTimeout(() => setToast(null), 5000);
       setScanning(false);
       return;
@@ -200,16 +208,22 @@ export function Dashboard() {
         setTimeout(() => setToast(null), 5000);
         return;
       }
-      const fresh = await refetch();
-      if (fresh && fresh.generated_at > beforeTs) {
-        // v2.4.6: Scan Now also re-fetches the security posture so Harden
-        // recommendations reflect live state (previously cached from first
-        // mount, so PUA/CFA changes required an app restart to surface).
-        void refreshSecurity();
-        setScanning(false);
-        setToast(`Scan complete · ${fresh.findings.length} findings`);
-        setTimeout(() => setToast(null), 5000);
-        return;
+      try {
+        const fresh = await refetch();
+        if (fresh && fresh.generated_at > beforeTs) {
+          // v2.4.6: Scan Now also re-fetches the security posture so Harden
+          // recommendations reflect live state (previously cached from first
+          // mount, so PUA/CFA changes required an app restart to surface).
+          void refreshSecurity();
+          setScanning(false);
+          setToast(`Scan complete · ${fresh.findings.length} findings`);
+          setTimeout(() => setToast(null), 5000);
+          return;
+        }
+      } catch {
+        // v2.4.51 (B51-HOOK-1): single refetch failure: don't surface, just
+        // keep polling. If the 5-min deadline expires the existing path
+        // handles it.
       }
       setTimeout(tick, 3000);
     };

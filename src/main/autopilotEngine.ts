@@ -72,6 +72,13 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { id: 'run_hwinfo_log_monthly',         tier: 1, description: '2-hour sensor log monthly',       trigger: 'schedule', cadence: 'monthly:1sat:23:00', action_name: 'run_hwinfo_log' },
   { id: 'shrink_component_store_monthly', tier: 1, description: 'Shrink component store monthly', trigger: 'schedule', cadence: 'monthly:2sat:04:00', action_name: 'shrink_component_store' },
   { id: 'run_safety_scanner_monthly',     tier: 1, description: 'Safety Scanner monthly',          trigger: 'schedule', cadence: 'monthly:3sat:04:00', action_name: 'run_safety_scanner' },
+  // v2.4.51 (B49-NAS-2): daily NAS @Recycle cache refresh. The
+  // Refresh-NasRecycleSizes.ps1 task writes directly to the DB cache via the
+  // node-script bridge / queue file; no actionRunner routing. action_name is
+  // intentionally omitted -- seedDefaultRulesOnce coerces missing values to
+  // null and evaluateAutopilot filters schedule rules out of the threshold
+  // tick (Task Scheduler dispatches it).
+  { id: 'refresh_nas_recycle_sizes_daily', tier: 1, description: 'Refresh NAS @Recycle sizes daily', trigger: 'schedule', cadence: 'daily:03:00', action_name: undefined as any },
   { id: 'remove_feature_update_leftovers_low_disk', tier: 1, description: 'Remove feature-update leftovers when disk C <15% free', trigger: 'threshold', action_name: 'remove_feature_update_leftovers' },
 
   // ---- Tier 2: auto-execute + notify ----
@@ -491,7 +498,18 @@ let evalTimer: ReturnType<typeof setInterval> | null = null;
 export function startAutopilotEngine(intervalMs = 60_000): void {
   seedDefaultRulesOnce();
   if (evalTimer) return;
+  // v2.4.51 (B51-ENG-1): in-flight guard. Pre-2.4.51 a long IPC sub-call
+  // (Telegram, getStatus) could overrun the 60s interval and the next
+  // setInterval tick fired concurrently with the still-running prior
+  // tick — duplicate dispatch + thrashing. Closure-scoped so a stop +
+  // restart cleanly resets the guard.
+  let tickInFlight = false;
   const tick = async () => {
+    if (tickInFlight) {
+      console.warn('[autopilotEngine] tick skipped: prior tick still in flight');
+      return;
+    }
+    tickInFlight = true;
     try {
       const decisions = await evaluateAutopilot();
       for (const d of decisions) {
@@ -499,6 +517,8 @@ export function startAutopilotEngine(intervalMs = 60_000): void {
       }
     } catch {
       // never let evaluation crash the main process
+    } finally {
+      tickInFlight = false;
     }
   };
   // Small initial delay so we don't hit backend before it's ready

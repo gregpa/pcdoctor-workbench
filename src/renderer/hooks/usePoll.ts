@@ -9,7 +9,13 @@ export function usePoll(fn: () => void | Promise<void>, intervalMs: number) {
     let cancelled = false;
     const tick = async () => {
       if (cancelled) return;
-      await fnRef.current();
+      try {
+        await fnRef.current();
+      } catch {
+        // v2.4.51 (B51-HOOK-1): a thrown polled fn must not break the
+        // interval. The caller is responsible for any user-visible error
+        // state — this hook just keeps polling.
+      }
     };
     tick();
     const id = setInterval(tick, intervalMs);
