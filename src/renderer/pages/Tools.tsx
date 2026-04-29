@@ -1,4 +1,5 @@
 import { useTools } from '@renderer/hooks/useTools.js';
+import { useStatus } from '@renderer/hooks/useStatus.js';
 import { TOOLS, TOOL_CATEGORIES, ToolDefinition } from '@shared/tools.js';
 import type { ToolStatus } from '@shared/types.js';
 import { useEffect, useState } from 'react';
@@ -143,6 +144,10 @@ function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpg
 
 export function Tools() {
   const { statuses, loading, installing, refresh, launch, install, installAll } = useTools();
+  const { status } = useStatus();
+  // v2.5.9 (B3): hide HWiNFO CSV import banner when LHM is feeding live temps.
+  // The CSV import is the legacy fallback path; LHM HTTP is the live source.
+  const lhmHttpOpen = status?.cpu_temp_status?.lhm_http_open === true;
   const [toast, setToast] = useState<string | null>(null);
   const [bulkInstalling, setBulkInstalling] = useState(false);
   const [recentResults, setRecentResults] = useState<any[]>([]);
@@ -321,34 +326,37 @@ export function Tools() {
         </div>
       </div>
 
-      <div className="mb-4 pcd-panel">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold">📊 Import HWiNFO CSV</div>
-            <div className="text-[10px] text-text-secondary mt-0.5">
-              Parses an overnight sensor log into CPU/GPU temperature trends (min/avg/max).
+      {!lhmHttpOpen && (
+        <div className="mb-4 pcd-panel">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold">📊 Import HWiNFO CSV</div>
+              <div className="text-[10px] text-text-secondary mt-0.5">
+                Parses an overnight sensor log into CPU/GPU temperature trends (min/avg/max).
+                Fallback path — when LHM Remote Web Server is running, live temps feed automatically.
+              </div>
             </div>
+            <button
+              onClick={async () => {
+                const file = prompt('Paste full path to HWiNFO CSV file:', 'C:\\Users\\greg_\\Downloads\\test.CSV');
+                if (!file) return;
+                setToast('Parsing HWiNFO CSV…');
+                const r = await (window as any).api.runAction({ name: 'import_hwinfo_csv', params: { csv_path: file } });
+                if (r.ok && r.data.success) {
+                  const findings = r.data.result?.findings;
+                  setToast(`Parsed ${r.data.result?.samples ?? 0} samples: ${findings ? Object.keys(findings).length : 0} sensor metrics captured`);
+                } else {
+                  setToast(`Import failed: ${r.error?.message ?? r.data?.error?.message ?? 'unknown'}`);
+                }
+                setTimeout(() => setToast(null), 8000);
+              }}
+              className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold"
+            >
+              Import…
+            </button>
           </div>
-          <button
-            onClick={async () => {
-              const file = prompt('Paste full path to HWiNFO CSV file:', 'C:\\Users\\greg_\\Downloads\\test.CSV');
-              if (!file) return;
-              setToast('Parsing HWiNFO CSV…');
-              const r = await (window as any).api.runAction({ name: 'import_hwinfo_csv', params: { csv_path: file } });
-              if (r.ok && r.data.success) {
-                const findings = r.data.result?.findings;
-                setToast(`Parsed ${r.data.result?.samples ?? 0} samples: ${findings ? Object.keys(findings).length : 0} sensor metrics captured`);
-              } else {
-                setToast(`Import failed: ${r.error?.message ?? r.data?.error?.message ?? 'unknown'}`);
-              }
-              setTimeout(() => setToast(null), 8000);
-            }}
-            className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold"
-          >
-            Import…
-          </button>
         </div>
-      </div>
+      )}
 
       {recentResults.length > 0 && (
         <div className="mb-4 pcd-panel">

@@ -777,6 +777,22 @@ export function registerIpcHandlers() {
   ipcMain.handle('api:getNvidiaDriverLatest', async (): Promise<IpcResult<any>> => {
     try {
       const data = await runPowerShellScript<any>('security/Check-NvidiaDriverLatest.ps1', ['-JsonOutput'], { timeoutMs: 30_000 });
+      // v2.5.9 (B4): cache the check result so Updates page can show
+      // "Last checked Xd ago" without re-running PowerShell on every mount.
+      // The Check-NvidiaDriverLatest.ps1 hits the Nvidia driver feed
+      // (HTTPS, ~3-5s); cache lets us reflect prior state instantly.
+      try {
+        const { setSetting } = await import('./dataStore.js');
+        setSetting('nvidia_check_cache', JSON.stringify({
+          ts: Date.now(),
+          installed_version: data?.installed_version ?? null,
+          latest_version: data?.latest_version ?? null,
+          message: data?.message ?? null,
+        }));
+      } catch (cacheErr: any) {
+        // Non-fatal — return the live result regardless of cache write.
+        console.warn(`ipc: nvidia_check_cache write failed: ${cacheErr?.message ?? cacheErr}`);
+      }
       return { ok: true, data };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
@@ -813,6 +829,10 @@ export function registerIpcHandlers() {
         'auto_block_rdp_bruteforce',
         'telegram_last_good_ts', 'selftest_banner',
         'obsidian_archive_dir',
+        // v2.5.9 (B4): Nvidia driver check cache (driver versions + epoch ms,
+        // no sensitive data). Written main-side by api:getNvidiaDriverLatest;
+        // read renderer-side on Updates.tsx mount to hydrate staleness UI.
+        'nvidia_check_cache',
       ]);
       const isSafeKey = (k: string) => RENDERER_SAFE_KEYS.has(k) || k.startsWith('event:');
 

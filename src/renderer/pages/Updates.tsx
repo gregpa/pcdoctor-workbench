@@ -6,6 +6,26 @@ import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 
+// v2.5.9 (B4): relative-time helper for "Last checked Xd ago" labels on the
+// driver tiles. Inlined here -- not promoted to a shared util because it's
+// the only site that needs this exact phrasing. If a second site needs it,
+// extract to renderer/lib/.
+/** @internal exported for unit tests only -- do not use outside Updates.tsx */
+export function timeAgoShort_test(ts: number): string {
+  return timeAgoShort(ts);
+}
+
+function timeAgoShort(ts: number): string {
+  const ms = Date.now() - ts;
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
 interface PendingUpdate {
   title: string;
   kb: string;
@@ -33,6 +53,12 @@ export function Updates() {
   const [toast, setToast] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<any>(null);
   const [nvInfo, setNvInfo] = useState<any>(null);
+  // v2.5.9 (B4): timestamp (ms epoch) of the last Nvidia check + last Dell scan.
+  // Nvidia ts comes from the cached `nvidia_check_cache` setting (written
+  // by api:getNvidiaDriverLatest). Dell ts comes from getLastActionSuccessMap
+  // which queries actions_log for the most recent successful run.
+  const [nvCheckedTs, setNvCheckedTs] = useState<number | null>(null);
+  const [dellLastScanTs, setDellLastScanTs] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -42,7 +68,42 @@ export function Updates() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  // v2.5.9 (B4): hydrate driver staleness state from persistent stores on mount.
+  // Failure here is non-fatal -- tiles fall back to the "no data yet" UI.
+  // Catch blocks log in dev but stay silent in production so a transient IPC
+  // failure or one-off JSON parse error doesn't spam the user's console.
+  const loadDriverStaleness = async () => {
+    try {
+      const settings = await api.getSettings();
+      if (settings.ok) {
+        const raw = settings.data['nvidia_check_cache'];
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (cached?.ts) {
+            setNvInfo({
+              installed_version: cached.installed_version,
+              latest_version: cached.latest_version,
+              message: cached.message,
+            });
+            setNvCheckedTs(cached.ts);
+          }
+        }
+      }
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('loadDriverStaleness (nvidia):', e);
+    }
+    try {
+      const r = await api.getLastActionSuccessMap();
+      if (r.ok) {
+        const ts = r.data['run_dell_command_update'];
+        if (typeof ts === 'number') setDellLastScanTs(ts);
+      }
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('loadDriverStaleness (dell):', e);
+    }
+  };
+
+  useEffect(() => { load(); loadDriverStaleness(); }, []);
 
   async function install(name: ActionName) {
     const def = ACTIONS[name];
@@ -69,8 +130,14 @@ export function Updates() {
   async function checkNvidia() {
     setToast('Checking Nvidia driver feed…');
     const r = await api.getNvidiaDriverLatest();
-    if (r.ok) { setNvInfo(r.data); setToast(null); }
-    else { setToast(`Nvidia check failed: ${r.error.message}`); setTimeout(() => setToast(null), 4000); }
+    if (r.ok) {
+      setNvInfo(r.data);
+      setNvCheckedTs(Date.now());  // v2.5.9 (B4) — cache write happens main-side too
+      setToast(null);
+    } else {
+      setToast(`Nvidia check failed: ${r.error.message}`);
+      setTimeout(() => setToast(null), 4000);
+    }
   }
 
   if (loading) return (
@@ -208,7 +275,21 @@ export function Updates() {
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Driver Updates</h2>
         <div className="grid grid-cols-2 gap-3">
           <div className="pcd-panel p-4">
-            <div className="font-semibold text-sm mb-1">🎮 Nvidia</div>
+            <div className="flex items-start justify-between mb-1">
+              <div className="font-semibold text-sm">🎮 Nvidia</div>
+              {(() => {
+                if (!nvInfo) return null;
+                const installed = nvInfo.installed_version;
+                const latest = nvInfo.latest_version;
+                if (!installed || !latest || latest === 'unknown') return null;
+                const outOfDate = installed !== latest;
+                return (
+                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${outOfDate ? 'bg-status-warn/20 text-status-warn border border-status-warn/40' : 'bg-status-good/20 text-status-good border border-status-good/40'}`}>
+                    {outOfDate ? 'OUT OF DATE' : 'UP TO DATE'}
+                  </span>
+                );
+              })()}
+            </div>
             {!nvInfo ? (
               <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs pcd-button">Check Latest Version</button>
             ) : (
@@ -216,6 +297,9 @@ export function Updates() {
                 <div>Installed: <code>{nvInfo.installed_version ?? '-'}</code></div>
                 <div>Latest: <code>{nvInfo.latest_version ?? 'unknown'}</code></div>
                 <div className="text-text-secondary text-[10px] mt-2">{nvInfo.message}</div>
+                {nvCheckedTs !== null && (
+                  <div className="text-text-secondary text-[10px]">Last checked {timeAgoShort(nvCheckedTs)}</div>
+                )}
                 <button onClick={checkNvidia} className="mt-2 px-2.5 py-1 rounded-md text-[11px] pcd-button">Re-check</button>
               </div>
             )}
@@ -223,6 +307,9 @@ export function Updates() {
           <div className="pcd-panel p-4">
             <div className="font-semibold text-sm mb-1">💻 Dell Command Update</div>
             <p className="text-[11px] text-text-secondary mb-2">Alienware-specific updates (BIOS, chipset, GPU). Requires the Dell Command | Update app.</p>
+            {dellLastScanTs !== null && (
+              <p className="text-[10px] text-text-secondary mb-2">Last scan {timeAgoShort(dellLastScanTs)}</p>
+            )}
             <button onClick={() => install('run_dell_command_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50">Run Dell Scan + Apply</button>
           </div>
         </div>
