@@ -1445,14 +1445,34 @@ export function registerIpcHandlers() {
   // try a hardcoded path first, then fall back to discovery via
   // Get-Process. shell.openPath routes through ShellExecuteW which
   // brings an already-running LHM window to the foreground.
-  ipcMain.handle('api:openLhm', async (): Promise<IpcResult<{ path: string }>> => {
+  ipcMain.handle('api:openLhm', async (): Promise<IpcResult<{ path: string; action?: string }>> => {
     try {
+      // v2.5.3: try the show-window helper first. If LHM is running but
+      // tray-hidden (Greg's "Minimize To Tray" config), shell.openPath
+      // hits the single-instance mutex and the user sees nothing — the
+      // helper walks EnumWindows, finds LHM's hidden top-level windows,
+      // and ShowWindow(SW_RESTORE) + SetForegroundWindow them.
+      try {
+        const { runPowerShellScript } = await import('./scriptRunner.js');
+        const r = await runPowerShellScript<any>('Show-LhmWindow.ps1', [], { timeoutMs: 5_000 });
+        if (r?.ok === true) {
+          return { ok: true, data: { path: 'running', action: r.action } };
+        }
+        // r?.ok === false → either 'not_running' or 'no_windows' or
+        // 'ps_unhandled'. Fall through to the launch path below.
+      } catch {
+        // Helper script crashed or timed out. Fall through to launch.
+      }
+
+      // Launch path: LHM is not running (or the show-window helper
+      // failed for an unrelated reason). Resolve a candidate exe and
+      // shell.openPath it.
       const candidates = await resolveLhmCandidatePaths();
       for (const candidate of candidates) {
         if (existsSync(candidate)) {
           const errMsg = await shell.openPath(candidate);
           if (errMsg === '') {
-            return { ok: true, data: { path: candidate } };
+            return { ok: true, data: { path: candidate, action: 'launched' } };
           }
           // Try the next candidate if shell.openPath rejected this one
           // (e.g. file exists but ACLs deny launch).

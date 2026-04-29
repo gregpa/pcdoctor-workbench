@@ -50,7 +50,10 @@ export function TrendBar({ title, trend, warnAt, critAt, height = 120, onExpand,
       // v2.5.2: pcd-panel-interactive replaces ad-hoc hover:border-status-info/60
       // so the click affordance matches the violet-glow used by every other
       // clickable dashboard tile post-v2.5.0 (was cyan-tinted, now consistent).
-      className={`pcd-panel ${clickable ? 'pcd-panel-interactive cursor-pointer' : ''}`}
+      // v2.5.3 (code-reviewer W1): write the static branch as a clean literal
+      // instead of `pcd-panel ${clickable ? '...' : ''}` which left a
+      // trailing space at rest. Matches the pattern used in TrendLine + SmartTable.
+      className={clickable ? 'pcd-panel pcd-panel-interactive cursor-pointer' : 'pcd-panel'}
       onClick={clickable ? onExpand : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand!(); } } : undefined}
       role={clickable ? 'button' : undefined}

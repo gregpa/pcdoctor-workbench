@@ -194,14 +194,11 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     category: 'diagnostic', icon: '🎮',
     tooltip: 'Launches the locally-installed NVIDIA App (or GeForce Experience / Control Panel as fallback) where GPU drivers are managed. Falls back to the NVIDIA driver downloads web page only if no local tool is present.',
   },
-  refresh_temperatures: {
-    name: 'refresh_temperatures', label: 'Refresh CPU + GPU Temperatures',
-    ps_script: 'Get-Temperatures.ps1',
-    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 3,
-    needs_admin: true,
-    category: 'diagnostic', icon: '🌡', informational: true,
-    tooltip: 'Runs Get-Temperatures elevated so the CPU WMI thermal-zone read succeeds, and writes the reading to temperature-cache.json. Subsequent non-admin scans pick up the cache for the CPU temp trend. GPU temp always works non-admin via nvidia-smi.',
-  },
+  // v2.5.3: refresh_temperatures action removed. The "Refresh CPU Temp"
+  // button in the Dashboard 7-day trends header was deleted in v2.4.44
+  // because LHM HTTP feeds temps automatically — leaving the catalog
+  // entry was dead drift. If the action is ever needed again, restore
+  // from git history (v2.4.29 commit) and re-add to ActionName in types.ts.
   clear_stale_pending_renames: {
     name: 'clear_stale_pending_renames', label: 'Clear Stale Pending Renames',
     ps_script: 'actions/Clear-StalePendingRenames.ps1',

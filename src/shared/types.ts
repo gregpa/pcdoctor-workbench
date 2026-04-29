@@ -229,8 +229,6 @@ export type ActionName =
   | 'empty_nas_recycle_bin'
   // v2.4.27 - Launch NVIDIA App / GeForce Experience / Control Panel
   | 'open_nvidia_app'
-  // v2.4.29 - Elevated CPU + GPU temperature read with cache write
-  | 'refresh_temperatures'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
