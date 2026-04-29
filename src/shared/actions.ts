@@ -199,6 +199,19 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   // because LHM HTTP feeds temps automatically — leaving the catalog
   // entry was dead drift. If the action is ever needed again, restore
   // from git history (v2.4.29 commit) and re-add to ActionName in types.ts.
+  // v2.5.6 (B47): allowlist LibreHardwareMonitor.exe in Defender's
+  // Controlled Folder Access. Greg's box has CFA enabled; LHM gets
+  // periodically blocked, surfacing as Windows Security toasts. The
+  // PS action is idempotent — re-runs are safe and report no_op when
+  // LHM is already on the list.
+  add_lhm_to_cfa_allowlist: {
+    name: 'add_lhm_to_cfa_allowlist', label: 'Allowlist LHM in Controlled Folder Access',
+    ps_script: 'actions/Allowlist-Lhm-Cfa.ps1',
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 3,
+    needs_admin: true,
+    category: 'hardening', icon: '🛡',
+    tooltip: 'Adds LibreHardwareMonitor.exe to Windows Defender Controlled Folder Access allowlist via Add-MpPreference. Stops the periodic "blocked by CFA" toasts. Idempotent — re-running when LHM is already allowlisted is a no-op. Tamper Protection may block this; if so, the action reports E_TAMPER_PROTECTION with instructions for the manual fallback.',
+  },
   clear_stale_pending_renames: {
     name: 'clear_stale_pending_renames', label: 'Clear Stale Pending Renames',
     ps_script: 'actions/Clear-StalePendingRenames.ps1',

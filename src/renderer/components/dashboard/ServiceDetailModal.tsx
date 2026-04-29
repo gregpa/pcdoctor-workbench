@@ -31,6 +31,16 @@ function severityClass(s: ServiceHealth['status_severity']): string {
 function explainSeverity(service: ServiceHealth): string {
   const status = (service.status || '').toLowerCase();
   const start = service.start ?? '';
+  // v2.5.6 (B40): pseudo-service entries (e.g. DockerDesktopGUI) are
+  // process-backed, not Windows Services. They have no `start` field.
+  // Restart-Service can't operate on them — give the user a sensible
+  // alternative path instead of the standard service copy.
+  const isPseudo = !service.start;
+  if (isPseudo) {
+    if (status.includes('not running')) return 'This is an application process, not a Windows service. There is no service to restart — relaunch the app from its desktop shortcut, Start menu, or system tray.';
+    if (status.includes('running')) return 'Application process is running. No service-level operations apply here.';
+    return 'This is an application process, not a Windows service. Manage it via the app itself or Task Manager.';
+  }
   if (status.includes('running') && !status.includes('not')) return 'Service is running. Automatic services should stay in this state.';
   if (status === 'not_installed') return 'Service is not registered on this machine. May be expected (e.g. Docker optional) or a sign of a missing component.';
   if (status.includes('stopped') || status === 'offline' || status.includes('not running')) {
@@ -90,13 +100,20 @@ export function ServiceDetailModal({ service, actionBusy, onClose, onRestart }: 
           >
             Close
           </button>
-          <button
-            onClick={() => { void onRestart(service.key); }}
-            disabled={actionBusy}
-            className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-semibold disabled:opacity-50"
-          >
-            Restart Service
-          </button>
+          {/* v2.5.6 (B40): hide Restart button for pseudo-services
+              (process-backed entries with no `start` field, e.g.
+              DockerDesktopGUI). Restart-Service throws "service does
+              not exist" against them; the modal copy now points the
+              user to relaunch the app instead. */}
+          {service.start && (
+            <button
+              onClick={() => { void onRestart(service.key); }}
+              disabled={actionBusy}
+              className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-semibold disabled:opacity-50"
+            >
+              Restart Service
+            </button>
+          )}
         </div>
       </div>
     </div>

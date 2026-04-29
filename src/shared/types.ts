@@ -229,6 +229,8 @@ export type ActionName =
   | 'empty_nas_recycle_bin'
   // v2.4.27 - Launch NVIDIA App / GeForce Experience / Control Panel
   | 'open_nvidia_app'
+  // v2.5.6 (B47) - Allowlist LibreHardwareMonitor.exe in Defender CFA
+  | 'add_lhm_to_cfa_allowlist'
   // Internal (not shown in UI)
   | 'create_restore_point';
 

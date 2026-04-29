@@ -39,6 +39,24 @@ const CONFIGS: MetricConfig[] = [
     algorithm: 'ewma',
     threshold_warn: 300, threshold_critical: 500, bad_direction: 'up',
   },
+  // v2.5.6 (FR1): temperature trends. Both metrics are recorded in
+  // recordStatusSnapshot via the temp pipeline (see pcdoctorBridge.ts
+  // readTemperaturesCached → recordStatusSnapshot { cpu_temp_c, gpu_temp_c }).
+  // Thresholds chosen for Greg's hardware:
+  //   - i9-10900KF: TJ Max 100°C, sustained throttle ~95°C → warn 80, crit 90
+  //   - RTX 3080: NVIDIA spec throttle ~83°C, hard cap ~93°C → warn 80, crit 85
+  // No preventive_action: temp climbs are usually environmental (ambient,
+  // dust, fan curve) and the user has to physically address them.
+  {
+    category: 'cpu', metric: 'temp_c', label: 'CPU temperature trend',
+    algorithm: 'linear_regression',
+    threshold_warn: 80, threshold_critical: 90, bad_direction: 'up',
+  },
+  {
+    category: 'gpu', metric: 'temp_c', label: 'GPU temperature trend',
+    algorithm: 'linear_regression',
+    threshold_warn: 80, threshold_critical: 85, bad_direction: 'up',
+  },
 ];
 
 interface RegressionResult {

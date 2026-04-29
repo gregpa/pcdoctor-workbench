@@ -639,7 +639,13 @@ function mapToSystemStatus(r: any): SystemStatus {
     // com.docker.service: Docker Desktop backend; may be Manual after install, OK when not in use
     // WSLService/LxssManager: managed by Docker/WSL2 on demand
     const knownManualStopped = new Set(['BITS', 'wuauserv', 'cryptsvc', 'EFS', 'WSearch', 'DockerDesktopGUI', 'com.docker.service', 'WSLService', 'LxssManager']);
-    if (/run/i.test(statusStr)) sev = 'good';
+    // v2.5.6 (B40): /run/i was matching "NOT RUNNING" (the substring "RUN")
+    // and painting the Docker Desktop GUI tile green even when the user-mode
+    // process was dead. Anchor to the start of the string and require either
+    // end-of-string or whitespace after to allow "running" + "running (N procs)"
+    // but reject "NOT RUNNING".
+    if (/^running( |$)/i.test(statusStr)) sev = 'good';
+    else if (/^not running/i.test(statusStr)) sev = 'crit';
     else if (/error/i.test(statusStr)) sev = 'crit';
     else if (statusStr === 'Stopped' && (start === 'Manual' || start === 'Disabled' || knownManualStopped.has(key))) sev = 'good';
     else if (statusStr === 'Stopped') sev = 'warn';
