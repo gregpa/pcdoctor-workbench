@@ -489,22 +489,28 @@ app.whenReady().then(() => {
       } catch { /* probe failed -- we'll fall through; ACL leg still runs */ }
 
       if (bundleNeedsElevatedCopy) {
-        // Need to wait for the user's UAC decision; only THEN can we say
-        // the on-disk bundle reflects the new version. Wrap in try/catch
-        // so a UAC decline still resolves the promise.
-        const { getSetting } = await import('./dataStore.js');
-        const lastRepair = getSetting('last_acl_repair_version');
-        const thisVersion = app.getVersion();
-        if (lastRepair !== thisVersion) {
-          // v2.4.47 (B46-1): mark the attempt regardless of UAC outcome so
-          // the migration IIFE doesn't re-prompt for the same operation.
-          bundleElevatedSyncAttempted = true;
-          try {
-            await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
-              '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',
-            ], { timeoutMs: 60_000 });
-          } catch { /* declined / failed - migration block will see stale bundle, retry next launch */ }
-        }
+        // v2.5.5: removed the `if (lastRepair !== thisVersion)` gate.
+        // Pre-2.5.5 the elevated copy only fired when last_acl_repair_version
+        // differed from the running app version — which was meant to avoid
+        // re-prompting UAC every launch when ACL repair had already succeeded.
+        // But the gate's implicit assumption (ACL repair → bundle-sync also
+        // ran) didn't hold when bundle-sync's size-only comparison missed
+        // a same-size content change (Greg's box: deployed Register-All-Tasks.ps1
+        // stuck at v2.5.1 across v2.5.2/3/4 because the only delta was the
+        // 5-char $ScriptVersion literal). Now we trust `bundleNeedsElevatedCopy`
+        // — the probe set it only because there's a real mismatch on disk
+        // that needs an elevated copy. If the user declined UAC last launch,
+        // they'll see the prompt again next launch — that's correct because
+        // the deployment is genuinely still needed.
+        //
+        // v2.4.47 (B46-1): mark the attempt regardless of UAC outcome so
+        // the migration IIFE doesn't re-prompt for the same operation.
+        bundleElevatedSyncAttempted = true;
+        try {
+          await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
+            '-SourceDir', bundledPsDir, '-Elevated', '-JsonOutput',
+          ], { timeoutMs: 60_000 });
+        } catch { /* declined / failed - migration block will see stale bundle, retry next launch */ }
       }
     } finally {
       resolveBundleSync();

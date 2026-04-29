@@ -60,7 +60,14 @@ if (-not $proc) {
     exit 0
 }
 
-Add-Type -Namespace U -Name Win32 -MemberDefinition @"
+# v2.5.5: guard against re-loading the type when the script is invoked
+# multiple times in the same PS session. Add-Type throws "type already
+# exists" on the second call, which Greg hit when running the script
+# twice from a single pwsh prompt during v2.5.4 testing. Each IPC call
+# spawns a fresh pwsh process so this didn't affect production, but the
+# guard makes the script idempotent for CLI testing.
+if (-not ('U.Win32' -as [type])) {
+    Add-Type -Namespace U -Name Win32 -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
 [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder sb, int max);
@@ -70,6 +77,7 @@ Add-Type -Namespace U -Name Win32 -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 public delegate bool EnumProc(IntPtr h, IntPtr l);
 "@
+}
 
 $lhmPid = $proc.Id
 $primaryHwnd = [IntPtr]::Zero  # Class .8. + non-empty title (preferred match)

@@ -78,18 +78,30 @@ Get-ChildItem -Path $SourceDir -Recurse -File -Filter '*.ps1' | ForEach-Object {
         return
     }
 
+    # v2.5.5: switched from size-only comparison to MD5 hash. Pre-2.5.5
+    # the check was `if ($dstLen -ne $srcLen)` which produced silent
+    # false-negatives for any content change that preserved byte count
+    # — e.g. `$ScriptVersion = '2.5.1'` → `'2.5.4'` (both 5 chars,
+    # identical file size). Greg's deployed Register-All-Tasks.ps1
+    # was stale at v2.5.1 across three releases (v2.5.2/3/4) because of
+    # exactly this. MD5 catches all content drift; not crypto-grade,
+    # but bundle-sync isn't a security boundary (the installer's
+    # Authenticode signature is). 100 small .ps1 files hash in ~50 ms.
     try {
         $dstLen = (Get-Item $dstPath -EA Stop).Length
-        if ($dstLen -ne $srcLen) {
+        $srcHash = (Get-FileHash -Path $_.FullName -Algorithm MD5 -EA Stop).Hash
+        $dstHash = (Get-FileHash -Path $dstPath -Algorithm MD5 -EA Stop).Hash
+        if ($srcHash -ne $dstHash) {
             $mismatches += [pscustomobject]@{
                 rel   = $rel
                 src   = $srcLen
                 dst   = $dstLen
-                cause = 'size_mismatch'
+                cause = if ($dstLen -ne $srcLen) { 'size_mismatch' } else { 'content_mismatch' }
             }
         }
     } catch {
-        # ACL-stripped file: can't Get-Item. Flag for elevated repair.
+        # ACL-stripped file (or hash failure): can't Get-Item / Get-FileHash.
+        # Flag for elevated repair.
         $mismatches += [pscustomobject]@{
             rel   = $rel
             src   = $srcLen
