@@ -401,6 +401,29 @@ async function getStatusInner(): Promise<SystemStatus> {
   // v2.5.2: attach the latest known LHM source status so the renderer
   // can render the "Remote Web Server is off" banner. Undefined on
   // cold-launch ticks before the first temp pipeline read resolves.
+  //
+  // ─────────────────────────────────────────────────────────────────
+  // INTENTIONAL ONE-TICK STALENESS  (code-reviewer v2.5.2 W1, documented v2.5.7)
+  //
+  // `_lastTempStatus` here reflects the result of the PRIOR temp-read
+  // cycle, not the current tick's. The temperature pipeline runs
+  // fire-and-forget AFTER getStatus returns (see the
+  // `void readTemperaturesCached().then(...)` block ~50 lines below)
+  // with a 30s in-memory cache (TEMPS_CACHE_MS). When LHM goes from up
+  // to down, the banner can therefore appear up to one cache-miss cycle
+  // (≤30s) + one renderer-poll-interval (~5s) after the actual outage.
+  //
+  // DO NOT "fix" this by awaiting readTemperaturesCached() here.
+  // Doing so re-introduces the v2.4.30 resize freeze: useStatus
+  // re-fires on every Chromium resize event during a window drag,
+  // each call awaits a Get-Temperatures.ps1 spawn (~200ms), and on
+  // Greg's high-RAM-pressure box the spawn stampede produced a
+  // 30-second UI freeze (the original bug that motivated the cache).
+  //
+  // The empirical original-incident outage lasted hours unnoticed —
+  // a 30-60s detection latency closes that gap by 99%+ which is the
+  // only thing that actually matters for the user-facing UX.
+  // ─────────────────────────────────────────────────────────────────
   if (_lastTempStatus) {
     status.cpu_temp_status = {
       source: _lastTempStatus.source,
