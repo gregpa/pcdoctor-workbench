@@ -84,12 +84,30 @@
   ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\baseline" -Tier B'
   ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\settings" -Tier B'
 
+  ; Step 6c (v2.5.7 B1 fix): pre-create workbench.db-wal / workbench.db-shm
+  ; as zero-byte files IF they do not exist, so Step 7's additive grants
+  ; actually land on the file objects. Without this step, fresh installs
+  ; deferred wal/shm creation to first SQLite write -- the new files
+  ; inherited Users:(I)(RX) from the tier-A root, and subsequent process
+  ; opens hit SQLITE_READONLY despite Step 7 having "succeeded" (no-op
+  ; because the targets did not exist yet). Zero-byte wal/shm are valid
+  ; SQLite state ("no committed txns in WAL") and are overwritten on first
+  ; transaction. We use New-Item -Force only when -not (Test-Path) so we
+  ; never clobber an existing journal on upgrade.
+  ; Note: NSIS parses '$name' inside strings as variable references, so we
+  ; CANNOT use PowerShell variables ($wal, $shm) here — that produces NSIS
+  ; warning 6000 ("unknown variable/constant") which is fatal under strict.
+  ; The wal/shm paths have no spaces, so unquoted Test-Path / New-Item args
+  ; are safe and avoid all NSIS-escape gymnastics.
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db-wal)) { New-Item -Path C:\ProgramData\PCDoctor\workbench.db-wal -ItemType File -Force -ErrorAction Stop | Out-Null }; if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db-shm)) { New-Item -Path C:\ProgramData\PCDoctor\workbench.db-shm -ItemType File -Force -ErrorAction Stop | Out-Null }"'
+
   ; Step 7: workbench.db needs Users:M despite living at root (tier-A).
   ; Additive /grant on these specific files; does not propagate. /C
-  ; continues on errors (wal/shm may not exist yet — SQLite creates them).
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db" /grant "*S-1-5-32-545:M" /C /Q'
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-wal" /grant "*S-1-5-32-545:M" /C /Q'
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-shm" /grant "*S-1-5-32-545:M" /C /Q'
+  ; continues on errors. Step 6c above guarantees wal/shm exist so /grant
+  ; lands instead of silently no-opping.
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db" /grant "*S-1-5-32-545:(M)" /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-wal" /grant "*S-1-5-32-545:(M)" /C /Q'
+  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-shm" /grant "*S-1-5-32-545:(M)" /C /Q'
 
   ; Step 8: remove Defender exclusion now ACL work is done.
   ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-MpPreference -ExclusionPath C:\ProgramData\PCDoctor -ErrorAction SilentlyContinue"'

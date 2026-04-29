@@ -95,7 +95,7 @@ foreach ($sd in @('logs', 'reports', 'snapshots', 'exports', 'claude-bridge', 'h
 foreach ($db in @('workbench.db', 'workbench.db-wal', 'workbench.db-shm')) {
     $p = Join-Path $root $db
     if (Test-Path $p) {
-        & icacls $p /grant '*S-1-5-32-545:M' /C /Q 2>&1 | Out-Null
+        & icacls $p /grant '*S-1-5-32-545:(M)' /C /Q 2>&1 | Out-Null
     }
 }
 

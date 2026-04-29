@@ -70,6 +70,12 @@ $dataSubdirs = @('logs', 'reports', 'snapshots', 'exports', 'claude-bridge', 'hi
 # Root-level scripts
 foreach ($i in 1..15) { Set-Content -Path "$Sandbox\Root-Script-$i.ps1" -Value "# test" -Force }
 Set-Content -Path "$Sandbox\workbench.db" -Value "mock" -Force
+# v2.5.7 (B1): pre-create wal/shm to mirror installer.nsh Step 6c. Without
+# these files in the sandbox, Phase 3's existing wal/shm Modify check (line
+# 200) silently skips them -- which is exactly the gap that let the bug ship
+# unnoticed for the entire 2.5.x series.
+Set-Content -Path "$Sandbox\workbench.db-wal" -Value "" -Force
+Set-Content -Path "$Sandbox\workbench.db-shm" -Value "" -Force
 Set-Content -Path "$Sandbox\event-allowlist.json" -Value "{}" -Force
 
 foreach ($sd in $scriptSubdirs) {
@@ -154,8 +160,13 @@ foreach ($sd in $dataSubdirs) {
     Invoke-ApplyTieredAcl -Path (Join-Path $Sandbox $sd) -Tier B -Mode recurse
 }
 
-Write-Host "  [step 6] workbench.db Users:M"
-& icacls "$Sandbox\workbench.db" /grant "*S-1-5-32-545:M" /C /Q 2>&1 | Out-Null
+Write-Host "  [step 6] workbench.db + wal + shm Users:M"
+# v2.5.7 (B1): mirror installer.nsh Step 7 -- grant on all three files, not
+# just the main db. The harness previously skipped wal/shm because it never
+# created them; now it does (Phase 1) and grants here.
+& icacls "$Sandbox\workbench.db"     /grant "*S-1-5-32-545:(M)" /C /Q 2>&1 | Out-Null
+& icacls "$Sandbox\workbench.db-wal" /grant "*S-1-5-32-545:(M)" /C /Q 2>&1 | Out-Null
+& icacls "$Sandbox\workbench.db-shm" /grant "*S-1-5-32-545:(M)" /C /Q 2>&1 | Out-Null
 
 # ========== Phase 3: verify every file has non-empty DACL ==========
 Write-Host ""

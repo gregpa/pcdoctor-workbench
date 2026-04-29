@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { WORKBENCH_DB_PATH } from './constants.js';
@@ -185,10 +186,82 @@ CREATE TABLE IF NOT EXISTS nas_recycle_sizes (
 
 let db: Database.Database | null = null;
 
+// v2.5.7 (B1 readonly-DB hotfix). The tier-A installer ACL on
+// C:\ProgramData\PCDoctor grants Users:(OI)(CI)(RX), so any file SQLite
+// (re)creates here -- specifically workbench.db-wal and workbench.db-shm --
+// inherits as Users:(I)(RX). Subsequent process opens then fail with
+// SQLITE_READONLY despite the explicit Users:(M) grant the installer applies
+// to the main db file. installer.nsh:90-92 grants Users:(M) on wal/shm too,
+// but with /C (continue on errors) and on fresh installs the files don't
+// exist yet, so the grant is a silent no-op. SQLite later creates them with
+// only the inherited (RX) ACE.
+//
+// This self-heal grants Users:(M) on each sibling at openDb() time whenever
+// it exists with a non-writable Users ACE. Pre-flight call handles the
+// existing-but-broken case (re-installs, deleted-and-recreated wal). The
+// post-flight call handles fresh-create -- the current process keeps the
+// wal/shm handles open with creator-implicit write so it works fine, but the
+// NEXT process needs the on-disk DACL to grant Users:(M) explicitly.
+//
+// Idempotent. If the user lacks WRITE_DAC (non-owner, non-admin) the icacls
+// call fails, we log a warning, and the underlying SqliteError surfaces
+// normally with no extra noise.
+const SIBLING_SUFFIXES = ['-wal', '-shm'] as const;
+
+/**
+ * Returns true if the file's DACL grants BUILTIN\Users at least Modify
+ * (token M or F in any ACE for that principal). Locale-bound to English
+ * Windows -- on non-English locales icacls prints localized names and we
+ * conservatively return false, causing a (harmless) extra grant attempt.
+ */
+function siblingHasUsersWriteAccess(filepath: string): boolean {
+  if (process.platform !== 'win32') return true;
+  try {
+    const out = execFileSync('icacls.exe', [filepath],
+      { encoding: 'utf8', windowsHide: true });
+    // Match a Users ACE whose final permission paren contains M or F as a
+    // standalone token. Examples that match: (M), (I)(M), (F), (I)(F).
+    // Examples that don't: (I)(RX), (RX,W,D) -- W alone isn't enough for
+    // SQLite's WAL+SHM lifecycle (needs delete on checkpoint cleanup).
+    return /BUILTIN\\Users:(?:\([^)]*\))*\([^)]*\b[MF]\b[^)]*\)/.test(out);
+  } catch {
+    return false;
+  }
+}
+
+function grantUsersModify(filepath: string): boolean {
+  if (process.platform !== 'win32') return false;
+  try {
+    execFileSync('icacls.exe',
+      [filepath, '/grant', '*S-1-5-32-545:(M)', '/Q'],
+      { encoding: 'utf8', windowsHide: true });
+    return true;
+  } catch (e: any) {
+    console.warn(
+      `dataStore: icacls grant failed on ${path.basename(filepath)}: ${e?.message ?? e}`);
+    return false;
+  }
+}
+
+export function ensureSiblingDbAcl(): void {
+  if (process.platform !== 'win32') return;
+  for (const sfx of SIBLING_SUFFIXES) {
+    const sib = `${WORKBENCH_DB_PATH}${sfx}`;
+    if (!existsSync(sib)) continue;
+    if (siblingHasUsersWriteAccess(sib)) continue;
+    if (grantUsersModify(sib)) {
+      console.log(`dataStore: granted Users:M on ${path.basename(sib)} (self-heal)`);
+    }
+  }
+}
+
 function openDb(): Database.Database {
   if (db) return db;
   const dir = path.dirname(WORKBENCH_DB_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  // v2.5.7 (B1): pre-flight on existing wal/shm with bad ACL so SQLite's
+  // own open of those handles doesn't trip SQLITE_READONLY.
+  ensureSiblingDbAcl();
   db = new Database(WORKBENCH_DB_PATH);
   // Reviewer P1: added busy_timeout + foreign_keys. WAL + NORMAL were
   // already correct for this single-process, single-writer pattern.
@@ -196,6 +269,10 @@ function openDb(): Database.Database {
   db.pragma('synchronous = NORMAL');
   db.pragma('busy_timeout = 5000');    // 5s lock wait before SQLITE_BUSY
   db.pragma('foreign_keys = ON');      // catch orphan rollback_id etc
+  // v2.5.7 (B1): post-flight on freshly-created wal/shm so the NEXT process
+  // open has Users:(M) on disk. Current process keeps handles open with
+  // creator-implicit write, so this isn't load-bearing for THIS run.
+  ensureSiblingDbAcl();
   db.exec(SCHEMA);
   runMigrations(db);
   return db;
