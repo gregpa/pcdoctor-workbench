@@ -70,11 +70,47 @@ function safeWeekDelta(category: string, metric: string, label?: string): { week
 // resize) don't stampede Get-Temperatures PS spawns. One PS spawn per
 // 30s is plenty for trend resolution - CPU and GPU temps don't change
 // meaningfully faster than that.
-let _tempsCache: { ts: number; value: { cpu_temp_c?: number; gpu_temp_c?: number } | null } | null = null;
-let _tempsInFlight: Promise<{ cpu_temp_c?: number; gpu_temp_c?: number } | null> | null = null;
+//
+// v2.5.2: cache value extended with the source-status fields the
+// scanner already emits (cpu.source, cpu.from_cache, lhm_http_open).
+// Used by mapToSystemStatus to surface a Dashboard banner when the
+// LHM Remote Web Server toggle is off, and by writePerfLine for
+// post-mortem diagnosis of "where did my CPU temp data go" outages.
+type TempsRead = {
+  cpu_temp_c?: number;
+  gpu_temp_c?: number;
+  source: string;
+  from_cache: boolean;
+  lhm_http_open: boolean;
+};
+let _tempsCache: { ts: number; value: TempsRead | null } | null = null;
+let _tempsInFlight: Promise<TempsRead | null> | null = null;
 const TEMPS_CACHE_MS = 30_000;
 
-async function readTemperaturesCached(): Promise<{ cpu_temp_c?: number; gpu_temp_c?: number } | null> {
+// v2.5.2: most recent temp source status. Read by mapToSystemStatus
+// each getStatus tick — null until the first temp pipeline read
+// completes (~30s after cold launch). Renderer hides the LHM banner
+// while this is null/undefined.
+let _lastTempStatus: { source: string; from_cache: boolean; lhm_http_open: boolean } | null = null;
+
+/** v2.5.2: test hook so unit tests can reset the latest-status singleton. */
+export function _resetLastTempStatusForTests(): void {
+  _lastTempStatus = null;
+  _tempsCache = null;
+  _tempsInFlight = null;
+}
+
+/** v2.5.2: test hook — exposes readTemperaturesBestEffort for unit tests that
+ *  mock the dynamic scriptRunner import to drive payloads in directly. */
+export const _readTemperaturesBestEffortForTests = readTemperaturesBestEffort;
+
+/** v2.5.2: getter for the renderer-side LHM banner. Returns the latest
+ *  observed status or null on cold launch. */
+export function getLatestTempStatus(): { source: string; from_cache: boolean; lhm_http_open: boolean } | null {
+  return _lastTempStatus;
+}
+
+async function readTemperaturesCached(): Promise<TempsRead | null> {
   const now = Date.now();
   if (_tempsCache && (now - _tempsCache.ts) < TEMPS_CACHE_MS) {
     return _tempsCache.value;
@@ -82,9 +118,20 @@ async function readTemperaturesCached(): Promise<{ cpu_temp_c?: number; gpu_temp
   if (_tempsInFlight) return _tempsInFlight;
   _tempsInFlight = readTemperaturesBestEffort().then((v) => {
     _tempsCache = { ts: Date.now(), value: v };
+    if (v) {
+      _lastTempStatus = { source: v.source, from_cache: v.from_cache, lhm_http_open: v.lhm_http_open };
+    }
     _tempsInFlight = null;
     return v;
   }).catch(() => {
+    // v2.5.2 (code-reviewer W2): clear _lastTempStatus on a thrown PS
+    // spawn so a transient promise rejection cannot leave the prior
+    // lhm_http_open=true value cached and silently mask a real outage.
+    // readTemperaturesBestEffort itself wraps everything in try/catch and
+    // returns null rather than throwing, so this is defense-in-depth for
+    // failures at the dynamic-import level (scriptRunner.js failing to
+    // load) or unhandled rejection inside the inner promise chain.
+    _lastTempStatus = null;
     _tempsInFlight = null;
     return null;
   });
@@ -93,12 +140,20 @@ async function readTemperaturesCached(): Promise<{ cpu_temp_c?: number; gpu_temp
 
 /**
  * v2.4.29: fetch current temperature readings for trend recording.
- * Returns { cpu_temp_c, gpu_temp_c } where each may be undefined when
- * the live path is unavailable (CPU needs admin + no cache yet; no
- * NVIDIA GPU). The function never throws - all failures degrade to
- * undefined so the scanner's other metrics still record.
+ * Returns { cpu_temp_c, gpu_temp_c, source, from_cache, lhm_http_open }
+ * where the temperature numbers may be undefined when the live path is
+ * unavailable (CPU needs admin + no cache yet; no NVIDIA GPU). The
+ * function never throws - all failures degrade to undefined so the
+ * scanner's other metrics still record.
+ *
+ * v2.5.2: source/from_cache/lhm_http_open lifted from the PS payload
+ * so the renderer can surface a "Remote Web Server is off" banner.
+ * Defaults are conservative: source='none', from_cache=false,
+ * lhm_http_open=false — matches what the scanner returns when LHM is
+ * unreachable AND the cache is stale (i.e. the worst case the banner
+ * is meant to flag).
  */
-async function readTemperaturesBestEffort(): Promise<{ cpu_temp_c?: number; gpu_temp_c?: number } | null> {
+async function readTemperaturesBestEffort(): Promise<TempsRead | null> {
   try {
     const { runPowerShellScript } = await import('./scriptRunner.js');
     const r = await runPowerShellScript<any>('Get-Temperatures.ps1', ['-JsonOutput'], { timeoutMs: 10_000 });
@@ -112,7 +167,10 @@ async function readTemperaturesBestEffort(): Promise<{ cpu_temp_c?: number; gpu_
     const gpuTemp = gpuList.length > 0 && typeof gpuList[0].temp_c === 'number'
       ? gpuList[0].temp_c
       : undefined;
-    return { cpu_temp_c: cpuTemp, gpu_temp_c: gpuTemp };
+    const source = typeof r?.cpu?.source === 'string' ? r.cpu.source : 'none';
+    const fromCache = r?.cpu?.from_cache === true;
+    const lhmHttpOpen = r?.lhm_http_open === true;
+    return { cpu_temp_c: cpuTemp, gpu_temp_c: gpuTemp, source, from_cache: fromCache, lhm_http_open: lhmHttpOpen };
   } catch {
     return null;
   }
@@ -340,6 +398,16 @@ async function getStatusInner(): Promise<SystemStatus> {
 
   const tMapStart = performance.now();
   const status = mapToSystemStatus(parsed);
+  // v2.5.2: attach the latest known LHM source status so the renderer
+  // can render the "Remote Web Server is off" banner. Undefined on
+  // cold-launch ticks before the first temp pipeline read resolves.
+  if (_lastTempStatus) {
+    status.cpu_temp_status = {
+      source: _lastTempStatus.source,
+      from_cache: _lastTempStatus.from_cache,
+      lhm_http_open: _lastTempStatus.lhm_http_open,
+    };
+  }
   tMap = performance.now() - tMapStart;
   // Persist snapshot for trend tracking (best-effort, non-fatal)
   try {
@@ -381,13 +449,22 @@ async function getStatusInner(): Promise<SystemStatus> {
   // (if any) is actually slow during window resize. total, read, parse,
   // map, snapshot are synchronous-path timings; temp read + notifier
   // are fire-and-forget and not counted here.
+  // v2.5.2: include the latest temp source status so a post-mortem on
+  // CPU temp gaps in the trend chart can pinpoint when LHM HTTP went
+  // unreachable. The status comes from the prior fire-and-forget
+  // readTemperaturesCached invocation; cold-launch first tick will
+  // log empty.
   const tTotal = performance.now() - tStart;
+  const ts = _lastTempStatus;
   void writePerfLine('getStatus', tTotal, {
     read_ms: Math.round(tRead * 100) / 100,
     parse_ms: Math.round(tParse * 100) / 100,
     map_ms: Math.round(tMap * 100) / 100,
     snapshot_ms: Math.round(tSnapshot * 100) / 100,
     findings: status.findings.length,
+    cpu_temp_source: ts ? ts.source : 'unknown',
+    cpu_temp_from_cache: ts ? ts.from_cache : false,
+    lhm_http_open: ts ? ts.lhm_http_open : false,
   });
   return status;
 }

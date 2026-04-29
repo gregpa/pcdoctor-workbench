@@ -30,8 +30,13 @@ export function SmartTable({ entries, onRunSmartCheck, onRowClick }: SmartTableP
     ? 'px-2 py-0.5 rounded text-[10px] bg-status-warn/15 border border-status-warn/40 text-status-warn hover:bg-status-warn/25'
     : 'px-2 py-0.5 rounded text-[10px] pcd-button text-text-secondary hover:text-text-primary hover:border-surface-500';
   const buttonLabel = anyNeedsAdmin ? '💾 Run SMART Check (admin)' : '🔄 Refresh SMART (admin)';
+  // v2.5.2: when rows are clickable, the panel acts as the click-target
+  // affordance area — pcd-panel-interactive gives it the violet glow on
+  // hover that matches every other clickable tile on the dashboard.
+  // Read-only embeds (no onRowClick) stay static.
+  const panelClass = onRowClick ? 'pcd-panel pcd-panel-interactive' : 'pcd-panel';
   return (
-    <div className="pcd-panel">
+    <div className={panelClass}>
       <div className="flex items-center justify-between mb-2">
         <div className="text-[9.5px] uppercase tracking-wider text-text-secondary">Disk SMART Health</div>
         {onRunSmartCheck && (

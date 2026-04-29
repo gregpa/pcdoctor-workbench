@@ -58,7 +58,7 @@ export function ServicePill({ service, onClick }: ServicePillProps) {
   return (
     <Wrapper
       {...(clickable ? { onClick: () => onClick!(service), type: 'button' } : {})}
-      className={`bg-surface-900 border border-surface-600 rounded-md p-2 text-left w-full ${clickable ? 'hover:border-status-info/40 cursor-pointer transition' : ''}`}
+      className={`bg-surface-900 border border-surface-600 rounded-md p-2 text-left w-full ${clickable ? 'pcd-panel-interactive cursor-pointer transition-colors transition-shadow' : ''}`}
       title={clickable ? 'Click for actions' : undefined}
     >
       <div className="flex items-start gap-1.5 mb-0.5">

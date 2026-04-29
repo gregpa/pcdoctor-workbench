@@ -330,6 +330,12 @@ $payload = [ordered]@{
     success      = $true
     duration_ms  = $sw.ElapsedMilliseconds
     generated_at = [int64](([DateTimeOffset](Get-Date)).ToUnixTimeSeconds())
+    # v2.5.2: lhm_http_open lifted into the payload so the bridge can
+    # surface a "Remote Web Server is off" banner in the Dashboard when
+    # the LHM toggle gets flipped (Greg lost a chunk of CPU temp trend
+    # on 2026-04-29 because the Options -> Remote Web Server -> Run
+    # toggle silently came off across a non-clean shutdown).
+    lhm_http_open = $lhmHttpOpen
     cpu          = [ordered]@{
         zones       = $cpuZones
         needs_admin = $cpuNeedsAdmin

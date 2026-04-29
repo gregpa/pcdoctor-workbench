@@ -108,6 +108,10 @@ const api = {
       ipcRenderer.send('api:logRenderPerf', { phase, duration_ms: durationMs, extra });
     } catch { /* telemetry must never throw */ }
   },
+  // v2.5.2: launch LibreHardwareMonitor from the Dashboard "Remote Web
+  // Server is off" banner. Main-side resolves the install path via
+  // hardcoded WinGet default + glob fallback + live Get-Process lookup.
+  openLhm: (): Promise<IpcResult<{ path: string }>> => ipcRenderer.invoke('api:openLhm'),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

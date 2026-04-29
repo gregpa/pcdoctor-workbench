@@ -61,7 +61,7 @@ export function History() {
               const statusColor = e.reverted_at ? 'text-text-secondary' : e.status === 'success' ? 'text-status-good' : e.status === 'error' ? 'text-status-crit' : 'text-status-info';
               const canRevert = !e.reverted_at && e.rollback_id && e.status === 'success';
               return (
-                <div key={e.id} className="flex items-center gap-3 bg-surface-800 border border-surface-600 rounded-md p-2.5 text-xs hover:border-status-info/40 cursor-pointer transition" onClick={() => setDetailItem(e)}>
+                <div key={e.id} className="flex items-center gap-3 bg-surface-800 border border-surface-600 rounded-md p-2.5 text-xs pcd-panel-interactive cursor-pointer transition-colors transition-shadow" onClick={() => setDetailItem(e)}>
                   <span className={`text-base w-5 ${statusColor}`}>{status}</span>
                   <span className="text-text-secondary w-20">{time}</span>
                   <span className="flex-1 font-semibold">{e.action_label}</span>

@@ -47,7 +47,10 @@ export function TrendBar({ title, trend, warnAt, critAt, height = 120, onExpand,
   const clickable = typeof onExpand === 'function';
   return (
     <div
-      className={`pcd-panel ${clickable ? 'cursor-pointer hover:border-status-info/60 transition-colors' : ''}`}
+      // v2.5.2: pcd-panel-interactive replaces ad-hoc hover:border-status-info/60
+      // so the click affordance matches the violet-glow used by every other
+      // clickable dashboard tile post-v2.5.0 (was cyan-tinted, now consistent).
+      className={`pcd-panel ${clickable ? 'pcd-panel-interactive cursor-pointer' : ''}`}
       onClick={clickable ? onExpand : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onExpand!(); } } : undefined}
       role={clickable ? 'button' : undefined}

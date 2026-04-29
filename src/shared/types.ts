@@ -122,6 +122,28 @@ export interface SystemMetrics {
   startup_allowlist_count?: number;
 }
 
+/**
+ * v2.5.2: live status of the CPU temperature source pipeline.
+ *
+ * Populated from the most recent successful Get-Temperatures.ps1
+ * invocation (fire-and-forget after each getStatus). The renderer uses
+ * `lhm_http_open === false` to surface a Dashboard banner when the
+ * LHM Remote Web Server toggle has flipped off — observed 2026-04-29
+ * after a non-clean shutdown silently dropped the setting and Greg
+ * lost a half-day of CPU temp trend before noticing.
+ *
+ * Undefined on cold-launch before the first temp read resolves
+ * (~30s) — renderers should hide the banner until the field appears.
+ */
+export interface CpuTempStatus {
+  /** 'LibreHardwareMonitor HTTP' | 'LibreHardwareMonitor WMI' | 'MSAcpi_ThermalZoneTemperature' | 'cache' | 'none' */
+  source: string;
+  /** True when the live read failed and the panel is rendering a stale cache value (≤6h old). */
+  from_cache: boolean;
+  /** True when the TCP probe to 127.0.0.1:8085 succeeded this scan. False = LHM Remote Web Server is off OR LHM is not running. */
+  lhm_http_open: boolean;
+}
+
 export interface SystemStatus {
   generated_at: number; // unix seconds
   overall_severity: Severity;
@@ -133,6 +155,7 @@ export interface SystemStatus {
   services?: ServiceHealth[];
   smart?: SmartEntry[];
   metrics?: SystemMetrics;
+  cpu_temp_status?: CpuTempStatus;
 }
 
 // --- Actions ---

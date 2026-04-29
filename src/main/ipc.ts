@@ -1,4 +1,4 @@
-import { ipcMain, safeStorage, app } from 'electron';
+import { ipcMain, safeStorage, app, shell } from 'electron';
 import { readFile, readdir, unlink, copyFile, mkdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -1438,7 +1438,96 @@ export function registerIpcHandlers() {
       void writeRenderPerfLine(sanitized.phase, sanitized.duration, sanitized.extra);
     } catch { /* telemetry must never throw */ }
   });
+
+  // v2.5.2: open LibreHardwareMonitor when the Dashboard banner reports
+  // the Remote Web Server is unreachable. Greg's box has LHM installed
+  // via WinGet (folder hash suffix can change after updates), so we
+  // try a hardcoded path first, then fall back to discovery via
+  // Get-Process. shell.openPath routes through ShellExecuteW which
+  // brings an already-running LHM window to the foreground.
+  ipcMain.handle('api:openLhm', async (): Promise<IpcResult<{ path: string }>> => {
+    try {
+      const candidates = await resolveLhmCandidatePaths();
+      for (const candidate of candidates) {
+        if (existsSync(candidate)) {
+          const errMsg = await shell.openPath(candidate);
+          if (errMsg === '') {
+            return { ok: true, data: { path: candidate } };
+          }
+          // Try the next candidate if shell.openPath rejected this one
+          // (e.g. file exists but ACLs deny launch).
+        }
+      }
+      return { ok: false, error: { code: 'E_LHM_NOT_FOUND', message: 'LibreHardwareMonitor.exe could not be located. Install via WinGet (LibreHardwareMonitor.LibreHardwareMonitor) or set the path manually.' } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to open LHM' } };
+    }
+  });
 }
+
+/**
+ * v2.5.2: build an ordered list of candidate LHM exe paths to try.
+ *
+ * Order:
+ *   1. Greg's WinGet install (current at v2.5.2 ship date).
+ *   2. The same WinGet folder pattern with any version-suffix (glob the
+ *      _Microsoft.Winget.Source_8wekyb3d8bbwe* parent so a future
+ *      LHM update doesn't break the link).
+ *   3. Standard Program Files install path.
+ *   4. Live Get-Process LibreHardwareMonitor lookup — the most-correct
+ *      answer when LHM is actually running.
+ */
+async function resolveLhmCandidatePaths(): Promise<string[]> {
+  const out: string[] = [];
+  // v2.5.2 (code-reviewer W3): the previous version hardcoded
+  // `C:\Users\greg_\...` as candidate 0. That dead-misses on every other
+  // user account, so we use `app.getPath('home')` instead — which on
+  // Windows resolves to %USERPROFILE% (correct for any logged-in user).
+  // Greg's box still hits because his home is C:\Users\greg_.
+  const wingetDefault = path.join(
+    app.getPath('home'),
+    'AppData', 'Local', 'Microsoft', 'WinGet', 'Packages',
+    'LibreHardwareMonitor.LibreHardwareMonitor_Microsoft.Winget.Source_8wekyb3d8bbwe',
+    'LibreHardwareMonitor.exe',
+  );
+  out.push(wingetDefault);
+
+  // WinGet folder hash usually stays stable but the folder can carry a
+  // version suffix on newer manifests. Scan the WinGet packages dir for
+  // any LibreHardwareMonitor* folder that contains the .exe.
+  try {
+    const wingetParent = path.join(app.getPath('home'), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Packages');
+    if (existsSync(wingetParent)) {
+      const entries = await readdir(wingetParent);
+      for (const dir of entries) {
+        if (!dir.startsWith('LibreHardwareMonitor')) continue;
+        const cand = path.join(wingetParent, dir, 'LibreHardwareMonitor.exe');
+        if (cand !== wingetDefault) out.push(cand);
+      }
+    }
+  } catch { /* directory walk failures are non-fatal — we fall through */ }
+
+  out.push('C:\\Program Files\\LibreHardwareMonitor\\LibreHardwareMonitor.exe');
+
+  // Live process lookup. Cheaper than spawning powershell — wmic is
+  // legacy but still installed on Windows 11 home builds; we don't
+  // depend on it being present.
+  try {
+    const r = await pExecFile('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      "(Get-Process LibreHardwareMonitor -ErrorAction SilentlyContinue | Select-Object -First 1).Path",
+    ], { timeout: 3000 });
+    const live = (r.stdout || '').trim();
+    if (live && existsSync(live)) out.push(live);
+  } catch { /* no running LHM process is the expected case here */ }
+
+  return out;
+}
+
+/** v2.5.2: test hook -- exposes resolveLhmCandidatePaths for unit tests.
+ *  Callers mock electron/app, node:fs, node:fs/promises, and node:child_process
+ *  to drive candidate-list scenarios without spawning real processes. */
+export const _resolveLhmCandidatePathsForTests = resolveLhmCandidatePaths;
 
 /** Pure validation helper for the api:logRenderPerf IPC payload. Exported for unit testing. */
 export function sanitizeRenderPerfInput(raw: unknown): {

@@ -300,7 +300,7 @@ export function Dashboard() {
       {weeklyReview?.has_pending_flag && (
         <div
           onClick={() => navigate('/weekly-review')}
-          className="mb-3 p-3 bg-status-info/10 border border-status-info/40 rounded-lg cursor-pointer hover:border-status-info/60 flex items-center justify-between gap-3 transition"
+          className="mb-3 p-3 bg-status-info/10 border border-status-info/40 rounded-lg cursor-pointer pcd-panel-interactive flex items-center justify-between gap-3 transition-colors transition-shadow"
         >
           <div className="flex items-center gap-2">
             <span>📋</span>
@@ -370,6 +370,62 @@ export function Dashboard() {
             Server, manual seeding is redundant -- the cache self-
             populates on every scanner tick. */}
       </div>
+      {/* v2.5.2: LHM Remote Web Server health banner. Surfaces above the
+          temp trend tiles when the live source pipeline reports the
+          web server as unreachable so the user knows why CPU temp is
+          stale instead of staring at a flat line in the trend.
+          Hidden on cold launch (cpu_temp_status undefined) and when LHM
+          HTTP is healthy. Click "Open LHM" → main-side IPC tries the
+          WinGet path + Get-Process fallback. */}
+      {status?.cpu_temp_status && status.cpu_temp_status.lhm_http_open === false && (() => {
+        // v2.5.2 (output-validator WARN2): describe the actual state of
+        // the source pipeline rather than always saying "unavailable":
+        //   - source='LibreHardwareMonitor WMI' or 'MSAcpi_*' → live
+        //     fallback path is working, banner is just nudging the user
+        //     to re-enable HTTP for fewer admin prompts.
+        //   - from_cache=true → live failed, panel is showing 6h cache.
+        //   - source='none' → no live path AND cache stale or absent.
+        const src = status.cpu_temp_status.source;
+        const fromCache = status.cpu_temp_status.from_cache;
+        const livefallback = src !== 'none' && src !== 'cache' && src !== 'LibreHardwareMonitor HTTP' && !fromCache;
+        const detailCopy = livefallback
+          ? `CPU temps are still flowing via ${src} fallback (slower / may need admin). Re-enabling HTTP gives faster non-admin reads.`
+          : fromCache
+            ? 'CPU temp readings are showing a cached value (≤6 h old).'
+            : 'CPU temp readings are unavailable.';
+        return (
+        <div className="mb-3 p-3 bg-status-warn/10 border border-status-warn/40 rounded-lg flex items-start justify-between gap-3 transition-colors transition-shadow">
+          <div className="flex items-start gap-2 flex-1">
+            <span className="text-status-warn">⚠</span>
+            <div className="text-[12px]">
+              <div className="font-semibold text-status-warn">LHM Remote Web Server is off</div>
+              <div className="text-text-secondary mt-0.5">
+                {detailCopy} In LibreHardwareMonitor: <span className="font-semibold">Options → Remote Web Server → Run</span>.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const r = await window.api.openLhm();
+                if (!r.ok) {
+                  // eslint-disable-next-line no-alert
+                  alert(`Could not open LHM: ${r.error?.message ?? 'unknown'}`);
+                }
+              } catch (err) {
+                // eslint-disable-next-line no-alert
+                alert(`Could not open LHM: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }}
+            className="px-3 py-1 rounded-md text-[11px] pcd-button text-text-primary self-start whitespace-nowrap"
+            title="Bring LibreHardwareMonitor to the foreground (or launch it if not running)."
+          >
+            Open LHM
+          </button>
+        </div>
+        );
+      })()}
       {/* v2.4.39 (B45): trend charts need width to be legible -- stack below
           lg rather than squeezing 3-up too narrow. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">

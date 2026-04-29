@@ -55,7 +55,10 @@ export function TrendLine({ title, trend, severity = 'info', height = 120, yDoma
         // instead of letting Chromium walk the whole Dashboard tree on
         // every resize pixel. The SVG uses viewBox + w-full so paint
         // containment is safe (nothing escapes the tile).
-        className: 'pcd-panel cursor-pointer hover:border-surface-500 transition-colors group',
+        // v2.5.2: pcd-panel-interactive replaces ad-hoc hover:border-surface-500
+        // so this matches the canonical violet-glow affordance used by
+        // every other clickable dashboard tile post-v2.5.0.
+        className: 'pcd-panel pcd-panel-interactive cursor-pointer group',
         onClick: onExpand,
         role: 'button' as const,
         tabIndex: 0,
