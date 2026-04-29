@@ -84,7 +84,7 @@ export function Forecast() {
 
       <div className="space-y-3">
         {data.projections.map((p) => (
-          <div key={p.metric} className={`border rounded-lg p-4 ${severityClasses(p.severity)}`}>
+          <div key={p.metric} className={`pcd-panel pcd-panel-interactive ${severityClasses(p.severity)}`}>
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">

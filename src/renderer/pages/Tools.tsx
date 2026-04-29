@@ -21,7 +21,7 @@ function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpg
   const installed = status?.installed ?? false;
 
   return (
-    <div className={`bg-surface-900 border rounded-lg p-3 flex flex-col gap-2 relative h-full ${upgrade ? 'border-status-warn/50' : 'border-surface-600'}`}>
+    <div className={`pcd-panel flex flex-col gap-2 relative h-full ${upgrade ? 'border-status-warn/50' : ''}`}>
       {upgrade && (
         <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-status-warn/20 text-status-warn border border-status-warn/40">
           Update
@@ -87,7 +87,7 @@ function ToolTile({ def, status, installing, upgrade, onLaunch, onInstall, onUpg
                   ▶ Launch ▾
                 </button>
                 {showModes && (
-                  <div className="absolute top-full mt-1 left-0 right-0 bg-surface-800 border border-surface-600 rounded-md shadow-xl z-10">
+                  <div className="absolute top-full mt-1 left-0 right-0 pcd-modal z-10">
                     {def.launch_modes.map(m => (
                       <button
                         key={m.id}
@@ -321,7 +321,7 @@ export function Tools() {
         </div>
       </div>
 
-      <div className="mb-4 bg-surface-800 border border-surface-600 rounded-lg p-3">
+      <div className="mb-4 pcd-panel">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[11px] font-semibold">📊 Import HWiNFO CSV</div>
@@ -351,11 +351,11 @@ export function Tools() {
       </div>
 
       {recentResults.length > 0 && (
-        <div className="mb-4 bg-surface-800 border border-surface-600 rounded-lg p-3">
+        <div className="mb-4 pcd-panel">
           <div className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold mb-2">Recent Tool Results ({recentResults.length})</div>
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {recentResults.map((r) => (
-              <div key={r.id} className="flex items-start gap-3 p-2 rounded-md bg-surface-900 border border-surface-700 text-[11px]">
+              <div key={r.id} className="flex items-start gap-3 p-2 rounded-md bg-surface-700 border border-surface-600 text-[11px] pcd-panel-interactive transition-colors transition-shadow">
                 <span className="text-[9px] px-2 py-0.5 rounded bg-surface-700 text-text-secondary font-semibold">{r.tool_id.toUpperCase()}</span>
                 <div className="flex-1 min-w-0">
                   <div className="text-text-secondary">{new Date(r.ts).toLocaleString()}</div>

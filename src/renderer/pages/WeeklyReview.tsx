@@ -43,7 +43,7 @@ export function WeeklyReview() {
     return (
       <div className="p-6">
         <h1 className="text-lg font-bold mb-4">📋 Weekly Review</h1>
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-4 text-sm text-text-secondary">
+        <div className="pcd-panel p-4 text-sm text-text-secondary">
           No weekly review available yet. Auto-runs Sunday 10 PM. Run manually:
           <code className="block bg-surface-900 p-2 rounded mt-2 text-xs">
             pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Invoke-WeeklyReview.ps1"
@@ -111,7 +111,7 @@ export function WeeklyReview() {
         </div>
       </div>
 
-      <div className="mb-4 bg-surface-800 border border-surface-600 rounded-lg p-3 flex items-center gap-4">
+      <div className="mb-4 pcd-panel flex items-center gap-4">
         <div className="flex-1">
           <div className="text-[10px] uppercase tracking-wider text-text-secondary">Progress</div>
           <div className="mt-1 h-2 bg-surface-900 rounded-full overflow-hidden">
@@ -157,7 +157,7 @@ export function WeeklyReview() {
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">📊 Headroom & Trends</h2>
         <div className="grid grid-cols-2 gap-2">
           {Object.entries(review.headroom).map(([k, v]) => (
-            <div key={k} className="bg-surface-800 border border-surface-600 rounded-md p-3 text-sm">
+            <div key={k} className="pcd-panel text-sm">
               <div className="text-[10px] uppercase tracking-wider text-text-secondary">{k.replace(/_/g, ' ')}</div>
               <div className="mt-0.5 text-text-primary">{v}</div>
             </div>
@@ -182,7 +182,7 @@ function Item({ item, onApply, onState, running }: {
 }) {
   const done = item.state === 'applied' || item.state === 'dismissed' || item.state === 'auto_resolved';
   return (
-    <div className={`border rounded-lg p-3 text-sm ${priorityClasses(item.priority)} flex justify-between items-start gap-3 ${done ? 'opacity-50' : ''}`}>
+    <div className={`pcd-panel pcd-panel-interactive text-sm ${priorityClasses(item.priority)} flex justify-between items-start gap-3 ${done ? 'opacity-50' : ''}`}>
       <div className="flex-1">
         <div className="font-semibold mb-1 flex items-center gap-2">
           <span>{priIcon(item.priority)}</span>

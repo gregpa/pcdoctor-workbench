@@ -46,7 +46,7 @@ export function MemTest86() {
       body: (
         <div>
           <p className="mb-2">Once Rufus finishes, reboot the PC and press the boot-menu key to select the USB.</p>
-          <div className="bg-surface-900 border border-surface-700 rounded-md p-3 text-[11px]">
+          <div className="pcd-panel text-[11px]">
             <div><strong>Alienware Aurora R11:</strong> Press <code>F12</code> right after power-on. Select your USB from the boot menu.</div>
             <div className="mt-1">Other common keys: Dell=F12, HP=F9, Lenovo=F12, ASUS=F8.</div>
           </div>

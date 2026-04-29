@@ -126,7 +126,7 @@ export function Updates() {
       )}
 
       {data.pending_count > 0 && (
-        <div className="mb-4 p-3 bg-surface-800 border border-surface-600 rounded-lg flex items-center gap-3">
+        <div className="mb-4 pcd-panel flex items-center gap-3">
           <div className="flex-1 text-sm">Ready to install. Creates a restore point first.</div>
           {securityKbs.length > 0 && (
             <button onClick={() => install('install_security_updates')} disabled={running !== null} className="px-3 py-1.5 rounded-md bg-status-warn text-black text-xs font-bold disabled:opacity-50">
@@ -142,13 +142,13 @@ export function Updates() {
       <section className="mb-5">
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Pending Updates</h2>
         {data.pending.length === 0 ? (
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-4 text-sm text-text-secondary">
+          <div className="pcd-panel p-4 text-sm text-text-secondary">
             ✓ System is up to date.
           </div>
         ) : (
           <div className="space-y-1.5">
             {data.pending.map((u, i) => (
-              <div key={i} className={`flex items-center gap-3 p-3 rounded-md text-xs ${u.is_security ? 'bg-status-warn/10 border border-status-warn/40' : 'bg-surface-800 border border-surface-600'}`}>
+              <div key={i} className={`pcd-panel pcd-panel-interactive flex items-center gap-3 text-xs ${u.is_security ? 'bg-status-warn/10 border-status-warn/40' : ''}`}>
                 {u.is_security && <span className="text-[9px] px-2 py-0.5 rounded bg-status-warn/30 text-status-warn font-bold">SECURITY</span>}
                 {u.kb && <span className="text-[10px] font-mono text-text-secondary">{u.kb}</span>}
                 <div className="flex-1">
@@ -164,7 +164,7 @@ export function Updates() {
 
       <section>
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Recently Installed (last 50)</h2>
-        <div className="bg-surface-800 border border-surface-600 rounded-lg max-h-80 overflow-y-auto">
+        <div className="pcd-panel max-h-80 overflow-y-auto !p-0">
           {data.installed_last_50.length === 0 ? (
             <div className="p-4 text-xs text-text-secondary">No install history available</div>
           ) : (
@@ -180,7 +180,7 @@ export function Updates() {
 
       <section className="mt-6">
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Feature Upgrade Readiness</h2>
-        <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
+        <div className="pcd-panel p-4">
           {!readiness ? (
             <button onClick={checkReadiness} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">
               Check Readiness
@@ -207,7 +207,7 @@ export function Updates() {
       <section className="mt-6">
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Driver Updates</h2>
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
+          <div className="pcd-panel p-4">
             <div className="font-semibold text-sm mb-1">🎮 Nvidia</div>
             {!nvInfo ? (
               <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs pcd-button">Check Latest Version</button>
@@ -220,7 +220,7 @@ export function Updates() {
               </div>
             )}
           </div>
-          <div className="bg-surface-800 border border-surface-600 rounded-lg p-4">
+          <div className="pcd-panel p-4">
             <div className="font-semibold text-sm mb-1">💻 Dell Command Update</div>
             <p className="text-[11px] text-text-secondary mb-2">Alienware-specific updates (BIOS, chipset, GPU). Requires the Dell Command | Update app.</p>
             <button onClick={() => install('run_dell_command_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50">Run Dell Scan + Apply</button>

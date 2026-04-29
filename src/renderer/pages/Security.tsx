@@ -250,7 +250,7 @@ export function Security() {
           ) : (
             <div className="space-y-1 max-h-80 overflow-y-auto">
               {data.persistence_items.slice(0, 50).map((p) => (
-                <div key={p.identifier} className={`flex items-center gap-2 text-xs p-2 rounded-md ${p.is_new ? 'bg-status-warn/10 border border-status-warn/30' : 'bg-surface-900 border border-surface-700'}`}>
+                <div key={p.identifier} className={`flex items-center gap-2 text-xs p-2 rounded-md pcd-panel-interactive transition-colors transition-shadow ${p.is_new ? 'bg-status-warn/10 border border-status-warn/30' : 'bg-surface-700 border border-surface-600'}`}>
                   <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface-700 text-text-secondary uppercase">{p.kind}</span>
                   {p.is_new && <span className="text-[9px] px-1.5 py-0.5 rounded bg-status-warn/30 text-status-warn font-semibold">NEW</span>}
                   <div className="flex-1 min-w-0">
@@ -451,7 +451,7 @@ export function Security() {
           ) : (
             <div className="space-y-2">
               {data.bitlocker.map(v => (
-                <div key={v.drive} className="bg-surface-900 border border-surface-700 rounded-md p-3">
+                <div key={v.drive} className="pcd-panel">
                   <div className="font-semibold">Drive {v.drive}</div>
                   <div>Status: <strong className={v.protection_on ? 'text-status-good' : 'text-status-warn'}>{v.status}</strong></div>
                   <div>Protection: <strong>{v.protection_on ? 'On' : 'Off'}</strong></div>
