@@ -48,11 +48,58 @@ if (-not (Test-Path $SourceDir)) {
     exit 1
 }
 
-# Walk the bundle and compare each .ps1 to its deployed counterpart.
+# v2.5.12 (B11): explicit allowlist of non-.ps1 sidecar files that ship in
+# the bundle and must be hash-compared + synced like the .ps1 scripts. Pre-
+# v2.5.12 the bundle-sync filter was `*.ps1` only, so config-sidecar JSON
+# files (event-allowlist.json) were deployed once at install time and never
+# refreshed -- v2.5.11's new SCM 7034 entry sat dormant on Greg's box. Fix
+# is to union the .ps1 walk with this explicit list. New sidecar files opt
+# in deliberately (one line per file) so user-editable sidecars (NAS config,
+# Startup config -- written by the app's settings UI) are NOT bundle-synced
+# and don't get clobbered.
+#
+# Path convention: top-level filenames resolve under powershell/. For a
+# subdirectory sidecar use a relative path with backslash (e.g.
+# 'security\rules.json') -- the gate test-bundle-sync-coverage.ps1 uses
+# Join-Path which handles relative segments correctly, and the elevated
+# copy reconstructs the same relative path under DestDir.
+$bundledSidecars = @(
+    'event-allowlist.json'
+)
+
+# Walk the bundle and compare each tracked file to its deployed counterpart.
 $mismatches = @()
 $srcRootLen = $SourceDir.TrimEnd('\').Length + 1
 
-Get-ChildItem -Path $SourceDir -Recurse -File -Filter '*.ps1' | ForEach-Object {
+# Build the union: every .ps1 (recursive) PLUS the explicit sidecars (top-
+# level only by default; relative subpaths supported per the convention
+# above). $filesToCheck flows through ONE shared comparison loop so the
+# hash-compare / mismatch-flag / elevated-copy logic stays single-source.
+$filesToCheck = @()
+$filesToCheck += Get-ChildItem -Path $SourceDir -Recurse -File -Filter '*.ps1'
+foreach ($side in $bundledSidecars) {
+    $sidePath = Join-Path $SourceDir $side
+    if (-not (Test-Path $sidePath)) { continue }
+    # v2.5.12 (W2): wrap Get-Item in try/catch. Test-Path can return $true
+    # for a sidecar whose ACL allows directory listing but not ReadAttributes
+    # -- Get-Item then throws "Access is denied" and (under -EA Continue)
+    # leaves $null in the array, which $_.FullName later trips into
+    # E_PS_UNHANDLED via the top-level trap. Synthesize a mismatch instead
+    # so the elevated path repairs the file (mirrors lines 127-135's
+    # unreadable-destination handling).
+    try {
+        $filesToCheck += Get-Item -LiteralPath $sidePath -EA Stop
+    } catch {
+        $mismatches += [pscustomobject]@{
+            rel   = $side
+            src   = -1
+            dst   = -2
+            cause = 'sidecar_unreadable'
+        }
+    }
+}
+
+$filesToCheck | ForEach-Object {
     $rel = $_.FullName.Substring($srcRootLen)
     # v2.4.10: reject traversal. A tampered bundle containing a symlink or
     # file named `..\..\Windows\System32\evil.ps1` would otherwise have its
@@ -116,7 +163,7 @@ if ($mismatches.Count -eq 0) {
         success       = $true
         no_op         = $true
         duration_ms   = $sw.ElapsedMilliseconds
-        checked       = (Get-ChildItem -Path $SourceDir -Recurse -File -Filter '*.ps1').Count
+        checked       = $filesToCheck.Count
         needs_elevation = $false
         copied        = 0
         message       = 'All scripts in sync.'
@@ -131,7 +178,7 @@ if (-not $Elevated) {
         success         = $true
         no_op           = $false
         duration_ms     = $sw.ElapsedMilliseconds
-        checked         = (Get-ChildItem -Path $SourceDir -Recurse -File -Filter '*.ps1').Count
+        checked         = $filesToCheck.Count
         needs_elevation = $true
         mismatches      = $mismatches
         copied          = 0

@@ -1,6 +1,6 @@
 {
     "name":  "pcdoctor-workbench",
-    "version":  "2.5.11",
+    "version":  "2.5.12",
     "engines":  {
                     "node":  "\u003e=17.3.0"
                 },
@@ -19,6 +19,7 @@
                     "test":  "vitest run",
                     "test:watch":  "vitest",
                     "test:tasks":  "powershell.exe -ExecutionPolicy Bypass -File scripts/test-task-registration.ps1",
+                    "test:bundle-sync":  "powershell.exe -ExecutionPolicy Bypass -File scripts/test-bundle-sync-coverage.ps1",
                     "lint":  "eslint src --ext .ts,.tsx"
                 },
     "dependencies":  {
