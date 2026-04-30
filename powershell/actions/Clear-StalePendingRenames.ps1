@@ -97,7 +97,8 @@ $benignPatterns = @(
     # v2.5.11 (B9): Edge auto-updater old-version directory removal.
     # Pending until the EdgeUpdate service idles long enough; on
     # always-on boxes that never happens.
-    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
+    # v2.5.15: relaxed to {3,4} components for parity with scanner.
+    '\\Microsoft\\EdgeUpdate\\\d+(?:\.\d+){2,3}(?:\\|$)'
 )
 
 $raw = $null

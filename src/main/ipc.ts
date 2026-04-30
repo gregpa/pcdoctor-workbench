@@ -55,6 +55,7 @@ import {
   listToolResults,
   getNasRecycleSizes, upsertNasRecycleSize,
 } from './dataStore.js';
+import { filterRendererSafeSettings } from './rendererSafeSettings.js';
 // v2.4.51 (B51-IPC-3): import the action registry so the rule-import validator
 // can enforce action_name ∈ KNOWN_ACTION_NAMES.
 import { ACTIONS as ACTIONS_INDEX } from '@shared/actions.js';
@@ -820,26 +821,11 @@ export function registerIpcHandlers() {
     try {
       const all = getAllSettings();
 
-      // Allow-list of keys that the renderer is permitted to read. Anything not matching
-      // is filtered out so that a new sensitive setting added later doesn't leak by default.
-      const RENDERER_SAFE_KEYS = new Set<string>([
-        'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
-        'quiet_hours_start', 'quiet_hours_end',
-        'email_digest_recipient', 'digest_hour',
-        'auto_block_rdp_bruteforce',
-        'telegram_last_good_ts', 'selftest_banner',
-        'obsidian_archive_dir',
-        // v2.5.9 (B4): Nvidia driver check cache (driver versions + epoch ms,
-        // no sensitive data). Written main-side by api:getNvidiaDriverLatest;
-        // read renderer-side on Updates.tsx mount to hydrate staleness UI.
-        'nvidia_check_cache',
-      ]);
-      const isSafeKey = (k: string) => RENDERER_SAFE_KEYS.has(k) || k.startsWith('event:');
-
-      const filtered: Record<string, string> = {};
-      for (const [k, v] of Object.entries(all)) {
-        if (isSafeKey(k)) filtered[k] = v;
-      }
+      // v2.5.15: filter logic extracted to src/main/rendererSafeSettings.ts
+      // so tests/main/rendererSafeSettings.test.ts can exercise it without
+      // the Electron app boot path. The v2.5.9 nvidia_check_cache bug
+      // (write-without-allowlist-add) is the regression class this guards.
+      const filtered = filterRendererSafeSettings(all);
 
       // Mask sensitive values - never return plaintext tokens to the renderer.
       for (const k of ['telegram_bot_token']) {

@@ -63,13 +63,20 @@ export function useStatus() {
       r.error.code === 'E_BRIDGE_CACHE_EMPTY' &&
       coldStartRetryCountRef.current < MAX_COLD_START_RETRIES
     ) {
-      coldStartRetryCountRef.current += 1;
       // Only one in-flight retry at a time -- clear any prior pending
       // retry before scheduling the next one. Prevents stacking when
       // refetch is called concurrently from usePoll + focus handler.
+      //
+      // v2.5.15 (W4 from code-reviewer): increment the counter INSIDE the
+      // timer callback, not at scheduling time. Concurrent callers (usePoll
+      // + focus event firing in the same retry window) each cancel and
+      // re-arm the SAME timer slot; if we incremented on every scheduling
+      // attempt the budget would burn down at 2x-Nx the rate of actual
+      // retry firings. Counter now tracks fired retries 1:1.
       if (coldStartRetryTimerRef.current) clearTimeout(coldStartRetryTimerRef.current);
       coldStartRetryTimerRef.current = setTimeout(() => {
         coldStartRetryTimerRef.current = null;
+        coldStartRetryCountRef.current += 1;
         void refetch();
       }, COLD_START_RETRY_MS);
     }

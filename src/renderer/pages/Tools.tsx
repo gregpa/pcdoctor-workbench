@@ -158,15 +158,15 @@ export function Tools() {
 
   useEffect(() => {
     (async () => {
-      const r = await (api as any).listToolResults?.();
-      if (r?.ok) setRecentResults(r.data);
+      const r = await api.listToolResults();
+      if (r.ok) setRecentResults(r.data);
     })();
   }, [statuses]);
 
   useEffect(() => {
     (async () => {
-      const r = await (api as any).getToolUpdates?.();
-      if (r?.ok) setToolUpdates({
+      const r = await api.getToolUpdates();
+      if (r.ok) setToolUpdates({
         checked_at: r.data.checked_at ?? null,
         upgrades: r.data.upgrades ?? [],
         winget_available: r.data.winget_available ?? null,
@@ -183,8 +183,8 @@ export function Tools() {
   async function onCheckUpdates() {
     setCheckingUpdates(true);
     setToast('Checking for tool updates via winget...');
-    const r = await (api as any).refreshToolUpdates?.();
-    if (r?.ok) {
+    const r = await api.refreshToolUpdates();
+    if (r.ok) {
       setToolUpdates({
         checked_at: r.data.checked_at ?? null,
         upgrades: r.data.upgrades ?? [],
@@ -192,7 +192,7 @@ export function Tools() {
       });
       setToast(`${r.data.count ?? 0} update(s) available`);
     } else {
-      setToast(`Check failed: ${r?.error?.message ?? 'unknown'}`);
+      setToast(`Check failed: ${r.error.message}`);
     }
     setCheckingUpdates(false);
     setTimeout(() => setToast(null), 6000);
@@ -201,20 +201,20 @@ export function Tools() {
   async function onUpgrade(wingetId: string, toolName: string) {
     setUpgrading(s => new Set(s).add(wingetId));
     setToast(`Upgrading ${toolName} via winget...`);
-    const r = await (api as any).upgradeTool?.(wingetId);
+    const r = await api.upgradeTool(wingetId);
     setUpgrading(s => { const n = new Set(s); n.delete(wingetId); return n; });
-    if (r?.ok) {
+    if (r.ok) {
       setToast(`${toolName} upgraded`);
       // Refresh cache so the badge disappears.
-      const fresh = await (api as any).getToolUpdates?.();
-      if (fresh?.ok) setToolUpdates({
+      const fresh = await api.getToolUpdates();
+      if (fresh.ok) setToolUpdates({
         checked_at: fresh.data.checked_at ?? null,
         upgrades: fresh.data.upgrades ?? [],
         winget_available: fresh.data.winget_available ?? null,
       });
       refresh();
     } else {
-      setToast(`Upgrade failed: ${r?.error?.message ?? 'unknown'}`);
+      setToast(`Upgrade failed: ${r.error.message}`);
     }
     setTimeout(() => setToast(null), 6000);
   }
@@ -225,12 +225,12 @@ export function Tools() {
     if (!confirm(`Upgrade all ${n} tools with pending updates via winget? Each fires a UAC prompt; total may take 5-20 minutes.`)) return;
     setBulkUpgrading(true);
     setToast(`Upgrading ${n} tools...`);
-    const r = await (api as any).upgradeAllTools?.();
+    const r = await api.upgradeAllTools();
     setBulkUpgrading(false);
-    if (r?.ok) {
+    if (r.ok) {
       setToast(`Upgraded ${r.data.upgraded_count ?? 0} / ${n} tools`);
-      const fresh = await (api as any).getToolUpdates?.();
-      if (fresh?.ok) setToolUpdates({
+      const fresh = await api.getToolUpdates();
+      if (fresh.ok) setToolUpdates({
         checked_at: fresh.data.checked_at ?? null,
         upgrades: fresh.data.upgrades ?? [],
         winget_available: fresh.data.winget_available ?? null,

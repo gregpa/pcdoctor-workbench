@@ -63,6 +63,19 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
+# v2.5.15: explicitly import the security module that exports Get-Acl. The
+# installer invokes this script via `powershell.exe -NoProfile -File`
+# (Windows PowerShell 5.1, NOT pwsh 7), and on boxes with Controlled Folder
+# Access / Defender ASR / similar guards, PowerShell's automatic module
+# auto-load can fail with `CouldNotAutoloadMatchingModule`. That produced
+# 265 lines of "module could not be loaded" spam during install on Greg's
+# box (and would silently fail the verification on any user with similar
+# guards). Pre-importing eliminates the auto-load attempt + spam, and
+# `-EA SilentlyContinue` keeps it non-fatal if even the explicit import
+# is blocked -- the subsequent Get-Acl calls already use -EA SilentlyContinue
+# so they degrade gracefully if the module truly is unavailable.
+Import-Module Microsoft.PowerShell.Security -EA SilentlyContinue
+
 $sidUsers  = 'S-1-5-32-545'     # BUILTIN\Users
 $sidAdmins = 'S-1-5-32-544'     # BUILTIN\Administrators
 $sidSystem = 'S-1-5-18'         # NT AUTHORITY\SYSTEM

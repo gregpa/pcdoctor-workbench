@@ -54,12 +54,18 @@ if ($src -notmatch $pattern) {
 }
 $arrayBody = $Matches[1]
 
-# Pull single-quoted entries; ignore commented-out lines (#) and blanks.
+# Pull single- OR double-quoted entries; ignore commented-out lines (#) and blanks.
+# v2.5.15: previously matched only single-quoted entries, which was a latent
+# coverage gap -- a future contributor using PowerShell double-quote string
+# syntax would silently slip past this gate (gate would report 0 sidecars
+# tracked instead of the real count). Match both quote styles.
 $sidecars = @()
 foreach ($line in ($arrayBody -split "`r?`n")) {
     $trimmed = $line.Trim()
     if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
     if ($trimmed -match "^'([^']+)'") {
+        $sidecars += $Matches[1]
+    } elseif ($trimmed -match '^"([^"]+)"') {
         $sidecars += $Matches[1]
     }
 }

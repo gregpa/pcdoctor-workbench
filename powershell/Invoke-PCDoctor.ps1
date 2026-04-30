@@ -421,7 +421,11 @@ $pfroBenignPatterns = @(
     # Pending until the EdgeUpdate service idles long enough; on
     # always-on boxes that never happens. Each Edge update queues a
     # new entry for the prior version dir.
-    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
+    # v2.5.15: pattern relaxed to {3,4} components. Edge has historically
+    # used 4-component versions, but the EdgeUpdate service itself has
+    # occasionally shipped 3-component internal versions (1.3.229).
+    # `(?:\.\d+){2,3}` matches 3- or 4-component version dirs.
+    '\\Microsoft\\EdgeUpdate\\\d+(?:\.\d+){2,3}(?:\\|$)'
 )
 $pfro = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue
 if ($pfro) {
@@ -1135,15 +1139,42 @@ $md -join "`n" | Out-File -FilePath $mdPath -Encoding UTF8
 # getStatus poll). NTFS Move-Item -Force = MoveFileExW with REPLACE_
 # EXISTING = atomic swap. Readers see either old content OR new
 # content, never an in-progress locked file.
+#
+# v2.5.15: ENOENT retry. Move-Item -Force on Windows has a documented
+# sub-millisecond race window where the source can briefly disappear
+# between rename internal phases (NTFS journal commit + path resolution),
+# producing a transient ENOENT. Wrap in a 3-attempt retry with 50ms
+# backoff. Hasn't been observed on Greg's box, but the race exists per
+# npm/write-file-atomic#227 and we'd rather not lose a scanner result
+# to a 1-in-1000 NTFS scheduling artifact.
+function Invoke-AtomicMove {
+    param([string]$SourceTmp, [string]$Destination)
+    $attempts = 3
+    for ($i = 1; $i -le $attempts; $i++) {
+        try {
+            Move-Item -LiteralPath $SourceTmp -Destination $Destination -Force -ErrorAction Stop
+            return
+        } catch [System.Management.Automation.ItemNotFoundException] {
+            # Source vanished mid-rename. Brief backoff then retry.
+            if ($i -eq $attempts) { throw }
+            Start-Sleep -Milliseconds 50
+        } catch {
+            # Any other error (locked dest, permission) -- propagate immediately;
+            # retrying won't help and we want loud failure on real bugs.
+            throw
+        }
+    }
+}
+
 $latestLink = Join-Path $OutDir 'latest.json'
 $latestTmp  = "$latestLink.tmp"
 Copy-Item -Path $jsonPath -Destination $latestTmp -Force
-Move-Item -LiteralPath $latestTmp -Destination $latestLink -Force
+Invoke-AtomicMove -SourceTmp $latestTmp -Destination $latestLink
 
 $latestMd    = Join-Path $OutDir 'latest.md'
 $latestMdTmp = "$latestMd.tmp"
 Copy-Item -Path $mdPath -Destination $latestMdTmp -Force
-Move-Item -LiteralPath $latestMdTmp -Destination $latestMd -Force
+Invoke-AtomicMove -SourceTmp $latestMdTmp -Destination $latestMd
 
 # Event log emit: severity-mapped entry so the run is visible in Event Viewer
 $evtLevel  = switch ($report.summary.overall) {

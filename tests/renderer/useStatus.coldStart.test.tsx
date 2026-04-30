@@ -160,4 +160,69 @@ describe('useStatus cold-start cache-empty retry (v2.5.13)', () => {
     expect(mockedGetStatus).toHaveBeenCalledTimes(4);
     expect(result.current.error).toBeNull();
   });
+
+  it('does not stack timers when concurrent callers fail with cache-empty', async () => {
+    // v2.5.15: simulate the race where usePoll + focus event both call
+    // refetch within the same retry window. The "clearTimeout + replace"
+    // pattern in useStatus.ts must guarantee at most ONE pending retry
+    // timer at any moment, even when multiple concurrent callers each
+    // see cache-empty.
+    mockedGetStatus.mockResolvedValue({
+      ok: false,
+      error: { code: 'E_BRIDGE_CACHE_EMPTY', message: 'cold' },
+    } as any);
+
+    const { result } = renderHook(() => useStatus());
+
+    // Two callers fire concurrently, each fails cache-empty, each
+    // increments the counter and re-arms the single timer slot.
+    await act(async () => {
+      await Promise.all([
+        result.current.refetch(),
+        result.current.refetch(),
+      ]);
+    });
+    expect(mockedGetStatus).toHaveBeenCalledTimes(2);
+
+    // Advance ONE retry window. Only ONE retry should fire (the most
+    // recent timer the second caller scheduled), not two -- the first
+    // caller's timer was cleared when the second caller scheduled its
+    // own. If timers stacked, this would fire 2x and consume budget at
+    // 2x rate.
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(mockedGetStatus).toHaveBeenCalledTimes(3);
+
+    // Advance another retry window -- still strictly +1 per tick.
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(mockedGetStatus).toHaveBeenCalledTimes(4);
+  });
+
+  it('concurrent caller burst does not consume retry budget at N-x rate', async () => {
+    // v2.5.15 (W4 from code-reviewer): the retry counter must increment
+    // ONCE per fired retry, not once per concurrent caller. A burst of 10
+    // simultaneous refetches in the cold-start window should leave the
+    // full 20-retry budget intact for subsequent timer firings.
+    mockedGetStatus.mockResolvedValue({
+      ok: false,
+      error: { code: 'E_BRIDGE_CACHE_EMPTY', message: 'cold' },
+    } as any);
+
+    const { result } = renderHook(() => useStatus());
+
+    // Fire 10 concurrent refetches.
+    await act(async () => {
+      await Promise.all(Array.from({ length: 10 }, () => result.current.refetch()));
+    });
+    expect(mockedGetStatus).toHaveBeenCalledTimes(10);
+
+    // Advance through the full retry-cap window (25 ticks of 500ms,
+    // budget is 20). If counter incremented per CALLER (the W4 bug),
+    // budget would be exhausted by tick (20-10)=10 with mock count
+    // capped at 10 + 10 = 20. The post-fix counter increments per FIRED
+    // retry only, so we expect 10 + 20 = 30.
+    for (let i = 0; i < 25; i += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    }
+    expect(mockedGetStatus).toHaveBeenCalledTimes(30);
+  });
 });

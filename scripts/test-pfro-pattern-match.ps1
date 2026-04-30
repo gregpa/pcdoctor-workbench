@@ -62,7 +62,7 @@ $scannerPatterns = @(
     # v2.5.11 (B9):
     '\\Windows\\fonts\\OFFSYM[A-Z]*\.TTF(?:\\|$)',
     '\\Windows\\fonts\\flat_officeFontsPreview\.ttf(?:\\|$)',
-    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
+    '\\Microsoft\\EdgeUpdate\\\d+(?:\.\d+){2,3}(?:\\|$)'
 )
 
 # Scrub patterns: from powershell\actions\Clear-StalePendingRenames.ps1 $benignPatterns
@@ -81,7 +81,7 @@ $scrubPatterns = @(
     # v2.5.11 (B9):
     '\\Windows\\fonts\\OFFSYM[A-Z]*\.TTF(?:\\|$)',
     '\\Windows\\fonts\\flat_officeFontsPreview\.ttf(?:\\|$)',
-    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
+    '\\Microsoft\\EdgeUpdate\\\d+(?:\.\d+){2,3}(?:\\|$)'
 )
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,9 @@ $mustMatch = @(
     '\??\C:\Windows\Fonts\OFFSYMXL.TTF',
     '\??\C:\Windows\Fonts\flat_officeFontsPreview.ttf',
     # v2.5.11 (B9): Edge updater old-version directory (real entry observed 2026-04-30)
-    '\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\1.3.229.3'
+    '\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\1.3.229.3',
+    # v2.5.15: relaxed pattern accepts 3-component too (EdgeUpdate internal channel)
+    '\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\1.3.229'
 )
 
 # "Must NOT match" cases: real-looking paths that should NOT be filtered.

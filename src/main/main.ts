@@ -641,6 +641,36 @@ app.whenReady().then(() => {
     } catch { /* non-fatal */ }
   })();
 
+  // v2.5.15 (Item 2): one-time migration of legacy plaintext telegram_bot_token
+  // to DPAPI-encrypted form. Runs BEFORE the v2.3.0 self-test below so any
+  // future version-bump that re-arms the self-test won't read plaintext from
+  // disk while the migration is racing in parallel (W1 from code-reviewer).
+  //
+  // Background: api:setSetting (ipc.ts:880) wraps new tokens in `dpapi:base64`
+  // when safeStorage.isEncryptionAvailable(). resolveTokenValue() in
+  // telegramBridge.ts handles BOTH plaintext (legacy) and encrypted forms, so
+  // consumer code works either way. But tokens written before this app had
+  // the wrap (or via any path bypassing api:setSetting) sit in the DB as
+  // plaintext forever. This migration walks them forward exactly once.
+  // Idempotent: skips tokens already prefixed `dpapi:`.
+  (async () => {
+    try {
+      const { safeStorage } = await import('electron');
+      const { getSetting, setSetting } = await import('./dataStore.js');
+      const raw = getSetting('telegram_bot_token');
+      if (raw && !raw.startsWith('dpapi:') && safeStorage.isEncryptionAvailable()) {
+        const encrypted = safeStorage.encryptString(raw).toString('base64');
+        setSetting('telegram_bot_token', `dpapi:${encrypted}`);
+        log.info('[telegram-token-migration] legacy plaintext token migrated to DPAPI');
+      }
+    } catch (e) {
+      // Pass error as a separate log argument so structured loggers preserve
+      // the stack trace instead of coercing to "[object Object]" via string
+      // interpolation (W2 from code-reviewer).
+      log.warn('[telegram-token-migration] non-fatal', e);
+    }
+  })();
+
   // v2.3.0 first-run self-test: fires once per major version, only if Telegram
   // is configured. Also bumps the selftest_version marker so 2.3.0 installs
   // ping the channel to confirm tokens still work after the upgrade.
@@ -674,6 +704,7 @@ app.whenReady().then(() => {
       }
     } catch { /* non-fatal — never block startup */ }
   })();
+
 
   // v2.5.13: seed the status cache before the renderer's first useStatus()
   // call races in. This is deliberately fire-and-forget; if Windows I/O stalls,
