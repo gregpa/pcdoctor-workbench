@@ -10,6 +10,7 @@
  * added to src/shared/actions.ts.
  */
 import type { ServiceHealth } from '@shared/types.js';
+import { deriveServiceDotColor } from '@renderer/lib/serviceDotColor.js';
 
 export interface ServiceDetailModalProps {
   service: ServiceHealth;
@@ -18,14 +19,6 @@ export interface ServiceDetailModalProps {
   onClose: () => void;
   /** Caller invokes the restart_service action with the ServiceName param. */
   onRestart: (serviceKey: string) => void | Promise<void>;
-}
-
-function severityClass(s: ServiceHealth['status_severity']): string {
-  switch (s) {
-    case 'good': return 'bg-status-good';
-    case 'warn': return 'bg-status-warn';
-    case 'crit': return 'bg-status-crit';
-  }
 }
 
 function explainSeverity(service: ServiceHealth): string {
@@ -67,7 +60,7 @@ export function ServiceDetailModal({ service, actionBusy, onClose, onRestart }: 
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
-          <span className={`w-2.5 h-2.5 rounded-full ${severityClass(service.status_severity)}`}></span>
+          <span className={`w-2.5 h-2.5 rounded-full ${deriveServiceDotColor(service)}`}></span>
           <span>{service.display}</span>
         </h2>
 
