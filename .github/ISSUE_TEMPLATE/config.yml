@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Read the Privacy Policy
+    url: https://github.com/gregpa/pcdoctor-workbench/blob/main/PRIVACY.md
+    about: What data PCDoctor collects, where it's stored, and what (if anything) leaves your machine.
+  - name: 🛠 Read the README first
+    url: https://github.com/gregpa/pcdoctor-workbench/blob/main/README.md
+    about: Install instructions, SmartScreen warning explainer, troubleshooting tips, and the "this is a personal tool" caveats.
+  - name: 🔍 Search existing issues
+    url: https://github.com/gregpa/pcdoctor-workbench/issues?q=is%3Aissue
+    about: Someone may have hit the same problem already.
