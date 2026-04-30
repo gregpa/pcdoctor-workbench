@@ -194,18 +194,24 @@ export class PCDoctorBridgeError extends Error {
 // together. Main-process await storm blocked IPC; compositor stalled;
 // other apps felt sluggish.
 //
-// Three protections layered here:
-//   1. STATUS_CACHE_MS (2s) -- repeated callers within the window share
-//      the same parsed SystemStatus. Resize storm collapses to 1 read.
-//   2. _getStatusInFlight -- single shared Promise when no cache hit.
-//      N concurrent callers share ONE in-flight readFile, not N of them.
-//   3. readFileWithTimeout (3s) -- if the file is genuinely stuck, fail
-//      fast and fall back to the last-good cached SystemStatus. UI
-//      shows slightly stale data for up to 3s instead of freezing.
+// v2.5.13: the synthetic CopyFileW termination harness falsified the
+// share-lock hypothesis. A normal Windows file-share lock either allows
+// copyFile to read (FileShare.Read) or fails fast with EBUSY (FileShare.None);
+// it does NOT reproduce the real 30-70s stalls. Those stalls are likely
+// Defender minifilter / disk queue / process-scheduling contention.
+//
+// Therefore the UI-facing fix is now stronger and simpler:
+//   - getStatus() is cache-only. It never reads latest.json and never maps
+//     JSON on a renderer/Telegram/Autopilot request path.
+//   - refreshStatusCache() is the only function allowed to perform fresh
+//     latest.json reads. main.ts calls it from the background poll loop.
+//   - STATUS_CACHE_MS remains as the freshness window for background refresh
+//     de-duplication; it is NOT a UI cache-expiry rule anymore. A stale cache
+//     is still safer than letting a user-triggered render wait on Windows I/O.
 const STATUS_CACHE_MS = 2_000;
 const READ_TIMEOUT_MS = 3_000;
 let _statusCache: { ts: number; status: SystemStatus } | null = null;
-let _getStatusInFlight: Promise<SystemStatus> | null = null;
+let _statusRefreshInFlight: Promise<SystemStatus> | null = null;
 
 /**
  * v2.4.43: copyFile-then-read with Promise.race timeout.
@@ -292,42 +298,55 @@ async function readFileWithTimeout(filePath: string, timeoutMs: number): Promise
 
 export async function getStatus(): Promise<SystemStatus> {
   const now = Date.now();
-  // 1. Fresh cache hit -- return immediately.
-  if (_statusCache && (now - _statusCache.ts) < STATUS_CACHE_MS) {
+  if (_statusCache) {
+    const ageMs = now - _statusCache.ts;
     void writePerfLine('getStatus.cached', 0, {
+      age_ms: ageMs,
+      stale: ageMs >= STATUS_CACHE_MS,
+      findings: _statusCache.status.findings.length,
+    });
+    return _statusCache.status;
+  }
+
+  // Cache-only contract: the UI path must not become the cold-start read path.
+  // main.ts starts refreshStatusCache() on app boot and every POLL_INTERVAL_MS.
+  // Until that first background read succeeds, callers get an explicit
+  // unavailable error instead of accidentally parking the renderer behind
+  // latest.json I/O.
+  void writePerfLine('getStatus.cache_empty', 0);
+  throw new PCDoctorBridgeError('E_BRIDGE_CACHE_EMPTY', 'Status cache has not been populated yet');
+}
+
+export async function refreshStatusCache(reason = 'background'): Promise<SystemStatus> {
+  const now = Date.now();
+  if (_statusCache && (now - _statusCache.ts) < STATUS_CACHE_MS) {
+    void writePerfLine('getStatus.refresh_cached', 0, {
+      reason,
       age_ms: now - _statusCache.ts,
       findings: _statusCache.status.findings.length,
     });
     return _statusCache.status;
   }
-  // 2. In-flight read -- share the same Promise.
-  if (_getStatusInFlight) {
-    void writePerfLine('getStatus.shared', 0);
-    return _getStatusInFlight;
+
+  if (_statusRefreshInFlight) {
+    void writePerfLine('getStatus.refresh_shared', 0, { reason });
+    return _statusRefreshInFlight;
   }
-  // 3. Kick off a new read. All side effects happen inside getStatusInner.
-  _getStatusInFlight = getStatusInner()
+
+  _statusRefreshInFlight = getStatusInner()
     .then((status) => {
       _statusCache = { ts: Date.now(), status };
-      _getStatusInFlight = null;
+      _statusRefreshInFlight = null;
       return status;
     })
     .catch((err) => {
-      _getStatusInFlight = null;
-      // If the read timed out / file was busy AND we have a cached
-      // last-good status, fall back to it rather than throwing. UI sees
-      // slightly stale data for a beat; freeze avoided.
-      //
-      // Stale-tolerance note: during sustained failure (e.g. Defender
-      // locks latest.json for 30 min) we will keep serving the SAME
-      // cached object indefinitely -- every 2s window triggers a new
-      // fetch attempt, which times out at 3s, which falls back to the
-      // same stale cache. This is the intentional tradeoff: "slightly
-      // stale data" > "freeze". If you ever need a max-staleness guard
-      // (e.g. error after 5 min stale), track `_statusCache.ts` against
-      // a wall-clock threshold here before returning.
+      _statusRefreshInFlight = null;
+      // Background refresh failed, but a stale cache is still the product
+      // contract. The UI path will keep serving it instantly while this
+      // background loop tries again on its next tick.
       if (_statusCache && isTransientReadError(err)) {
         void writePerfLine('getStatus.fallback', 0, {
+          reason,
           code: err?.code,
           cache_age_ms: Date.now() - _statusCache.ts,
         });
@@ -335,13 +354,13 @@ export async function getStatus(): Promise<SystemStatus> {
       }
       throw err;
     });
-  return _getStatusInFlight;
+  return _statusRefreshInFlight;
 }
 
 /** Test hook: clear the in-memory cache + in-flight promise between tests. */
 export function _resetStatusCacheForTests(): void {
   _statusCache = null;
-  _getStatusInFlight = null;
+  _statusRefreshInFlight = null;
 }
 
 // Parse errors (E_BRIDGE_PARSE_FAILED) and missing-file errors

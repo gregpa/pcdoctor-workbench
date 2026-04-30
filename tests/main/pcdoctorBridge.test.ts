@@ -20,7 +20,7 @@ vi.mock('node:fs/promises', async () => {
 
 // Import AFTER vi.mock so the module under test sees the mocked readFile.
 import { readFile, copyFile } from 'node:fs/promises';
-import { getStatus, mapAreaToAction, _resetStatusCacheForTests } from '../../src/main/pcdoctorBridge.js';
+import { getStatus, refreshStatusCache, mapAreaToAction, _resetStatusCacheForTests } from '../../src/main/pcdoctorBridge.js';
 
 // Resolve fixture path without relying on __dirname (ESM-safe)
 const fixturePath = path.join(process.cwd(), 'tests', 'fixtures', 'latest.sample.json');
@@ -43,7 +43,7 @@ describe('pcdoctorBridge.getStatus', () => {
     const fixture = await realReadFile(fixturePath, 'utf8');
     (readFile as any).mockResolvedValueOnce(fixture);
 
-    const status = await getStatus();
+    const status = await refreshStatusCache('test');
     expect(status.host).toBe('ALIENWARE-R11');
     expect(status.overall_severity).toBe('warn');
     expect(status.overall_label).toContain('ATTENTION');
@@ -66,12 +66,12 @@ describe('pcdoctorBridge.getStatus', () => {
 
   it('throws E_BRIDGE_FILE_MISSING when latest.json absent', async () => {
     (readFile as any).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    await expect(getStatus()).rejects.toMatchObject({ code: 'E_BRIDGE_FILE_MISSING' });
+    await expect(refreshStatusCache('test')).rejects.toMatchObject({ code: 'E_BRIDGE_FILE_MISSING' });
   });
 
   it('throws E_BRIDGE_PARSE_FAILED on corrupt JSON', async () => {
     (readFile as any).mockResolvedValueOnce('not json');
-    await expect(getStatus()).rejects.toMatchObject({ code: 'E_BRIDGE_PARSE_FAILED' });
+    await expect(refreshStatusCache('test')).rejects.toMatchObject({ code: 'E_BRIDGE_PARSE_FAILED' });
   });
 
   it('strips UTF-8 BOM from latest.json before parsing', async () => {
@@ -79,23 +79,20 @@ describe('pcdoctorBridge.getStatus', () => {
     // Prepend BOM to simulate PowerShell-written file
     (readFile as any).mockResolvedValueOnce('\uFEFF' + fixture);
 
-    const status = await getStatus();
+    const status = await refreshStatusCache('test');
     expect(status.overall_severity).toBe('warn');
     expect(status.host).toBe('ALIENWARE-R11');
   });
 });
 
 /**
- * v2.4.40: resize-freeze fix (B51). Multiple concurrent getStatus callers
- * were independently hitting readFile, and when latest.json was locked by
- * Defender / OneDrive / in-flight scanner, they all queued up and blocked
- * for ~49 seconds. Three protections added:
- *   1. 2-second STATUS_CACHE_MS -- repeated callers share parsed status
- *   2. _getStatusInFlight -- concurrent callers share one Promise
- *   3. 3-second readFile timeout -- fail fast; fall back to cached last-good
+ * v2.4.40/v2.5.13: resize-freeze fix (B51). Multiple UI-triggered getStatus
+ * callers used to independently hit readFile/copyFile when latest.json was
+ * under Defender / OneDrive / scanner pressure. v2.5.13 made getStatus
+ * cache-only and moved fresh reads behind refreshStatusCache().
  *
- * If any of these tests goes red, one of the three protections was removed
- * from src/main/pcdoctorBridge.ts -- see the FIX block at top of getStatus.
+ * If any of these tests goes red, either the cache-only UI contract regressed
+ * or the background refresh protections were removed.
  */
 describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
   beforeEach(() => {
@@ -104,25 +101,33 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     // implementation set by `vi.fn(actual.readFile)`, which breaks
     // realReadFile() at the top of each test (would return undefined).
     (readFile as any).mockClear();
+    (copyFile as any).mockClear();
   });
 
-  it('repeated call within 2s uses cache (readFile called once)', async () => {
+  it('getStatus serves cache only and performs no disk read', async () => {
     const fixture = await realReadFile(fixturePath, 'utf8');
-    // Clear AFTER reading the fixture -- realReadFile itself is the mocked
-    // readFile (vi.mock replaces the whole module). Its call counts toward
-    // toHaveBeenCalledTimes; clear so the test-relevant count starts at 0.
     (readFile as any).mockClear();
     (readFile as any).mockResolvedValue(fixture);
 
+    await refreshStatusCache('test');
+    (readFile as any).mockClear();
+    (copyFile as any).mockClear();
+
     await getStatus();
     await getStatus();
     await getStatus();
 
-    // Only one actual disk read despite three callers.
-    expect((readFile as any)).toHaveBeenCalledTimes(1);
+    expect((copyFile as any)).not.toHaveBeenCalled();
+    expect((readFile as any)).not.toHaveBeenCalled();
   });
 
-  it('concurrent callers share a single in-flight copyFile (single-flight)', async () => {
+  it('getStatus throws cache-empty without touching disk before background refresh seeds cache', async () => {
+    await expect(getStatus()).rejects.toMatchObject({ code: 'E_BRIDGE_CACHE_EMPTY' });
+    expect((copyFile as any)).not.toHaveBeenCalled();
+    expect((readFile as any)).not.toHaveBeenCalled();
+  });
+
+  it('concurrent refresh callers share a single in-flight copyFile (single-flight)', async () => {
     const fixture = await realReadFile(fixturePath, 'utf8');
     (readFile as any).mockClear();
     (copyFile as any).mockClear();
@@ -136,9 +141,9 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     // default mock after copy resolves -- return fixture there.
     (readFile as any).mockResolvedValue(fixture);
 
-    const pA = getStatus();
-    const pB = getStatus();
-    const pC = getStatus();
+    const pA = refreshStatusCache('test-a');
+    const pB = refreshStatusCache('test-b');
+    const pC = refreshStatusCache('test-c');
 
     // Flush the microtask queue so getStatusInner reaches its copyFile call.
     await Promise.resolve();
@@ -157,13 +162,13 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     expect((readFile as any)).toHaveBeenCalledTimes(1);
   });
 
-  it('times out copyFile after 3s and falls back to cached last-good status', async () => {
+  it('background refresh times out copyFile after 3s and falls back to cached last-good status', async () => {
     const fixture = await realReadFile(fixturePath, 'utf8');
 
     // Seed the cache with a successful first call (copyFile default no-op +
     // mocked readFile returning fixture).
     (readFile as any).mockResolvedValueOnce(fixture);
-    const first = await getStatus();
+    const first = await refreshStatusCache('test');
     expect(first.host).toBe('ALIENWARE-R11');
 
     // Advance past the 2s cache window to force a fresh fetch.
@@ -172,13 +177,13 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
 
     // v2.4.43: simulate a Windows share-mode lock by making copyFile
     // hang indefinitely. Promise.race inside readFileWithTimeout should
-    // reject after 3s, and getStatus's outer catch should fall back to
-    // the cached last-good status (not throw).
+    // reject after 3s, and refreshStatusCache's outer catch should fall
+    // back to the cached last-good status (not throw).
     (copyFile as any).mockImplementationOnce(() => {
       return new Promise<void>(() => { /* never resolves */ });
     });
 
-    const pending = getStatus();
+    const pending = refreshStatusCache('test');
     await vi.advanceTimersByTimeAsync(3_100);
     const fallback = await pending;
 
@@ -193,17 +198,17 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     // source file is missing (this is the realistic path in v2.4.43 since
     // readFile no longer sees the source path directly).
     (copyFile as any).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    await expect(getStatus()).rejects.toMatchObject({ code: 'E_BRIDGE_FILE_MISSING' });
+    await expect(refreshStatusCache('test')).rejects.toMatchObject({ code: 'E_BRIDGE_FILE_MISSING' });
   });
 
-  it('throws timeout error when no cache exists and copyFile hangs', async () => {
+  it('background refresh throws timeout error when no cache exists and copyFile hangs', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
     (copyFile as any).mockImplementationOnce(() => {
       return new Promise<void>(() => { /* never resolves */ });
     });
 
-    const pending = getStatus();
+    const pending = refreshStatusCache('test');
     // Attach a no-op handler synchronously so Node doesn't briefly
     // flag the rejection as unhandled before vitest's expect catches it.
     pending.catch(() => { /* handled by expect below */ });
@@ -219,7 +224,7 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     // Seed cache with a successful call.
     const fixture = await realReadFile(fixturePath, 'utf8');
     (readFile as any).mockResolvedValueOnce(fixture);
-    const first = await getStatus();
+    const first = await refreshStatusCache('test');
     expect(first.host).toBe('ALIENWARE-R11');
 
     // Force cache miss via fake time advance.
@@ -227,11 +232,11 @@ describe('pcdoctorBridge.getStatus resize-freeze fix (v2.4.40)', () => {
     vi.setSystemTime(Date.now() + 3_000);
 
     // copyFile rejects with EBUSY (transient Windows share-mode lock).
-    // getStatus should catch isTransientReadError and serve cached data.
+    // refreshStatusCache should catch isTransientReadError and serve cached data.
     (copyFile as any).mockClear();
     (copyFile as any).mockRejectedValueOnce(Object.assign(new Error('EBUSY: locked'), { code: 'EBUSY' }));
 
-    const result = await getStatus();
+    const result = await refreshStatusCache('test');
     expect(result.host).toBe('ALIENWARE-R11');
     // Assert copyFile was actually attempted -- rules out a cache-hit
     // path that would return stale data without trying to refresh.

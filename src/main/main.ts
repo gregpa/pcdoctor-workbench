@@ -14,7 +14,7 @@ import { access, constants as fsConstants, stat } from 'node:fs/promises';
 import log from 'electron-log/main';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
-import { getStatus } from './pcdoctorBridge.js';
+import { getStatus, refreshStatusCache } from './pcdoctorBridge.js';
 import { POLL_INTERVAL_MS, LOG_DIR } from './constants.js';
 
 // v2.4.52 (B52-MIG-1): wire electron-log for the main process. Pre-2.4.52
@@ -185,7 +185,10 @@ function createWindow() {
 
 async function backgroundPoll() {
   try {
-    const status = await getStatus();
+    // v2.5.13: backgroundPoll owns fresh latest.json reads. UI-facing
+    // getStatus() is cache-only so renderer/Telegram/Autopilot requests never
+    // park behind Defender/disk-stack stalls.
+    const status = await refreshStatusCache('main-background-poll');
     updateTraySeverity(status.overall_severity);
   } catch {
     // Silent - backend may not have run yet. Tray stays last-known color.
@@ -654,6 +657,12 @@ app.whenReady().then(() => {
       }
     } catch { /* non-fatal — never block startup */ }
   })();
+
+  // v2.5.13: seed the status cache before the renderer's first useStatus()
+  // call races in. This is deliberately fire-and-forget; if Windows I/O stalls,
+  // window creation still proceeds and the UI sees cache-empty instead of
+  // becoming the first latest.json reader.
+  void refreshStatusCache('startup-preload').catch(() => {});
 
   createWindow();
   createTray({
