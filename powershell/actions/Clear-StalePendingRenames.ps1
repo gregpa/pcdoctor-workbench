@@ -87,7 +87,17 @@ $benignPatterns = @(
     '\\Microsoft Office\\Updates\\Apply\\FilesInUse(?:\\|$)',
     # v2.4.36 (B42): Print spooler V4 driver swap. Spooler locks the
     # driver folder so the rename never completes on reboot.
-    '\\System32\\spool\\V4Dirs(?:\\|$)'
+    '\\System32\\spool\\V4Dirs(?:\\|$)',
+    # v2.5.11 (B9): Office Click-to-Run symbol fonts. Win32 GDI keeps
+    # system fonts open across the session; Office can't replace OFFSYM*
+    # without a font subsystem restart that consumer Win11 never performs.
+    # [A-Z]* is case-insensitive (PS -match default); covers all 6 variants.
+    '\\Windows\\fonts\\OFFSYM[A-Z]*\.TTF(?:\\|$)',
+    '\\Windows\\fonts\\flat_officeFontsPreview\.ttf(?:\\|$)',
+    # v2.5.11 (B9): Edge auto-updater old-version directory removal.
+    # Pending until the EdgeUpdate service idles long enough; on
+    # always-on boxes that never happens.
+    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
 )
 
 $raw = $null

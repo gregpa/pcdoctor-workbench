@@ -408,7 +408,20 @@ $pfroBenignPatterns = @(
     '\\Common Files\\microsoft shared\\ClickToRun\\backup(?:\\|$)',
     '\\Common Files\\microsoft shared\\ClickToRun\\Updates(?:\\|$)',
     '\\Microsoft Office\\Updates\\Apply\\FilesInUse(?:\\|$)',
-    '\\System32\\spool\\V4Dirs(?:\\|$)'
+    '\\System32\\spool\\V4Dirs(?:\\|$)',
+    # v2.5.11 (B9): Office Click-to-Run symbol fonts. Win32 GDI keeps
+    # system fonts open across the session; Office can't replace OFFSYM*
+    # without a font subsystem restart that consumer Win11 never performs.
+    # Office re-queues these every Click-to-Run update.
+    # Note: [A-Z]* is case-insensitive here because PS -match defaults to
+    # case-insensitive; covers OFFSYM/OFFSYMB/OFFSYML/OFFSYMSB/OFFSYMSL/OFFSYMXL.
+    '\\Windows\\fonts\\OFFSYM[A-Z]*\.TTF(?:\\|$)',
+    '\\Windows\\fonts\\flat_officeFontsPreview\.ttf(?:\\|$)',
+    # v2.5.11 (B9): Edge auto-updater old-version directory removal.
+    # Pending until the EdgeUpdate service idles long enough; on
+    # always-on boxes that never happens. Each Edge update queues a
+    # new entry for the prior version dir.
+    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
 )
 $pfro = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -EA SilentlyContinue
 if ($pfro) {

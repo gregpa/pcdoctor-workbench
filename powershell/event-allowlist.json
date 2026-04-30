@@ -77,6 +77,13 @@
                           "max_30d":  400,
                           "max_7d":  100,
                           "reason":  "Endpoint discovery failure for transient Bluetooth/USB devices. Harmless."
+                      },
+                      {
+                          "provider":  "Service Control Manager",
+                          "event_id":  7034,
+                          "reason":  "Microsoft Gaming Services crash-loop dominates 7034 on this box. Tried Remove-AppxPackage + reinstall (2026-04-30) -- Store re-stages and the loop returns. Sandboxed; cosmetic event-log noise only. If observed count spikes past 180/7d, a NEW service may have joined the crash pool -- investigate.",
+                          "max_7d":  180,
+                          "max_30d":  800
                       }
                   ]
 }

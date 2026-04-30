@@ -58,7 +58,11 @@ $scannerPatterns = @(
     '\\Common Files\\microsoft shared\\ClickToRun\\backup(?:\\|$)',
     '\\Common Files\\microsoft shared\\ClickToRun\\Updates(?:\\|$)',
     '\\Microsoft Office\\Updates\\Apply\\FilesInUse(?:\\|$)',
-    '\\System32\\spool\\V4Dirs(?:\\|$)'
+    '\\System32\\spool\\V4Dirs(?:\\|$)',
+    # v2.5.11 (B9):
+    '\\Windows\\fonts\\OFFSYM[A-Z]*\.TTF(?:\\|$)',
+    '\\Windows\\fonts\\flat_officeFontsPreview\.ttf(?:\\|$)',
+    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
 )
 
 # Scrub patterns: from powershell\actions\Clear-StalePendingRenames.ps1 $benignPatterns
@@ -73,7 +77,11 @@ $scrubPatterns = @(
     '\\Common Files\\microsoft shared\\ClickToRun\\backup(?:\\|$)',
     '\\Common Files\\microsoft shared\\ClickToRun\\Updates(?:\\|$)',
     '\\Microsoft Office\\Updates\\Apply\\FilesInUse(?:\\|$)',
-    '\\System32\\spool\\V4Dirs(?:\\|$)'
+    '\\System32\\spool\\V4Dirs(?:\\|$)',
+    # v2.5.11 (B9):
+    '\\Windows\\fonts\\OFFSYM[A-Z]*\.TTF(?:\\|$)',
+    '\\Windows\\fonts\\flat_officeFontsPreview\.ttf(?:\\|$)',
+    '\\Microsoft\\EdgeUpdate\\\d+\.\d+\.\d+\.\d+(?:\\|$)'
 )
 
 # ---------------------------------------------------------------------------
@@ -109,10 +117,22 @@ $mustMatch = @(
     '\??\C:\Program Files\Mozilla Firefox\updated\core\xul.dll',
     # Gaming Services proxy DLL (path-embedded)
     '\??\C:\Windows\SystemApps\Microsoft.GamingApp_8wekyb3d8bbwe\gamingservicesproxy_e.dll',
+    # Gaming Services proxy DLL with .0 / .1 versioned suffix (real form on Greg's box 2026-04-30)
+    '\??\C:\Windows\System32\gamingservicesproxy_e.dll.0',
     # Gaming Services DLL (bare filename match)
     'gamingservices_e.dll',
     # InstallerService token
-    'C:\Program Files\WindowsApps\Microsoft.GamingServices_InstallerService_stager'
+    'C:\Program Files\WindowsApps\Microsoft.GamingServices_InstallerService_stager',
+    # v2.5.11 (B9): Office Click-to-Run symbol fonts (all 6 real variants observed 2026-04-30)
+    '\??\C:\Windows\Fonts\OFFSYM.TTF',
+    '\??\C:\Windows\Fonts\OFFSYMB.TTF',
+    '\??\C:\Windows\Fonts\OFFSYML.TTF',
+    '\??\C:\Windows\Fonts\OFFSYMSB.TTF',
+    '\??\C:\WINDOWS\Fonts\OFFSYMSL.TTF',
+    '\??\C:\Windows\Fonts\OFFSYMXL.TTF',
+    '\??\C:\Windows\Fonts\flat_officeFontsPreview.ttf',
+    # v2.5.11 (B9): Edge updater old-version directory (real entry observed 2026-04-30)
+    '\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\1.3.229.3'
 )
 
 # "Must NOT match" cases: real-looking paths that should NOT be filtered.
@@ -131,7 +151,15 @@ $mustNotMatch = @(
     # An empty string (registry multi-sz often has a trailing empty entry)
     '',
     # A system driver with no relation to any benign pattern
-    '\??\C:\Windows\System32\drivers\ntfs.sys'
+    '\??\C:\Windows\System32\drivers\ntfs.sys',
+    # v2.5.11 (B9): a generic system font NOT in the Office symbol family —
+    # real font subsystem changes DO need a reboot, must NOT be filtered.
+    '\??\C:\Windows\Fonts\arial.ttf',
+    # v2.5.11 (B9): the live EdgeUpdate executable (no version subdir) —
+    # genuine pending update of the updater itself, must NOT be filtered.
+    '\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe',
+    # v2.5.11 (B9): the live EdgeUpdate config XML — must NOT be filtered.
+    '\??\C:\Program Files (x86)\Microsoft\EdgeUpdate\config.xml'
 )
 
 # ---------------------------------------------------------------------------
