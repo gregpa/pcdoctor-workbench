@@ -315,7 +315,11 @@ export function Settings() {
               >
                 Reveal Token
               </button>
-              <button onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-crit/40">
+              <button
+                onClick={() => { setTgToken(''); setTgChat(''); saveSetting('telegram_bot_token', ''); saveSetting('telegram_chat_id', ''); saveSetting('telegram_enabled', '0'); showToast('Disconnected'); }}
+                title="Clears the saved Telegram bot token and chat ID. PCDoctor stops sending notifications to Telegram. The bot itself stays alive on Telegram's side; you can re-enter the token anytime."
+                className="px-3 py-1.5 rounded-md text-xs pcd-button hover:border-status-crit/40"
+              >
                 Disconnect
               </button>
             </div>
@@ -522,7 +526,11 @@ export function Settings() {
                 <span className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-status-crit' : 'bg-surface-600'}`}></span>
                 <code className="flex-1 font-mono">{r.remote_address}</code>
                 <span className="text-[10px] text-text-secondary">{r.direction}</span>
-                <button onClick={() => unblockIp(r.remote_address)} className="px-2 py-1 rounded pcd-button text-[10px] hover:border-status-good/40">Unblock</button>
+                <button
+                  onClick={() => unblockIp(r.remote_address)}
+                  title="Removes the firewall rule blocking this IP. Inbound traffic from this address can again reach RDP / SMB. Use only if you blocked the IP yourself or are sure it's safe."
+                  className="px-2 py-1 rounded pcd-button text-[10px] hover:border-status-good/40"
+                >Unblock</button>
               </div>
             ))}
           </div>
@@ -562,8 +570,16 @@ export function Settings() {
                     {t.last_run && ` · Last: ${t.last_run}`}
                   </div>
                 </div>
-                <button onClick={() => runTaskNow(t.name)} className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40">Run now</button>
-                <button onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')} className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40">
+                <button
+                  onClick={() => runTaskNow(t.name)}
+                  title="Trigger this scheduled task immediately, bypassing its normal schedule. Useful for testing or pulling fresh data on demand."
+                  className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40"
+                >Run now</button>
+                <button
+                  onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')}
+                  title={t.status === 'Disabled' ? 'Re-enable this scheduled task. It will fire again on its configured schedule.' : 'Disable this scheduled task. It stays registered but won\'t fire until you re-enable it.'}
+                  className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40"
+                >
                   {t.status === 'Disabled' ? 'Enable' : 'Disable'}
                 </button>
               </div>

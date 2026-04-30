@@ -46,7 +46,11 @@ export function Forecast() {
             Generated: {new Date(data.generated_at * 1000).toLocaleString()} · Based on metrics history
           </div>
         </div>
-        <button onClick={regenerate} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">
+        <button
+          onClick={regenerate}
+          title="Re-run the forecast engine over your full metrics history. Recomputes linear regression + EWMA models and refreshes projected threshold-crossing dates. Read-only; no admin required."
+          className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold"
+        >
           Regenerate Now
         </button>
       </div>

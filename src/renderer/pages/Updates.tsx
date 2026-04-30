@@ -161,10 +161,19 @@ export function Updates() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => install('repair_windows_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50">
+          <button
+            onClick={() => install('repair_windows_update')}
+            disabled={running !== null}
+            title="Resets Windows Update services + component store. Run if updates are stuck or failing repeatedly. Admin required, no automatic rollback."
+            className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50"
+          >
             Repair WU
           </button>
-          <button onClick={load} className="px-3 py-1.5 rounded-md text-xs pcd-button">
+          <button
+            onClick={load}
+            title="Re-read the pending update list. Doesn't trigger a Windows Update scan; just refreshes what PCDoctor already knows."
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
+          >
             Refresh
           </button>
         </div>
@@ -249,9 +258,18 @@ export function Updates() {
         <h2 className="text-xs uppercase tracking-wider text-text-secondary font-semibold mb-2">Feature Upgrade Readiness</h2>
         <div className="pcd-panel p-4">
           {!readiness ? (
-            <button onClick={checkReadiness} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold">
-              Check Readiness
-            </button>
+            <div>
+              <p className="text-[11px] text-text-secondary mb-2">
+                Audits whether your machine is ready for the next major Windows feature upgrade (e.g. Win11 25H2 → 26H1). Checks free space, TPM, Secure Boot, CPU compatibility, pending reboots, and known blocker apps. Read-only — does not start the upgrade.
+              </p>
+              <button
+                onClick={checkReadiness}
+                title="Run the feature-upgrade compatibility audit. Read-only; no admin required."
+                className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold"
+              >
+                Check Readiness
+              </button>
+            </div>
           ) : (
             <div>
               <div className={`text-sm font-bold mb-2 ${readiness.ready ? 'text-status-good' : 'text-status-warn'}`}>
@@ -291,7 +309,18 @@ export function Updates() {
               })()}
             </div>
             {!nvInfo ? (
-              <button onClick={checkNvidia} className="px-3 py-1.5 rounded-md text-xs pcd-button">Check Latest Version</button>
+              <div>
+                <p className="text-[11px] text-text-secondary mb-2">
+                  Queries Nvidia's driver feed for the latest GameReady/Studio version available for your GPU. After the first check, this tile shows installed-vs-latest comparison + an UP TO DATE / OUT OF DATE badge + "Last checked Xd ago".
+                </p>
+                <button
+                  onClick={checkNvidia}
+                  title="Fetch latest Nvidia driver version. Read-only network call to nvidia.com; no admin required."
+                  className="px-3 py-1.5 rounded-md text-xs pcd-button"
+                >
+                  Check Latest Version
+                </button>
+              </div>
             ) : (
               <div className="text-xs space-y-1">
                 <div>Installed: <code>{nvInfo.installed_version ?? '-'}</code></div>
@@ -306,11 +335,20 @@ export function Updates() {
           </div>
           <div className="pcd-panel p-4">
             <div className="font-semibold text-sm mb-1">💻 Dell Command Update</div>
-            <p className="text-[11px] text-text-secondary mb-2">Alienware-specific updates (BIOS, chipset, GPU). Requires the Dell Command | Update app.</p>
-            {dellLastScanTs !== null && (
+            <p className="text-[11px] text-text-secondary mb-2">Alienware-specific updates (BIOS, chipset, GPU). Requires the Dell Command | Update app installed on your machine.</p>
+            {dellLastScanTs !== null ? (
               <p className="text-[10px] text-text-secondary mb-2">Last scan {timeAgoShort(dellLastScanTs)}</p>
+            ) : (
+              <p className="text-[10px] text-text-secondary mb-2 italic">Not scanned yet — click below to run for the first time. Will display "Last scan Xd ago" after.</p>
             )}
-            <button onClick={() => install('run_dell_command_update')} disabled={running !== null} className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50">Run Dell Scan + Apply</button>
+            <button
+              onClick={() => install('run_dell_command_update')}
+              disabled={running !== null}
+              title="Runs Dell Command | Update CLI to scan + apply available BIOS/chipset/firmware updates. Admin required. May require reboot."
+              className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50"
+            >
+              Run Dell Scan + Apply
+            </button>
           </div>
         </div>
       </section>

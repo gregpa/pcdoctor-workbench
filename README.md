@@ -63,23 +63,40 @@ The installer drops scripts at `C:\ProgramData\PCDoctor\` with tier-A/B ACL lock
 ### 📊 Dashboard
 Live KPI cards (CPU load, RAM, disks, NAS, services, uptime) with week-over-week deltas. 270° SVG gauges + 7-day trend charts (click to expand with full hover tooltips + Min/Max/Avg/P95). SMART disk health table; Services & Processes health pills. Active Alerts with inline Fix + 🤖 Investigate buttons. **Clean My PC** threshold-gated cleanup suite.
 
+![Dashboard](docs/screenshots/Dashboard.png)
+
 ### 🛡 Security
 Windows Defender status + Quick/Full/Offline scans. Firewall profiles + rule count + reset. Windows Update (pending, security-only, stuck-update detection). Failed logon audit with top source IPs + one-click Block (routed through audit log + rollback). BitLocker, UAC, GPU driver age, Persistence diff, Threat indicators, Shell handler signature audit, Hosts file integrity.
+
+![Security](docs/screenshots/Security.png)
 
 ### 🧰 Tools Launcher
 20-tile grid, auto-detect via filesystem probe + winget fallback. Per-tool launch presets + HWiNFO/OCCT CSV import.
 
+![Tools](docs/screenshots/Tools.png)
+
+### 🪟 Updates
+Pending Windows Updates + recently-installed history. Feature-upgrade readiness audit. Driver-staleness tiles for Nvidia (auto-checks against Nvidia's driver feed) and Dell Command Update (Alienware-specific BIOS/chipset/firmware).
+
+![Updates](docs/screenshots/Updates.png)
+
 ### 📋 Weekly Review
 Sun 10 PM automated briefing with priority-grouped action items. Historical navigation + Archive to Obsidian Vault.
+
+![Weekly Review](docs/screenshots/Weekly_Review.png)
 
 ### 🔮 Forecast Engine
 Linear regression + EWMA over 90 days of metrics. Projected threshold-crossing dates with confidence scores.
 
+![Forecast](docs/screenshots/Forecast.png)
+
 ### 🤖 Autopilot
 25 default rules (Tier 1/2/3) with schedule + threshold triggers. Export/import rule sets; per-rule enable/disable/suppress. Tier 3 rules alert via Telegram before acting.
 
-### 🔔 Notifications
-Windows toast + Telegram bot (DPAPI-encrypted token, two-step confirmation for destructive actions). Quiet hours + email digest buffering + morning flush.
+### 🔔 Notifications + ⚙ Settings
+Windows toast + Telegram bot (DPAPI-encrypted token, two-step confirmation for destructive actions). Quiet hours + email digest buffering + morning flush. Scheduled-task management. Auto-update preferences.
+
+![Settings](docs/screenshots/Settings.png)
 
 ### 🧠 Claude Code Integration
 Embedded xterm.js terminal (via node-pty) with system context pre-loaded. External Window fallback via Windows Terminal. "Investigate with Claude" buttons on alerts/persistence/failed actions. Bridge file (`commands.jsonl` / `responses.jsonl`) for Claude-initiated actions with approval modal.

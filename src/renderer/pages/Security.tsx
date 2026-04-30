@@ -259,8 +259,16 @@ export function Security() {
                   </div>
                   {p.approved !== 1 && (
                     <>
-                      <button onClick={() => approve(p.identifier, true)} className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-good/40">Approve</button>
-                      <button onClick={() => approve(p.identifier, false)} className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-crit/40">Reject</button>
+                      <button
+                        onClick={() => approve(p.identifier, true)}
+                        title="Mark this persistence entry (startup item, scheduled task, service) as expected. It won't show as new on future scans."
+                        className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-good/40"
+                      >Approve</button>
+                      <button
+                        onClick={() => approve(p.identifier, false)}
+                        title="Flag this persistence entry as unwanted. It stays in the diff until you remove it from Windows manually (this button does NOT delete it)."
+                        className="px-2 py-0.5 rounded pcd-button text-[10px] hover:border-status-crit/40"
+                      >Reject</button>
                     </>
                   )}
                   <button
@@ -289,9 +297,21 @@ export function Security() {
           onClose={() => setDetail(null)}
           actions={
             <>
-              <button onClick={() => { setDetail(null); applyAction('update_defender_defs'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button">Update Defs</button>
-              <button onClick={() => { setDetail(null); applyAction('defender_quick_scan'); }} className="px-3 py-1.5 rounded-md text-xs pcd-button">Quick Scan</button>
-              <button onClick={() => { setDetail(null); applyAction('defender_full_scan'); }} className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-bold">Full Scan</button>
+              <button
+                onClick={() => { setDetail(null); applyAction('update_defender_defs'); }}
+                title="Pull the latest Defender signature definitions. Quick (~30s); no admin required."
+                className="px-3 py-1.5 rounded-md text-xs pcd-button"
+              >Update Defs</button>
+              <button
+                onClick={() => { setDetail(null); applyAction('defender_quick_scan'); }}
+                title="Scan common malware locations (running processes, startup, profile). Takes ~5-10 min."
+                className="px-3 py-1.5 rounded-md text-xs pcd-button"
+              >Quick Scan</button>
+              <button
+                onClick={() => { setDetail(null); applyAction('defender_full_scan'); }}
+                title="Scan every file on every drive. Takes 1-4 hours depending on drive size + count. Best run overnight."
+                className="px-3 py-1.5 rounded-md text-xs bg-status-warn text-black font-bold"
+              >Full Scan</button>
             </>
           }
         >
