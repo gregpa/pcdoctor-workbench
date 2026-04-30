@@ -86,7 +86,24 @@ function createWindow() {
     // User decision 2026-04-24: lock it. Maximize still works.
     // Re-evaluate if/when we move to a worker-thread file read
     // (worker.terminate() is OS-enforced and bypasses the starvation).
-    resizable: false,
+    //
+    // v2.5.14 (2026-04-30): UNLOCK + DIAGNOSTIC. The synthetic
+    // worker-terminate harness (scripts/diagnose-worker-terminate-copyfile.mjs)
+    // falsified the share-lock hypothesis. v2.5.13 then made the UI
+    // path independent of disk I/O via cache-only getStatus +
+    // refreshStatusCache. With the renderer no longer waiting on
+    // disk on any user-triggered render, the resize-freeze chain
+    // is structurally broken at the second link. Unlocking should
+    // be safe.
+    //
+    // If freezes return: revert this commit. Perf log will show
+    // whether refreshStatusCache (background) is now the slow
+    // path -- if so, the freeze was never the read itself, it was
+    // something else in the IPC chain. minWidth/minHeight from
+    // v2.4.39 era keep narrow widths from breaking the dashboard.
+    resizable: true,
+    minWidth: 900,
+    minHeight: 640,
     maximizable: true,
     minimizable: true,
     show: !startHidden,
