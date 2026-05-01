@@ -231,6 +231,8 @@ export type ActionName =
   | 'open_nvidia_app'
   // v2.5.6 (B47) - Allowlist LibreHardwareMonitor.exe in Defender CFA
   | 'add_lhm_to_cfa_allowlist'
+  // v2.5.17 (first-run wizard W2) - Add C:\ProgramData\PCDoctor to Defender exclusions
+  | 'add_pcdoctor_exclusion'
   // Internal (not shown in UI)
   | 'create_restore_point';
 

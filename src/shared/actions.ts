@@ -678,6 +678,21 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     },
   },
 
+  // ============== v2.5.17 — FIRST-RUN WIZARD ==============
+  // v2.5.17 (W2): add C:\ProgramData\PCDoctor to Defender ExclusionPath.
+  // Eliminates per-file AV scanning overhead on every report write and DB
+  // access. Offered as an optional step in the first-run wizard; also safe
+  // to run at any time from the Security page.
+  add_pcdoctor_exclusion: {
+    name: 'add_pcdoctor_exclusion', label: 'Add Defender Exclusion',
+    ps_script: 'actions/Add-PCDoctorExclusion.ps1',
+    confirm_level: 'none', rollback_tier: 'C',
+    estimated_duration_s: 3,
+    needs_admin: true,
+    category: 'hardening', icon: '🛡',
+    tooltip: 'Adds C:\\ProgramData\\PCDoctor to Windows Defender\'s ExclusionPath list. Stops real-time scanning overhead on every scanner read/write. Idempotent — re-running when the path is already excluded is a no-op. Admin required. Tamper Protection may block this; if so the action reports E_TAMPER_PROTECTION with manual fallback instructions.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

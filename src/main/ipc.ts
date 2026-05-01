@@ -3,7 +3,7 @@ import { readFile, readdir, unlink, copyFile, mkdir, stat } from 'node:fs/promis
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { spawnSync, execFile } from 'node:child_process';
+import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 // v2.4.48 (B48-SEC-1): direct execFile of schtasks.exe with array-form
@@ -61,7 +61,7 @@ import { filterRendererSafeSettings } from './rendererSafeSettings.js';
 import { ACTIONS as ACTIONS_INDEX } from '@shared/actions.js';
 import { generateForecasts } from './forecastEngine.js';
 import { runPowerShellScript } from './scriptRunner.js';
-import { PCDOCTOR_ROOT } from './constants.js';
+import { PCDOCTOR_ROOT, resolvePwshPath, PWSH_FALLBACK } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget, installToolViaDirectDownload } from './toolLauncher.js';
 import { TOOLS } from '@shared/tools.js';
 import { launchClaudeInTerminal, launchClaudeWithContext, resolveClaudePath } from './claudeBridge.js';
@@ -1487,6 +1487,28 @@ export function registerIpcHandlers() {
       return { ok: false, error: { code: 'E_LHM_NOT_FOUND', message: 'LibreHardwareMonitor.exe could not be located. Install via WinGet (LibreHardwareMonitor.LibreHardwareMonitor) or set the path manually.' } };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Failed to open LHM' } };
+    }
+  });
+
+  // v2.5.17 (first-run wizard W5): fire Invoke-PCDoctor.ps1 -Mode Report in
+  // the background so the dashboard has data on first launch. Fire-and-forget —
+  // the wizard shows "Scan started" and advances; the scanner writes
+  // C:\ProgramData\PCDoctor\reports\latest.json asynchronously (~60 seconds).
+  ipcMain.handle('api:triggerInitialScan', async (): Promise<IpcResult<null>> => {
+    try {
+      const scriptPath = path.join(PCDOCTOR_ROOT, 'Invoke-PCDoctor.ps1');
+      if (!existsSync(scriptPath)) {
+        return { ok: false, error: { code: 'E_SCAN_SCRIPT_MISSING', message: 'Invoke-PCDoctor.ps1 not found at C:\\ProgramData\\PCDoctor\\. Run the scanner manually from the troubleshooting section in README.' } };
+      }
+      const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
+      const child = spawn(pwsh, [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive',
+        '-File', scriptPath, '-Mode', 'Report',
+      ], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return { ok: true, data: null };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_SCAN_SPAWN_FAILED', message: e?.message ?? 'Failed to start initial scan' } };
     }
   });
 }

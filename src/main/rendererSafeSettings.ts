@@ -32,6 +32,10 @@ export const RENDERER_SAFE_KEYS: ReadonlySet<string> = new Set<string>([
   // no sensitive data). Written main-side by api:getNvidiaDriverLatest;
   // read renderer-side on Updates.tsx mount to hydrate staleness UI.
   'nvidia_check_cache',
+  // v2.5.17: first-run wizard completion flag. '1' when the wizard has been
+  // dismissed. Read renderer-side on mount to skip the wizard on subsequent
+  // launches. Written by the wizard via api:setSetting.
+  'first_run_complete',
 ]);
 
 /**

@@ -125,6 +125,8 @@ describe('rendererSafeSettings allowlist', () => {
         'auto_block_rdp_bruteforce',
         'digest_hour',
         'email_digest_recipient',
+        // v2.5.17: first-run wizard completion flag
+        'first_run_complete',
         'nvidia_check_cache',
         'obsidian_archive_dir',
         'quiet_hours_end',

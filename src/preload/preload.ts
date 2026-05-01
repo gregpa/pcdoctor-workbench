@@ -112,6 +112,9 @@ const api = {
   // Server is off" banner. Main-side resolves the install path via
   // hardcoded WinGet default + glob fallback + live Get-Process lookup.
   openLhm: (): Promise<IpcResult<{ path: string }>> => ipcRenderer.invoke('api:openLhm'),
+  // v2.5.17 (first-run wizard W5): fire Invoke-PCDoctor.ps1 -Mode Report in
+  // the background so the dashboard has data on first launch. Fire-and-forget.
+  triggerInitialScan: (): Promise<IpcResult<null>> => ipcRenderer.invoke('api:triggerInitialScan'),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

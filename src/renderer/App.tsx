@@ -12,12 +12,14 @@ import { Claude } from './pages/Claude.js';
 import { Autopilot } from './pages/Autopilot.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ClaudeApprovalListener } from './components/layout/ClaudeApprovalListener.js';
+import { FirstRunWizard } from './components/layout/FirstRunWizard.js';
 import { ConfirmProvider } from './lib/confirmContext.js';
 import './styles/globals.css';
 
 export function App() {
   return (
     <ConfirmProvider>
+      <FirstRunWizard />
       <ClaudeApprovalListener />
       <HashRouter>
         {/* v2.4.24: outer container is fixed to viewport height + hides
