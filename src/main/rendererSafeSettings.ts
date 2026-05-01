@@ -43,6 +43,11 @@ export const RENDERER_SAFE_KEYS: ReadonlySet<string> = new Set<string>([
   'forecast_cpu_load_warn', 'forecast_cpu_load_crit',
   'forecast_disk_free_warn', 'forecast_disk_free_crit',
   'forecast_events_warn', 'forecast_events_crit',
+  // v2.5.18: wizard-persisted settings
+  'nas_enabled', 'nas_brand',
+  'obsidian_enabled', 'wsl_memory_limit_gb', 'claude_detected',
+  'wizard_completed_at', 'wizard_version',
+  'autopilot_enabled',
 ]);
 
 /**

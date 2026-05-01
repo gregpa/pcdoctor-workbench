@@ -644,6 +644,24 @@ export function Settings() {
         </div>
       </section>
 
+      {/* Re-run wizard */}
+      <section className="mb-6 pcd-section">
+        <h2 className="text-sm font-bold mb-3">Setup Wizard</h2>
+        <p className="text-xs text-text-secondary mb-3">
+          Re-run the first-time setup wizard to reconfigure hardware detection,
+          thresholds, notifications, and autopilot rules.
+        </p>
+        <button
+          onClick={async () => {
+            await api.setSetting('first_run_complete', '0');
+            window.dispatchEvent(new Event('pcd:rerun-wizard'));
+          }}
+          className="px-3 py-1.5 rounded-md text-xs pcd-button"
+        >
+          Re-run Setup Wizard
+        </button>
+      </section>
+
       {/* About */}
       <section className="pcd-section">
         <h2 className="text-sm font-bold mb-3">About</h2>

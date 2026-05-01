@@ -145,6 +145,8 @@ export function Dashboard() {
   const [expandedTrend, setExpandedTrend] = useState<null | { title: string; trend: Trend; unit: string; yDomain?: [number, number] }>(null);
   // v2.4.13: bump after a NAS @Recycle empty so the panel re-fetches sizes.
   const [nasRefreshToken, setNasRefreshToken] = useState(0);
+  // Task-18: hide NAS panel when wizard set nas_enabled='0'. Default true for backward compat.
+  const [nasEnabled, setNasEnabled] = useState(true);
   // v2.4.6: Event Log chart click-to-expand. Opens a modal that fetches
   // Get-EventLogBreakdown.ps1 on demand and lists the top providers/IDs.
   const [showEventLogDetail, setShowEventLogDetail] = useState(false);
@@ -161,6 +163,19 @@ export function Dashboard() {
     if (r?.ok) setLastActionSuccess(r.data);
   }, []);
   useEffect(() => { refreshLastSuccess(); }, [refreshLastSuccess]);
+
+  // Task-18: read wizard nas_enabled setting
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.getSettings();
+        if (!alive || !r.ok) return;
+        if (r.data['nas_enabled'] === '0') setNasEnabled(false);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   // v2.4.38: log every Dashboard render so we can detect render storms
   // during a resize drag once the window is unlocked in v2.4.39. One
@@ -485,45 +500,47 @@ export function Dashboard() {
          mapped network drives via Get-NasDrives.ps1; shows offline ones
          grayed out with a reachable=false flag. Per-drive confirm button
          only (no "empty all" to avoid misclicks across 14 TB shares). */}
-      <NasRecycleBinPanel
-        refreshToken={nasRefreshToken}
-        onEmptyDrive={async (letter) => {
-          // v2.5.21: show a start toast so the user knows the 2-4 minute
-          // SMB operation is running. Prior UX: zero feedback during the
-          // entire operation → user thinks it failed.
-          setToastVariant('default');
-          setToast(`Emptying ${letter}:\\@Recycle — this may take a few minutes…`);
-          const err = await run({ name: 'empty_nas_recycle_bin', params: { drive_letter: letter } });
-          if (err) {
-            setToastVariant('error');
-            setToast(`Empty ${letter}:\\@Recycle failed: ${err.message}`);
-          } else {
-            const result = (window as any).__lastActionResult as {
-              bytes_freed?: number; entries_deleted?: number;
-              entries_errors?: unknown[]; status?: string;
-            } | undefined;
-            if (result?.status === 'empty') {
-              setToastVariant('noop');
-              setToast(`${letter}:\\@Recycle was already empty — nothing to do.`);
-            } else if (result?.bytes_freed) {
-              const freed = fmtBytesShort(result.bytes_freed);
-              const errCount = result.entries_errors?.length ?? 0;
-              if (errCount > 0) {
-                setToastVariant('default');
-                setToast(`Freed ${freed} from ${letter}:\\@Recycle (${errCount} item${errCount > 1 ? 's' : ''} failed — SMB timeout).`);
+      {nasEnabled && (
+        <NasRecycleBinPanel
+          refreshToken={nasRefreshToken}
+          onEmptyDrive={async (letter) => {
+            // v2.5.21: show a start toast so the user knows the 2-4 minute
+            // SMB operation is running. Prior UX: zero feedback during the
+            // entire operation → user thinks it failed.
+            setToastVariant('default');
+            setToast(`Emptying ${letter}:\\@Recycle — this may take a few minutes…`);
+            const err = await run({ name: 'empty_nas_recycle_bin', params: { drive_letter: letter } });
+            if (err) {
+              setToastVariant('error');
+              setToast(`Empty ${letter}:\\@Recycle failed: ${err.message}`);
+            } else {
+              const result = (window as any).__lastActionResult as {
+                bytes_freed?: number; entries_deleted?: number;
+                entries_errors?: unknown[]; status?: string;
+              } | undefined;
+              if (result?.status === 'empty') {
+                setToastVariant('noop');
+                setToast(`${letter}:\\@Recycle was already empty — nothing to do.`);
+              } else if (result?.bytes_freed) {
+                const freed = fmtBytesShort(result.bytes_freed);
+                const errCount = result.entries_errors?.length ?? 0;
+                if (errCount > 0) {
+                  setToastVariant('default');
+                  setToast(`Freed ${freed} from ${letter}:\\@Recycle (${errCount} item${errCount > 1 ? 's' : ''} failed — SMB timeout).`);
+                } else {
+                  setToastVariant('default');
+                  setToast(`Freed ${freed} from ${letter}:\\@Recycle.`);
+                }
               } else {
                 setToastVariant('default');
-                setToast(`Freed ${freed} from ${letter}:\\@Recycle.`);
+                setToast(`Empty ${letter}:\\@Recycle completed.`);
               }
-            } else {
-              setToastVariant('default');
-              setToast(`Empty ${letter}:\\@Recycle completed.`);
             }
-          }
-          setTimeout(() => setToast(null), 6000);
-          setNasRefreshToken((t) => t + 1);
-        }}
-      />
+            setTimeout(() => setToast(null), 6000);
+            setNasRefreshToken((t) => t + 1);
+          }}
+        />
+      )}
 
       <TodaysActionsWidget status={status} />
 

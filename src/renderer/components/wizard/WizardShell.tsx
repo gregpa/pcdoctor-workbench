@@ -76,6 +76,13 @@ export function WizardShell() {
     return () => { cancelled = true; };
   }, []);
 
+  // Listen for re-run request from Settings page.
+  useEffect(() => {
+    const handler = () => setVisible(true);
+    window.addEventListener('pcd:rerun-wizard', handler);
+    return () => window.removeEventListener('pcd:rerun-wizard', handler);
+  }, []);
+
   // Still loading or already completed — render nothing.
   if (visible === null || visible === false) return null;
 
