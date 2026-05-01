@@ -255,17 +255,19 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
                         title={isOffline
                           ? 'Drive offline'
                           : d.recycle_bytes === null
-                            ? `Empty ${d.letter}\\@Recycle (size computed on click)`
+                            ? `Empty ${d.letter}\\@Recycle — size scanning in background, click Refresh to update`
                             : (d.recycle_bytes ?? 0) === 0
-                              ? '@Recycle is empty or missing'
+                              ? `Empty ${d.letter}\\@Recycle (@Recycle is empty or missing)`
                               : `Empty ${d.letter}\\@Recycle (${fmtBytes(d.recycle_bytes)})`}
                         className="px-2 py-1 rounded-md text-[10px] bg-status-warn/20 border border-status-warn/50 text-status-warn hover:bg-status-warn/30 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                       >
                         {busy === d.letter
                           ? '...'
                           : d.recycle_bytes === null
-                            ? '🗑 Empty'
-                            : `🗑 ${fmtBytes(d.recycle_bytes)}`}
+                            ? '🗑 Empty…'
+                            : d.recycle_bytes === 0
+                              ? '🗑 Empty'
+                              : `🗑 ${fmtBytes(d.recycle_bytes)}`}
                       </button>
                     ) : (
                       // Placeholder keeps row heights aligned when mixing local

@@ -139,10 +139,13 @@ describe('<NasRecycleBinPanel>', () => {
     vi.stubGlobal('api', makeApi([drive({ recycle_bytes: null, reachable: true })]));
     render(<NasRecycleBinPanel onEmptyDrive={noop} />);
     await waitFor(() => expect(screen.getByText('M:')).toBeTruthy());
-    const trashBtn = screen.getByTitle(/size computed on click/);
+    // v2.5.18: tooltip now says "size scanning in background" instead of
+    // "size computed on click" to reflect the auto-spawn behaviour.
+    const trashBtn = screen.getByTitle(/size scanning in background/);
     expect(trashBtn).not.toBeDisabled();
-    // Button label uses 'Empty' fallback rather than '-' when size is unknown.
-    expect(screen.getByRole('button', { name: /🗑 Empty/ })).toBeTruthy();
+    // v2.5.18: label shows '🗑 Empty…' (ellipsis signals pending size) when
+    // recycle_bytes is null, to distinguish "size unknown" from "size is 0".
+    expect(screen.getByRole('button', { name: /🗑 Empty…/ })).toBeTruthy();
   });
 
   it('clicking the trash button calls onEmptyDrive with the letter without the colon', async () => {

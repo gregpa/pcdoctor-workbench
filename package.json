@@ -1,6 +1,6 @@
 {
     "name":  "pcdoctor-workbench",
-    "version":  "2.5.17",
+    "version":  "2.5.18",
     "engines":  {
                     "node":  "\u003e=17.3.0"
                 },

@@ -172,6 +172,13 @@ export function validateImportedRule(raw: unknown): { ok: true; rule: ValidatedI
 // per-call so a stuck queue dir can't block the IPC handler.
 const NAS_RECYCLE_QUEUE_DIR = 'C:\\ProgramData\\PCDoctor\\queue';
 const NAS_RECYCLE_QUEUE_MAX_FILES = 50;
+// v2.5.18: throttle for the background auto-refresh of @Recycle sizes.
+// When getNasDrives finds reachable network drives with no cached size,
+// it spawns Refresh-NasRecycleSizes.ps1 once per 5 min so the user
+// sees real bytes after clicking the panel's Refresh button rather than
+// waiting until the next 03:00 daily scheduled run.
+let _nasRecycleRefreshSentAt = 0;
+const _NAS_REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 
 interface QueueRow {
   letter: unknown;
@@ -1384,6 +1391,27 @@ export function registerIpcHandlers() {
         }
         return { ...d, recycle_bytes_cache_age_ms: null };
       });
+      // v2.5.18: if any reachable network drive has no cached @Recycle size,
+      // kick off Refresh-NasRecycleSizes.ps1 in the background so the NEXT
+      // panel Refresh shows real bytes. Avoids the user waiting until the
+      // next 03:00 daily scheduled run on a fresh install or after a long
+      // gap since the task last fired. Throttled to once per 5 min.
+      const hasUncached = enriched.some(
+        d => d.kind === 'network' && d.reachable && d.recycle_bytes === null
+      );
+      if (hasUncached && (Date.now() - _nasRecycleRefreshSentAt) > _NAS_REFRESH_THROTTLE_MS) {
+        _nasRecycleRefreshSentAt = Date.now();
+        const refreshScript = path.join(PCDOCTOR_ROOT, 'Refresh-NasRecycleSizes.ps1');
+        if (existsSync(refreshScript)) {
+          const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
+          const child = spawn(
+            pwsh,
+            ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-File', refreshScript],
+            { detached: true, stdio: 'ignore' }
+          );
+          child.unref();
+        }
+      }
       return { ok: true, data: enriched };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to enumerate drives' } };
