@@ -120,16 +120,9 @@ export function W6ToolsCatalog() {
           const inst = buildInstalledSet(result.data);
           setInstalledSet(inst);
 
-          // If first visit (no prior selections), pre-select not-installed tools
+          // If first visit (no prior selections), pre-check installed tools
           if (state.selectedTools.length === 0) {
-            const preSelected = new Set<string>();
-            for (const [id, def] of Object.entries(TOOLS)) {
-              // Pre-select tools that aren't installed and aren't native (native are always available)
-              if (!inst.has(id) && def.category !== 'native') {
-                preSelected.add(id);
-              }
-            }
-            setSelected(preSelected);
+            setSelected(new Set(inst));
           }
         } else {
           setError(result.error?.message ?? 'Unknown error checking tools.');
@@ -204,7 +197,7 @@ export function W6ToolsCatalog() {
       <div>
         <h2 className="text-lg font-bold text-text-primary">Diagnostic Tools</h2>
         <p className="text-sm text-text-secondary mt-0.5">
-          Select tools to install. Already-installed tools are marked with a checkmark.
+          Select tools to install. Already-installed tools are marked with a green badge.
         </p>
       </div>
 

@@ -156,7 +156,7 @@ export function W8Integrations() {
           </button>
         </div>
         <p className="text-xs text-text-secondary mt-1">
-          Save weekly review reports to an Obsidian vault?
+          Save weekly review reports to a local folder (e.g. an Obsidian vault or any directory).
           {obsidianInstalled && ' Obsidian was detected on this system.'}
         </p>
 
@@ -201,6 +201,7 @@ export function W8Integrations() {
           </div>
           <p className="text-xs text-text-secondary mt-1">
             Your system has {totalRamGb} GB RAM. WSL defaults to using {wslDefault} GB.
+            Capping WSL memory prevents Linux subsystem processes from starving Windows apps.
           </p>
 
           {wslEnabled && (

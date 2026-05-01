@@ -109,33 +109,31 @@ describe('<W6ToolsCatalog>', () => {
       expect(screen.getByText('Diagnostic Tools')).toBeInTheDocument();
     });
 
-    // Initially, non-native not-installed tools are pre-selected.
-    // Find the OCCT checkbox (installed tool — should not be pre-selected since it's already installed)
+    // Initially, installed tools are pre-checked.
+    // OCCT is installed — should be pre-checked.
     const occtCheckbox = screen.getByLabelText(/OCCT/);
+    expect(occtCheckbox).toBeChecked();
 
-    // OCCT is installed, so it shouldn't contribute to "selected for installation" count
-    // Let's toggle HWiNFO64 off (it's not installed, should be pre-selected)
+    // HWiNFO64 is not installed — should NOT be pre-checked.
     const hwinfoCheckbox = screen.getByLabelText(/HWiNFO64/);
+    expect(hwinfoCheckbox).not.toBeChecked();
 
-    // Get current count text
-    const countBefore = screen.getByText(/selected for installation/);
-    expect(countBefore).toBeInTheDocument();
+    // No not-installed tools are selected, so count shows "No new tools selected"
+    expect(screen.getByText(/No new tools selected/)).toBeInTheDocument();
 
-    // Uncheck HWiNFO64
+    // Check HWiNFO64 (not installed) — should increase "for installation" count
     fireEvent.click(hwinfoCheckbox);
 
-    // The count should decrease by 1
     await waitFor(() => {
-      // After unchecking one, count should update
-      const countText = screen.getByText(/selected for installation|No new tools selected/);
+      const countText = screen.getByText(/1 tool selected for installation/);
       expect(countText).toBeInTheDocument();
     });
 
-    // Toggle OCCT on (installed tool — selecting it shouldn't increase "for installation" count since it's already installed)
+    // Uncheck OCCT (installed) — unchecking an installed tool doesn't change installation count
     fireEvent.click(occtCheckbox);
 
     await waitFor(() => {
-      expect(occtCheckbox).toBeChecked();
+      expect(occtCheckbox).not.toBeChecked();
     });
   });
 
