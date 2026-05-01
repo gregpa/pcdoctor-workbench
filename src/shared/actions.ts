@@ -320,10 +320,10 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'apply_wsl_cap', label: 'Apply WSL Memory Cap',
     ps_script: 'actions/Apply-WSLCap.ps1',
     confirm_level: 'risky', rollback_tier: 'B',
-    snapshot_paths: ['C:\\Users\\greg_\\.wslconfig'],
+    snapshot_paths: [`${process.env.USERPROFILE ?? ''}\\.wslconfig`],
     estimated_duration_s: 15,
     category: 'perf', icon: '🧠',
-    tooltip: 'Writes C:\\Users\\greg_\\.wslconfig with memory=8GB + swap=4GB then wsl --shutdown. Prevents WSL eating all 32 GB overnight.',
+    tooltip: 'Writes %USERPROFILE%\\.wslconfig with memory=8GB + swap=4GB then wsl --shutdown. Prevents WSL eating all your system RAM overnight.',
   },
   fix_shell_overlays: {
     name: 'fix_shell_overlays', label: 'Fix Shell Overlays',

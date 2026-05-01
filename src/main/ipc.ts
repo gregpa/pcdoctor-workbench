@@ -530,9 +530,10 @@ export function registerIpcHandlers() {
       // setting so fresh installs on other machines don't try to write
       // into a non-existent directory.
       const configured = getSetting('obsidian_archive_dir') ?? '';
-      const obsidianDir = configured.trim()
-        ? configured
-        : path.join(app.getPath('documents'), 'PCDoctor', 'Weekly Reviews');
+      const obsidianDir = configured.trim();
+      if (!obsidianDir) {
+        return { ok: false, error: { code: 'E_NOT_CONFIGURED', message: 'obsidian_archive_dir is not configured in Settings. Set it to an Obsidian vault path to enable archiving.' } };
+      }
       await mkdir(obsidianDir, { recursive: true });
       const destPath = path.join(obsidianDir, `${reviewDate}.md`);
       await copyFile(sourceMd, destPath);
