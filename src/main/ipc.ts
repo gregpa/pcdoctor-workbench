@@ -881,6 +881,13 @@ export function registerIpcHandlers() {
       'obsidian_archive_dir',
       // v2.5.18: first-run wizard completion flag
       'first_run_complete',
+      // Configurable forecast thresholds (wizard-prep Task 3)
+      'forecast_cpu_temp_warn', 'forecast_cpu_temp_crit',
+      'forecast_gpu_temp_warn', 'forecast_gpu_temp_crit',
+      'forecast_ram_warn_pct', 'forecast_ram_crit_pct',
+      'forecast_cpu_load_warn', 'forecast_cpu_load_crit',
+      'forecast_disk_free_warn', 'forecast_disk_free_crit',
+      'forecast_events_warn', 'forecast_events_crit',
     ]);
     const isWritable = (k: string) => WRITABLE_KEYS.has(k) || k.startsWith('event:');
     if (!isWritable(key)) {

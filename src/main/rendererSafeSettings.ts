@@ -36,6 +36,13 @@ export const RENDERER_SAFE_KEYS: ReadonlySet<string> = new Set<string>([
   // dismissed. Read renderer-side on mount to skip the wizard on subsequent
   // launches. Written by the wizard via api:setSetting.
   'first_run_complete',
+  // Configurable forecast thresholds (wizard-prep Task 3)
+  'forecast_cpu_temp_warn', 'forecast_cpu_temp_crit',
+  'forecast_gpu_temp_warn', 'forecast_gpu_temp_crit',
+  'forecast_ram_warn_pct', 'forecast_ram_crit_pct',
+  'forecast_cpu_load_warn', 'forecast_cpu_load_crit',
+  'forecast_disk_free_warn', 'forecast_disk_free_crit',
+  'forecast_events_warn', 'forecast_events_crit',
 ]);
 
 /**
