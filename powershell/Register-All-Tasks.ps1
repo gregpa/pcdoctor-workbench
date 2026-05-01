@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Continue'
 # missing (e.g. running from C:\ProgramData\PCDoctor where ..\package.json
 # doesn't exist), the hardcoded fallback below applies. The fallback literal
 # is updated alongside the package.json bump per release.
-$ScriptVersion = '2.5.18'
+$ScriptVersion = '2.5.19'
 try {
     $pkgPath = Join-Path $PSScriptRoot '..\package.json'
     if (Test-Path $pkgPath) {
