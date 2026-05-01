@@ -22,6 +22,8 @@ import { W3NetworkNas } from './steps/W3NetworkNas.js';
 import { W4SecurityBaseline } from './steps/W4SecurityBaseline.js';
 import { W5Notifications } from './steps/W5Notifications.js';
 import { W6ToolsCatalog } from './steps/W6ToolsCatalog.js';
+import { W7AutopilotRules } from './steps/W7AutopilotRules.js';
+import { W8Integrations } from './steps/W8Integrations.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -149,6 +151,8 @@ function WizardOverlay({ onDone }: { onDone: () => void }) {
             : currentStep === 3 ? <W4SecurityBaseline />
             : currentStep === 4 ? <W5Notifications />
             : currentStep === 5 ? <W6ToolsCatalog />
+            : currentStep === 6 ? <W7AutopilotRules />
+            : currentStep === 7 ? <W8Integrations />
             : <StepPlaceholder index={currentStep} label={STEP_LABELS[currentStep]} />}
         </div>
 
