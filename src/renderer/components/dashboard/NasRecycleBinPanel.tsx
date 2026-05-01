@@ -241,13 +241,10 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
                         : `${fmtBytes(d.used_bytes)} / ${fmtBytes(d.total_bytes)}`}
                     </span>
                     {isNetwork ? (
-                      // v2.4.50 (B49-NAS-1): button enabled whenever the
-                      // drive is reachable. Pre-2.4.50 we gated on
-                      // `recycle_bytes > 0` but Get-NasDrives.ps1 no longer
-                      // populates that field (the recursive SMB scan blew
-                      // the 30s IPC budget). The actual empty operation
-                      // computes size on-demand inside Empty-NasRecycleBin.ps1
-                      // and no-ops gracefully if @Recycle is missing/empty.
+                      // v2.5.21: button enlarged from 10px→11px with min-w
+                      // so the "🗑 246.7 GB" label is readable. Prior 10px
+                      // button rendered as an unreadable square at typical
+                      // dashboard widths.
                       <button
                         type="button"
                         onClick={() => void handleEmpty(d)}
@@ -257,14 +254,14 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
                           : d.recycle_bytes === null
                             ? `Empty ${d.letter}\\@Recycle — size scanning in background, click Refresh to update`
                             : (d.recycle_bytes ?? 0) === 0
-                              ? `Empty ${d.letter}\\@Recycle (@Recycle is empty or missing)`
-                              : `Empty ${d.letter}\\@Recycle (${fmtBytes(d.recycle_bytes)})`}
-                        className="px-2 py-1 rounded-md text-[10px] bg-status-warn/20 border border-status-warn/50 text-status-warn hover:bg-status-warn/30 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
+                              ? `${d.letter}\\@Recycle is empty`
+                              : `Empty ${d.letter}\\@Recycle — reclaim ${fmtBytes(d.recycle_bytes)}`}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-medium min-w-[80px] text-center bg-status-warn/20 border border-status-warn/50 text-status-warn hover:bg-status-warn/30 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                       >
                         {busy === d.letter
-                          ? '...'
+                          ? '⏳ Emptying…'
                           : d.recycle_bytes === null
-                            ? '🗑 Empty…'
+                            ? '🗑 Scanning…'
                             : d.recycle_bytes === 0
                               ? '🗑 Empty'
                               : `🗑 ${fmtBytes(d.recycle_bytes)}`}
@@ -273,7 +270,7 @@ export function NasRecycleBinPanel({ onEmptyDrive, refreshToken = 0 }: NasRecycl
                       // Placeholder keeps row heights aligned when mixing local
                       // + network drives. The existing "Empty All Recycle Bins"
                       // Quick Action is where local $Recycle.Bin cleanup lives.
-                      <span className="text-[10px] text-text-secondary italic whitespace-nowrap w-[72px] text-right">-</span>
+                      <span className="text-[11px] text-text-secondary italic whitespace-nowrap min-w-[80px] text-right">-</span>
                     )}
                   </div>
                   <div className="relative h-1 w-full rounded bg-surface-700 overflow-hidden">

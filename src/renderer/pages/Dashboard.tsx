@@ -37,6 +37,15 @@ import type { ActionName, ServiceHealth, SmartEntry } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 import { logPerf } from '@renderer/lib/perfLog.js';
 
+// v2.5.21: compact byte formatter for toasts (NAS @Recycle feedback).
+function fmtBytesShort(n: number): string {
+  if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(2)} TB`;
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024)      return `${(n / 1024).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
 const QUICK_ACTIONS: ActionName[] = [
   'clear_temp_files', 'flush_dns',
   'rebuild_search_index', 'run_sfc',
@@ -479,9 +488,39 @@ export function Dashboard() {
       <NasRecycleBinPanel
         refreshToken={nasRefreshToken}
         onEmptyDrive={async (letter) => {
-          // v2.4.16: actionRunner does snake_case -> PascalCase properly,
-          // so 'drive_letter' -> '-DriveLetter' -> $DriveLetter PS param.
-          await handleAction('empty_nas_recycle_bin', { drive_letter: letter });
+          // v2.5.21: show a start toast so the user knows the 2-4 minute
+          // SMB operation is running. Prior UX: zero feedback during the
+          // entire operation → user thinks it failed.
+          setToastVariant('default');
+          setToast(`Emptying ${letter}:\\@Recycle — this may take a few minutes…`);
+          const err = await run({ name: 'empty_nas_recycle_bin', params: { drive_letter: letter } });
+          if (err) {
+            setToastVariant('error');
+            setToast(`Empty ${letter}:\\@Recycle failed: ${err.message}`);
+          } else {
+            const result = (window as any).__lastActionResult as {
+              bytes_freed?: number; entries_deleted?: number;
+              entries_errors?: unknown[]; status?: string;
+            } | undefined;
+            if (result?.status === 'empty') {
+              setToastVariant('noop');
+              setToast(`${letter}:\\@Recycle was already empty — nothing to do.`);
+            } else if (result?.bytes_freed) {
+              const freed = fmtBytesShort(result.bytes_freed);
+              const errCount = result.entries_errors?.length ?? 0;
+              if (errCount > 0) {
+                setToastVariant('default');
+                setToast(`Freed ${freed} from ${letter}:\\@Recycle (${errCount} item${errCount > 1 ? 's' : ''} failed — SMB timeout).`);
+              } else {
+                setToastVariant('default');
+                setToast(`Freed ${freed} from ${letter}:\\@Recycle.`);
+              }
+            } else {
+              setToastVariant('default');
+              setToast(`Empty ${letter}:\\@Recycle completed.`);
+            }
+          }
+          setTimeout(() => setToast(null), 6000);
           setNasRefreshToken((t) => t + 1);
         }}
       />
