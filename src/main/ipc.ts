@@ -1549,6 +1549,20 @@ export function registerIpcHandlers() {
       return { ok: false, error: { code: 'E_SCAN_SPAWN_FAILED', message: e?.message ?? 'Failed to start initial scan' } };
     }
   });
+
+  // v2.6.0 (wizard W2): system hardware profile for the first-run wizard.
+  // Runs Get-SystemProfile.ps1 which queries CIM for CPU/RAM/GPU/OS/drives
+  // plus WSL/Claude/Obsidian detection. ~2s, no admin required.
+  ipcMain.handle('api:getSystemProfile', async (): Promise<IpcResult<import('@shared/types.js').SystemProfile>> => {
+    try {
+      const r = await runPowerShellScript<import('@shared/types.js').SystemProfile>(
+        'Get-SystemProfile.ps1', ['-JsonOutput'], { timeoutMs: 15_000 },
+      );
+      return { ok: true, data: r };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_SYSTEM_PROFILE', message: e?.message ?? 'Failed to collect system profile' } };
+    }
+  });
 }
 
 /**
