@@ -693,6 +693,19 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Adds C:\\ProgramData\\PCDoctor to Windows Defender\'s ExclusionPath list. Stops real-time scanning overhead on every scanner read/write. Idempotent — re-running when the path is already excluded is a no-op. Admin required. Tamper Protection may block this; if so the action reports E_TAMPER_PROTECTION with manual fallback instructions.',
   },
 
+  // v2.5.18 (W9): Register all PCDoctor scheduled tasks via Register-All-Tasks.ps1.
+  // Runs the task-registration script with UAC elevation. Called from the
+  // first-run wizard and from Settings > Scheduled Tasks.
+  register_scheduled_tasks: {
+    name: 'register_scheduled_tasks', label: 'Register Scheduled Tasks',
+    ps_script: 'Register-All-Tasks.ps1',
+    confirm_level: 'none', rollback_tier: 'C',
+    estimated_duration_s: 10,
+    needs_admin: true,
+    category: 'internal', icon: '📅',
+    tooltip: 'Registers all PCDoctor maintenance tasks with Windows Task Scheduler. Requires administrator elevation.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

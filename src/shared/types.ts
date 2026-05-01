@@ -233,6 +233,8 @@ export type ActionName =
   | 'add_lhm_to_cfa_allowlist'
   // v2.5.17 (first-run wizard W2) - Add C:\ProgramData\PCDoctor to Defender exclusions
   | 'add_pcdoctor_exclusion'
+  // v2.5.18 (first-run wizard W9) - Register all scheduled tasks
+  | 'register_scheduled_tasks'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
