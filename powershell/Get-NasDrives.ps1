@@ -131,25 +131,44 @@ foreach ($d in $allDrives) {
             $totalBytes = [int64]$d.Size
         } catch { }
 
-        # v2.4.50 (B49-NAS-1): @Recycle size scanning REMOVED from this
-        # hot path. Pre-2.4.50 the script ran `Get-ChildItem -Recurse` over
-        # each network share's @Recycle folder. On Greg's QNAP that took
-        # 21.5s for M:\@Recycle alone (4 huge Plex video files producing
-        # SMB metadata round-trips per directory) plus 3.5s for Z:, easily
-        # blowing the 30s IPC timeout and breaking the entire drive panel.
-        #
-        # `recycle_bytes` is now always `$null` for network drives. The UI
-        # gates the trash button on `unc` presence instead of size > 0.
-        # The actual empty operation (Empty-NasRecycleBin.ps1) computes
-        # size on-demand in the action runner, which has its own 5-min
-        # action timeout (not the 30s IPC budget) so a slow share is
-        # tolerable there.
-        #
-        # Future v2.4.51+: scheduled-task background refresh of @Recycle
-        # sizes into a cache; UI reads cache (always fast). For now,
-        # simplicity wins.
-        $recycleBytes = $null
-        # Local + removable drives also leave $recycleBytes = $null. The
+        # v2.5.19: fast inline @Recycle size scan reinstated, replacing the
+        # v2.4.50 removal. The old Get-ChildItem -Recurse approach took 21.5s
+        # on M:\@Recycle (PS object marshalling per file over SMB). The new
+        # approach uses raw .NET GetFiles/GetDirectories (one SMB op per dir,
+        # no PS object overhead) with a strict 3s per-drive hard cap. 6 NAS
+        # drives × 3s = 18s worst case, within the 30s IPC budget. If a drive
+        # times out, recycle_bytes stays null and the background cache
+        # (Refresh-NasRecycleSizes.ps1) fills it in on the next daily run.
+        if ($isNetwork) {
+            $recyclePath = "$letter`:\@Recycle"
+            if (Test-Path $recyclePath -ErrorAction SilentlyContinue) {
+                $driveSw = [System.Diagnostics.Stopwatch]::StartNew()
+                $scanSum = [int64]0
+                $scanTimedOut = $false
+                $dirStack = [System.Collections.Generic.Stack[string]]::new()
+                $dirStack.Push($recyclePath)
+                try {
+                    while ($dirStack.Count -gt 0 -and -not $scanTimedOut) {
+                        $curDir = $dirStack.Pop()
+                        try {
+                            foreach ($f in [System.IO.Directory]::GetFiles($curDir)) {
+                                try { $scanSum += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                                if ($driveSw.ElapsedMilliseconds -gt 3000) { $scanTimedOut = $true; break }
+                            }
+                            if (-not $scanTimedOut) {
+                                foreach ($sub in [System.IO.Directory]::GetDirectories($curDir)) {
+                                    $dirStack.Push($sub)
+                                }
+                            }
+                        } catch { }  # access-denied on this dir — skip
+                    }
+                } catch { $scanTimedOut = $true }
+                if (-not $scanTimedOut) { $recycleBytes = $scanSum }
+            } else {
+                $recycleBytes = [int64]0  # @Recycle doesn't exist → truly empty
+            }
+        }
+        # Local + removable drives leave $recycleBytes = $null. The
         # UI uses `kind === 'network'` to decide whether to show the @Recycle
         # button at all (local $Recycle.Bin is handled by the existing
         # empty_recycle_bins Quick Action).
