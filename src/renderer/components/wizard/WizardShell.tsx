@@ -18,6 +18,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { WizardProvider, useWizard } from './WizardContext.js';
 import { W1Welcome } from './steps/W1Welcome.js';
 import { W2SystemProfile } from './steps/W2SystemProfile.js';
+import { W3NetworkNas } from './steps/W3NetworkNas.js';
+import { W4SecurityBaseline } from './steps/W4SecurityBaseline.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -141,6 +143,8 @@ function WizardOverlay({ onDone }: { onDone: () => void }) {
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {currentStep === 0 ? <W1Welcome />
             : currentStep === 1 ? <W2SystemProfile />
+            : currentStep === 2 ? <W3NetworkNas />
+            : currentStep === 3 ? <W4SecurityBaseline />
             : <StepPlaceholder index={currentStep} label={STEP_LABELS[currentStep]} />}
         </div>
 
