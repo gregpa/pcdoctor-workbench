@@ -878,6 +878,8 @@ export function registerIpcHandlers() {
       'email_digest_recipient', 'digest_hour',
       'auto_block_rdp_bruteforce',
       'obsidian_archive_dir',
+      // v2.5.18: first-run wizard completion flag
+      'first_run_complete',
     ]);
     const isWritable = (k: string) => WRITABLE_KEYS.has(k) || k.startsWith('event:');
     if (!isWritable(key)) {
