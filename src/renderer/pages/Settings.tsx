@@ -359,7 +359,7 @@ export function Settings() {
         <h2 className="text-sm font-bold mb-3">🌐 NAS / SMB Mappings</h2>
         <div className="text-xs text-text-secondary mb-3">
           Server IP and drive mappings used by the scanner and Remap NAS Drives action.
-          Previously hardcoded to Greg's QNAP at 192.168.50.226 — now configurable per install.
+          Configure your NAS server address and SMB share mappings below.
           Changes write immediately to <code>C:\ProgramData\PCDoctor\settings\nas.json</code>.
         </div>
         {!nasLoaded ? (
@@ -371,7 +371,7 @@ export function Settings() {
               type="text"
               value={nasServer}
               onChange={(e) => { setNasServer(e.target.value); setNasDirty(true); }}
-              placeholder="192.168.50.226"
+              placeholder="e.g. 192.168.1.100 or nas.local"
               className="w-full mb-3 px-2 py-1.5 text-xs font-mono bg-surface-900 border border-surface-600 rounded"
             />
             <label className="block text-xs font-semibold mb-1">Drive mappings</label>

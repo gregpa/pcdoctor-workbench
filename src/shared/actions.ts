@@ -265,7 +265,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     snapshot_paths: [],  // registry snapshot handled inside script
     estimated_duration_s: 30,
     category: 'network', icon: '🌐',
-    tooltip: 'Re-establishes all 6 persistent SMB mappings to QNAP NAS (M:, Z:, W:, V:, B:, U:). Removes stuck sessions first.',
+    tooltip: 'Re-establishes all persistent SMB mappings configured in Settings > NAS. Removes stuck sessions first.',
   },
 
   // ============== SERVICE / PROCESS ==============
