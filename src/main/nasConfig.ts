@@ -16,11 +16,13 @@ import { getSetting, setSetting } from './dataStore.js';
  */
 
 /**
- * Greg's QNAP, preserved as the default so existing installs behave
- * identically after upgrade. Forks + fresh installs should edit these
- * via the Settings page.
+ * v2.6.0 (public branch): defaults are empty so fresh installs start
+ * clean. The first-run wizard (or Settings page) populates these from
+ * auto-detected network drives. Existing installs that already wrote
+ * nas_server / nas_mappings to the DB are unaffected — readNasConfig()
+ * reads the DB first and only falls back to these when no DB value exists.
  */
-export const DEFAULT_NAS_SERVER = '192.168.50.226';
+export const DEFAULT_NAS_SERVER = '';
 
 export interface NasMapping {
   /** Drive letter with trailing colon, e.g. "M:" */
@@ -29,14 +31,7 @@ export interface NasMapping {
   share: string;
 }
 
-export const DEFAULT_NAS_MAPPINGS: NasMapping[] = [
-  { drive: 'M:', share: 'Plex Movies' },
-  { drive: 'Z:', share: 'Plex TV Shows' },
-  { drive: 'W:', share: '14TB' },
-  { drive: 'V:', share: '14TB-2' },
-  { drive: 'B:', share: 'Backups' },
-  { drive: 'U:', share: 'Greg 4TB USB' },
-];
+export const DEFAULT_NAS_MAPPINGS: NasMapping[] = [];
 
 const NAS_CONFIG_DIR = path.join(PCDOCTOR_ROOT, 'settings');
 const NAS_CONFIG_FILE = path.join(NAS_CONFIG_DIR, 'nas.json');
@@ -55,7 +50,7 @@ export interface NasConfig {
  * missing values. Lightweight — no side effects.
  */
 export function readNasConfig(): NasConfig {
-  const server = getSetting('nas_server') ?? DEFAULT_NAS_SERVER;
+  const server = getSetting('nas_server') || DEFAULT_NAS_SERVER;
   const rawMappings = getSetting('nas_mappings');
   let mappings: NasMapping[] = DEFAULT_NAS_MAPPINGS;
   if (rawMappings) {
@@ -87,8 +82,8 @@ function isValidMapping(x: unknown): x is NasMapping {
  * accepting them; throws on bad input.
  */
 export function writeNasConfig(server: string, mappings: NasMapping[]): void {
-  if (!server || typeof server !== 'string') {
-    throw new Error('nas_server must be a non-empty string');
+  if (typeof server !== 'string') {
+    throw new Error('nas_server must be a string');
   }
   // v2.4.10: restrict server to hostname / IPv4-shaped chars.
   // This value flows into `\\$server\$share` via Remap-NAS.ps1 → New-PSDrive.

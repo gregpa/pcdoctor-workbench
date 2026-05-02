@@ -81,7 +81,19 @@ if ($lhmHttpOpen) { try {
     function Collect-LhmLeaves {
         param($node, $list)
         if (-not $node) { return }
-        if ($node.Value -and "$($node.Value)" -match '°\s*C\s*$') {
+        # v2.5.28: replaced literal '°' with [char]0x00B0 in the regex.
+        # Pre-2.5.28 the script's source file got read with mismatched
+        # encoding under Windows PowerShell 5.1 (which the IPC handler
+        # falls back to when pwsh 7 is missing). The literal 'degree'
+        # byte in the regex pattern didn't match the same character
+        # arriving from LHM's UTF-8-decoded HTTP response, so EVERY
+        # leaf node was rejected and cpuZones came back empty even on
+        # hardware where LHM had real temps. Greg's Surface Pro 5
+        # (Iliana-PC, 2026-05-01) showed this -- LHM tree had Core Max
+        # 63 C, CPU Package 63 C, etc., but PCDoctor reported "no sensor
+        # data". Char-code escape works regardless of source encoding.
+        $degC = [char]0x00B0
+        if ($node.Value -and "$($node.Value)" -match "$degC\s*C\s*$") {
             $list.Add($node) | Out-Null
         }
         if ($node.Children) {
@@ -98,7 +110,10 @@ if ($lhmHttpOpen) { try {
         if ($text -notmatch '(?i)(CPU|Core|Package|Tdie|Tctl)') { continue }
         # Guard against sensor groupings mislabelled as temps
         if ($text -match '(?i)(GPU|VRM|Mainboard|Chipset|Mobo|Motherboard)') { continue }
-        if ("$($leaf.Value)" -match '([\d.,]+)\s*°\s*C') {
+        # v2.5.28: same encoding-agnostic char-code escape as the leaf
+        # collector above.
+        $degC2 = [char]0x00B0
+        if ("$($leaf.Value)" -match "([\d.,]+)\s*$degC2\s*C") {
             $tempC = [double]($Matches[1] -replace ',', '.')
             if ($tempC -ge 0 -and $tempC -le 150) {
                 $cpuZones += [ordered]@{
@@ -246,7 +261,14 @@ if (Test-Path $smartCachePath) {
             $entry = $prop.Value
             if ($null -ne $entry.temp_c) {
                 $diskList += [ordered]@{
-                    drive   = $entry.serial ?? $prop.Name
+                    # v2.5.26: replaced PS7-only `??` operator with an `if`
+                    # expression so the script parses on Windows PowerShell 5.1
+                    # (the fallback when pwsh 7 is missing). On Greg's clean
+                    # second-PC install (2026-05-01) the `??` syntax error
+                    # killed the entire temp pipeline -- LHM was running with
+                    # Remote Web Server on, but Get-Temperatures.ps1 couldn't
+                    # parse, so temps never reached the dashboard.
+                    drive   = $(if ($entry.serial) { $entry.serial } else { $prop.Name })
                     model   = "$($entry.model)"
                     temp_c  = [int]$entry.temp_c
                     kind    = 'nvme'
@@ -326,6 +348,25 @@ if ($cpuZones.Count -gt 0 -and -not $cpuCacheUsed) {
     }
 }
 
+# v2.5.28: detect HWiNFO64 running so the Dashboard can offer it as an
+# alternate temp source. Critical for hardware where LHM connects but
+# enumerates zero temperature sensors -- most commonly Microsoft Surface
+# devices (locked-down chipset blocks MSR access to userspace, even with
+# admin), some OEM laptops, and certain Ryzen mobile SKUs. On Greg's
+# Surface Pro 5 (Iliana-PC, Intel i7-7660U, 2026-05-01), LHM enumerated
+# the CPU but produced zero Temperatures sensors; the existing dashboard
+# banner only knew the "RWS is off" state and couldn't tell the user
+# what's actually wrong.
+$hwinfoRunning = $false
+$hwinfoPath = $null
+try {
+    $proc = Get-Process -Name 'HWiNFO64' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($proc) {
+        $hwinfoRunning = $true
+        $hwinfoPath = $proc.Path
+    }
+} catch { }
+
 $payload = [ordered]@{
     success      = $true
     duration_ms  = $sw.ElapsedMilliseconds
@@ -336,6 +377,10 @@ $payload = [ordered]@{
     # on 2026-04-29 because the Options -> Remote Web Server -> Run
     # toggle silently came off across a non-clean shutdown).
     lhm_http_open = $lhmHttpOpen
+    # v2.5.28: hwinfo_running surfaces whether HWiNFO64 is currently up,
+    # so the renderer can wire a "Open HWiNFO for live temps" CTA in the
+    # no-sensors banner without having to spawn its own detection script.
+    hwinfo_running = $hwinfoRunning
     cpu          = [ordered]@{
         zones       = $cpuZones
         needs_admin = $cpuNeedsAdmin

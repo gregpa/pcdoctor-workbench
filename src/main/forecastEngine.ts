@@ -1,4 +1,4 @@
-import { queryMetricTrend, saveForecasts, MetricPoint } from './dataStore.js';
+import { queryMetricTrend, saveForecasts, MetricPoint, getSetting } from './dataStore.js';
 import type { ForecastData, ForecastProjection } from '@shared/types.js';
 import { notify } from './notifier.js';
 
@@ -107,7 +107,23 @@ export function generateForecasts(): ForecastData {
   }> = [];
   const nowMs = Date.now();
 
-  for (const cfg of CONFIGS) {
+  // Read configurable thresholds from settings (fall back to hardcoded defaults)
+  const thresholdOverrides: Record<string, { warn: number; crit: number }> = {
+    'cpu.temp_c':       { warn: Number(getSetting('forecast_cpu_temp_warn'))  || 80,  crit: Number(getSetting('forecast_cpu_temp_crit'))  || 90  },
+    'gpu.temp_c':       { warn: Number(getSetting('forecast_gpu_temp_warn'))  || 80,  crit: Number(getSetting('forecast_gpu_temp_crit'))  || 85  },
+    'ram.used_pct':     { warn: Number(getSetting('forecast_ram_warn_pct'))   || 85,  crit: Number(getSetting('forecast_ram_crit_pct'))   || 95  },
+    'cpu.load_pct':     { warn: Number(getSetting('forecast_cpu_load_warn'))  || 70,  crit: Number(getSetting('forecast_cpu_load_crit'))  || 90  },
+    'disk.free_pct':    { warn: Number(getSetting('forecast_disk_free_warn')) || 20,  crit: Number(getSetting('forecast_disk_free_crit')) || 10  },
+    'events.system_count': { warn: Number(getSetting('forecast_events_warn')) || 300, crit: Number(getSetting('forecast_events_crit'))    || 500 },
+  };
+
+  for (const baseCfg of CONFIGS) {
+    // Apply per-metric threshold overrides from settings (shallow copy to avoid mutating module-level CONFIGS)
+    const metricKey = `${baseCfg.category}.${baseCfg.metric}`;
+    const ov = thresholdOverrides[metricKey];
+    const cfg = ov
+      ? { ...baseCfg, threshold_warn: ov.warn, threshold_critical: ov.crit }
+      : baseCfg;
     const minPoints = cfg.min_points ?? 14;
     const minDays = cfg.min_days ?? 7;
     // Pull last 90 days

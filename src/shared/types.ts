@@ -233,6 +233,8 @@ export type ActionName =
   | 'add_lhm_to_cfa_allowlist'
   // v2.5.17 (first-run wizard W2) - Add C:\ProgramData\PCDoctor to Defender exclusions
   | 'add_pcdoctor_exclusion'
+  // v2.5.18 (first-run wizard W9) - Register all scheduled tasks
+  | 'register_scheduled_tasks'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
@@ -536,4 +538,19 @@ export interface ScheduledTaskInfo {
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
+}
+
+// --- System profile (first-run wizard W2) ---
+export interface SystemProfile {
+  success: boolean;
+  duration_ms: number;
+  cpu: { name: string; cores: number; logical_processors: number; max_clock_mhz: number } | null;
+  ram: { total_bytes: number; total_gb: number; dimm_count: number; speed_mhz: number | null } | null;
+  gpu: { name: string; vram_bytes: number | null } | null;
+  os: { caption: string; version: string; build: string; arch: string } | null;
+  machine: { manufacturer: string; model: string } | null;
+  drives: Array<{ letter: string; type: number; size_bytes: number | null; free_bytes: number | null; filesystem: string | null; label: string | null }>;
+  wsl: { installed: boolean; wslconfig_exists: boolean; memory_limit_gb: number | null } | null;
+  claude_cli: { installed: boolean; path: string | null } | null;
+  obsidian: { installed: boolean; path: string | null } | null;
 }

@@ -28,6 +28,21 @@ export interface ToolDefinition {
   expected_duration_min?: number;
   expected_duration_max?: number;
   icon: string;
+  /** v2.5.26: tools that gate full Dashboard functionality (e.g. live temps).
+   *  The first-run tools splash blocks "Continue to Dashboard" until every
+   *  required tool is installed, OR the user explicitly skips with a warning.
+   *  Reserve for tools whose absence makes a dashboard panel unusable. */
+  dashboard_required?: boolean;
+  /** v2.5.26: tools that ENHANCE the dashboard but aren't gating. Surfaced in
+   *  the splash with download/winget buttons, but the user can continue
+   *  without them. Examples: HWiNFO64 (CSV import), OCCT (stress tests). */
+  dashboard_recommended?: boolean;
+  /** v2.5.26: post-install steps the splash should display so users know how
+   *  to actually USE the tool with PCDoctor (e.g. LHM's "Options -> Remote
+   *  Web Server -> Run" toggle, which the temp pipeline depends on). Markdown
+   *  not supported -- splash renders as plain text with simple formatting
+   *  applied via splitlines. */
+  post_install_instructions?: string;
 }
 
 export const TOOLS: Record<string, ToolDefinition> = {
@@ -40,10 +55,22 @@ export const TOOLS: Record<string, ToolDefinition> = {
       'C:\\Program Files\\OCCT\\OCCT.exe',
       'C:\\Program Files (x86)\\OCCT\\OCCT.exe',
     ],
+    // v2.5.23: OCCT has no winget package (license + free/personal/pro tiers
+    // make silent install awkward). Surface the official download page so
+    // the tile shows a "Download…" button instead of dead "Manual install
+    // only" text. User runs the installer themselves and accepts the EULA.
+    download_url: 'https://www.ocbase.com/download',
     launch_modes: [
       { id: 'gui', label: 'Open (interactive)', args: [], detached: true },
     ],
     icon: '🔥',
+    // v2.5.26: powers the Dashboard's stress-test action buttons. Recommended
+    // (not required) -- dashboard works without stress testing if the user
+    // doesn't need it.
+    dashboard_recommended: true,
+    post_install_instructions:
+      'OCCT is free for personal use. After download, run the installer and accept the EULA.\n' +
+      'No further configuration is needed -- PCDoctor auto-detects the install location.',
   },
   hwinfo64: {
     id: 'hwinfo64', name: 'HWiNFO64', category: 'hardware',
@@ -52,10 +79,21 @@ export const TOOLS: Record<string, ToolDefinition> = {
       'C:\\Program Files\\HWiNFO64\\HWiNFO64.exe',
       'C:\\ProgramData\\PCDoctor\\tools\\HWiNFO64\\HWiNFO64.exe',
     ],
+    // v2.5.23: same as OCCT - no winget. Free version is on the official
+    // download page; pick "HWiNFO Installer" (NOT the portable build) so
+    // the detect_paths above resolve.
+    download_url: 'https://www.hwinfo.com/download/',
     launch_modes: [
       { id: 'gui', label: 'Open (sensors-only mode)', args: ['-so'], detached: true },
     ],
     icon: '🌡',
+    // v2.5.26: powers the Dashboard's HWiNFO CSV import + sensor-delta tile.
+    // Recommended -- a fallback to LHM when LHM isn't catching every sensor.
+    dashboard_recommended: true,
+    post_install_instructions:
+      'On the download page, choose "HWiNFO Installer" (not the portable build) so PCDoctor can detect it at the standard install path.\n' +
+      'Free version is fine for personal use.\n' +
+      'Launch with the "-so" flag (PCDoctor does this automatically) for sensors-only mode.',
   },
   awcc: {
     id: 'awcc', name: 'Alienware Command Center', category: 'hardware',
@@ -123,6 +161,19 @@ export const TOOLS: Record<string, ToolDefinition> = {
     winget_id: 'LibreHardwareMonitor.LibreHardwareMonitor',
     launch_modes: [{ id: 'gui', label: 'Open (enable Remote Web Server after)', args: [], detached: true }],
     icon: '🌡',
+    // v2.5.26: LHM is the canonical temp source for the Dashboard's CPU /
+    // GPU / mobo temp panel. Without it, those tiles show "—" and the
+    // forecast tab can't trend thermal data. Mark as required so the
+    // first-run tools splash blocks dashboard activation until LHM is
+    // installed AND the Remote Web Server is on (the post-install steps
+    // below tell the user how).
+    dashboard_required: true,
+    post_install_instructions:
+      'After installing, open LibreHardwareMonitor and:\n' +
+      '1. Right-click the system tray icon (or use the Options menu) → "Run as administrator" so it can read all sensors.\n' +
+      '2. Options → Remote Web Server → Run.  PCDoctor reads temps from this on port 8085.\n' +
+      '3. Options → Auto Start (so it launches with Windows).\n' +
+      '4. Options → Minimize to Tray + Minimize on Close (keeps it running quietly in the background).',
   },
 
   // ============ DISK ============
@@ -147,6 +198,10 @@ export const TOOLS: Record<string, ToolDefinition> = {
     winget_id: 'CrystalDewWorld.CrystalDiskInfo',
     launch_modes: [{ id: 'gui', label: 'Open', args: [], detached: true }],
     icon: '💾',
+    // v2.5.26: CrystalDiskInfo is the GUI counterpart to PCDoctor's SMART
+    // status tile. Marked required so a fresh install lands with a working
+    // disk-health workflow; install is silent via winget.
+    dashboard_required: true,
   },
   crystaldiskmark: {
     id: 'crystaldiskmark', name: 'CrystalDiskMark', category: 'disk',

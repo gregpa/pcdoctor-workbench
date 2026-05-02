@@ -338,7 +338,7 @@ export function Tools() {
             </div>
             <button
               onClick={async () => {
-                const file = prompt('Paste full path to HWiNFO CSV file:', 'C:\\Users\\greg_\\Downloads\\test.CSV');
+                const file = prompt('Paste full path to HWiNFO CSV file:');
                 if (!file) return;
                 setToast('Parsing HWiNFO CSV…');
                 const r = await (window as any).api.runAction({ name: 'import_hwinfo_csv', params: { csv_path: file } });

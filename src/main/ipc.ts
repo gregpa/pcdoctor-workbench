@@ -5,6 +5,7 @@ import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import log from 'electron-log/main.js';
 
 // v2.4.48 (B48-SEC-1): direct execFile of schtasks.exe with array-form
 // args (no shell interpolation). Pre-2.4.48 this helper concatenated
@@ -60,7 +61,7 @@ import { filterRendererSafeSettings } from './rendererSafeSettings.js';
 // can enforce action_name ∈ KNOWN_ACTION_NAMES.
 import { ACTIONS as ACTIONS_INDEX } from '@shared/actions.js';
 import { generateForecasts } from './forecastEngine.js';
-import { runPowerShellScript } from './scriptRunner.js';
+import { runPowerShellScript, resolveScriptPath } from './scriptRunner.js';
 import { PCDOCTOR_ROOT, resolvePwshPath, PWSH_FALLBACK } from './constants.js';
 import { listAllToolStatuses, launchTool, installToolViaWinget, installToolViaDirectDownload } from './toolLauncher.js';
 import { TOOLS } from '@shared/tools.js';
@@ -530,9 +531,10 @@ export function registerIpcHandlers() {
       // setting so fresh installs on other machines don't try to write
       // into a non-existent directory.
       const configured = getSetting('obsidian_archive_dir') ?? '';
-      const obsidianDir = configured.trim()
-        ? configured
-        : path.join(app.getPath('documents'), 'PCDoctor', 'Weekly Reviews');
+      const obsidianDir = configured.trim();
+      if (!obsidianDir) {
+        return { ok: false, error: { code: 'E_NOT_CONFIGURED', message: 'obsidian_archive_dir is not configured in Settings. Set it to an Obsidian vault path to enable archiving.' } };
+      }
       await mkdir(obsidianDir, { recursive: true });
       const destPath = path.join(obsidianDir, `${reviewDate}.md`);
       await copyFile(sourceMd, destPath);
@@ -880,6 +882,23 @@ export function registerIpcHandlers() {
       'obsidian_archive_dir',
       // v2.5.18: first-run wizard completion flag
       'first_run_complete',
+      // Configurable forecast thresholds (wizard-prep Task 3)
+      'forecast_cpu_temp_warn', 'forecast_cpu_temp_crit',
+      'forecast_gpu_temp_warn', 'forecast_gpu_temp_crit',
+      'forecast_ram_warn_pct', 'forecast_ram_crit_pct',
+      'forecast_cpu_load_warn', 'forecast_cpu_load_crit',
+      'forecast_disk_free_warn', 'forecast_disk_free_crit',
+      'forecast_events_warn', 'forecast_events_crit',
+      // v2.5.18: wizard-persisted settings
+      'nas_enabled', 'nas_brand',
+      'obsidian_enabled', 'wsl_memory_limit_gb', 'claude_detected',
+      'wizard_completed_at', 'wizard_version',
+      'autopilot_enabled',
+      // v2.5.26: first-run tools splash completion flag. Set to '1' once the
+      // user dismisses the splash (either after all required tools install or
+      // by explicit Skip). Renderer reads this to decide whether to render
+      // FirstRunToolsSplash on top of the dashboard.
+      'dashboard_tools_setup_complete',
     ]);
     const isWritable = (k: string) => WRITABLE_KEYS.has(k) || k.startsWith('event:');
     if (!isWritable(key)) {
@@ -1403,7 +1422,9 @@ export function registerIpcHandlers() {
       );
       if (hasUncached && (Date.now() - _nasRecycleRefreshSentAt) > _NAS_REFRESH_THROTTLE_MS) {
         _nasRecycleRefreshSentAt = Date.now();
-        const refreshScript = path.join(PCDOCTOR_ROOT, 'Refresh-NasRecycleSizes.ps1');
+        // v2.5.23: same ProgramData -> bundle fallback as the rest of
+        // the script invocations.
+        const refreshScript = resolveScriptPath('Refresh-NasRecycleSizes.ps1');
         if (existsSync(refreshScript)) {
           const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
           const child = spawn(
@@ -1526,19 +1547,66 @@ export function registerIpcHandlers() {
   // C:\ProgramData\PCDoctor\reports\latest.json asynchronously (~60 seconds).
   ipcMain.handle('api:triggerInitialScan', async (): Promise<IpcResult<null>> => {
     try {
-      const scriptPath = path.join(PCDOCTOR_ROOT, 'Invoke-PCDoctor.ps1');
+      // v2.5.23: use resolveScriptPath() so a fresh install where
+      // `C:\ProgramData\PCDoctor\Invoke-PCDoctor.ps1` was not yet (or
+      // never) populated still falls back to the bundled script in
+      // `<install>/resources/powershell/`. Pre-2.5.23 the existsSync
+      // guard hard-failed every "Scan now" click on the second-PC
+      // install (Greg, 2026-05-01) because ProgramData was missing
+      // exactly the system-probing scripts; the user saw the dashboard
+      // stay empty with no surfaced toast.
+      const scriptPath = resolveScriptPath('Invoke-PCDoctor.ps1');
       if (!existsSync(scriptPath)) {
-        return { ok: false, error: { code: 'E_SCAN_SCRIPT_MISSING', message: 'Invoke-PCDoctor.ps1 not found at C:\\ProgramData\\PCDoctor\\. Run the scanner manually from the troubleshooting section in README.' } };
+        return { ok: false, error: { code: 'E_SCAN_SCRIPT_MISSING', message: 'Invoke-PCDoctor.ps1 not found in ProgramData or app bundle. Reinstall the app, or run the scanner manually from the troubleshooting section in README.' } };
       }
+      // v2.5.25: pipe stdout/stderr to electron-log instead of `stdio: 'ignore'`.
+      // Pre-2.5.25 a silent failure inside Invoke-PCDoctor.ps1 (missing helper,
+      // permission issue, exit non-zero, etc.) was undebuggable from the user's
+      // side -- "Run Scan" reported success, no latest.json appeared, no log
+      // line ever told us why. Greg's second-PC install (2026-05-01) hit a
+      // version of this and the only recourse was running the script manually
+      // from a PowerShell terminal to see the output.
+      //
+      // Keep `detached: true` + child.unref() so the IPC returns immediately
+      // (the script takes ~30s and the renderer toast is "scan running in
+      // background"). The stdout/stderr lines now land in main.log under the
+      // [initial-scan-ipc] prefix. If the .ps1 errors, the line + exit code
+      // are recorded for the next bug report.
       const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
       const child = spawn(pwsh, [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive',
         '-File', scriptPath, '-Mode', 'Report',
-      ], { detached: true, stdio: 'ignore' });
+      ], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stdout?.on('data', (chunk: Buffer) => {
+        log.info('[initial-scan-ipc]', chunk.toString('utf8').trimEnd());
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        log.warn('[initial-scan-ipc stderr]', chunk.toString('utf8').trimEnd());
+      });
+      child.on('exit', (code) => {
+        log.info(`[initial-scan-ipc] exited code=${code ?? 'null'}`);
+      });
+      child.on('error', (err) => {
+        log.error('[initial-scan-ipc] spawn error:', err?.message ?? err);
+      });
       child.unref();
       return { ok: true, data: null };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_SCAN_SPAWN_FAILED', message: e?.message ?? 'Failed to start initial scan' } };
+    }
+  });
+
+  // v2.6.0 (wizard W2): system hardware profile for the first-run wizard.
+  // Runs Get-SystemProfile.ps1 which queries CIM for CPU/RAM/GPU/OS/drives
+  // plus WSL/Claude/Obsidian detection. ~2s, no admin required.
+  ipcMain.handle('api:getSystemProfile', async (): Promise<IpcResult<import('@shared/types.js').SystemProfile>> => {
+    try {
+      const r = await runPowerShellScript<import('@shared/types.js').SystemProfile>(
+        'Get-SystemProfile.ps1', ['-JsonOutput'], { timeoutMs: 15_000 },
+      );
+      return { ok: true, data: r };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_SYSTEM_PROFILE', message: e?.message ?? 'Failed to collect system profile' } };
     }
   });
 }

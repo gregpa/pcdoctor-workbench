@@ -47,8 +47,8 @@ export function MemTest86() {
         <div>
           <p className="mb-2">Once Rufus finishes, reboot the PC and press the boot-menu key to select the USB.</p>
           <div className="pcd-panel text-[11px]">
-            <div><strong>Alienware Aurora R11:</strong> Press <code>F12</code> right after power-on. Select your USB from the boot menu.</div>
-            <div className="mt-1">Other common keys: Dell=F12, HP=F9, Lenovo=F12, ASUS=F8.</div>
+            <div>Press your boot-menu key right after power-on. Select your USB from the boot menu.</div>
+            <div className="mt-1">Common boot keys: Dell=F12, HP=F9, Lenovo=F12, ASUS=F8. Check your PC manufacturer's documentation if unsure.</div>
           </div>
           <p className="mt-3 text-[11px] text-text-secondary">MemTest86 starts automatically. Leave it running for <strong>at least 4 full passes</strong> (~4–8 hours depending on RAM size). Any errors appear on screen.</p>
         </div>

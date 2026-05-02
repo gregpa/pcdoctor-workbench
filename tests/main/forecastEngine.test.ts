@@ -9,6 +9,7 @@ vi.mock('../../src/main/dataStore.js', () => ({
   queryMetricTrend: (category: string, metric: string, _days: number) =>
     TREND[`${category}.${metric}`] ?? [],
   saveForecasts: vi.fn(),
+  getSetting: vi.fn(() => null),
 }));
 vi.mock('../../src/main/notifier.js', () => ({
   notify: vi.fn(async () => {}),

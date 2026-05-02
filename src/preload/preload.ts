@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
-  SecurityPosture, ToolStatus, ScheduledTaskInfo,
+  SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile,
 } from '@shared/types.js';
 
 const api = {
@@ -115,6 +115,8 @@ const api = {
   // v2.5.17 (first-run wizard W5): fire Invoke-PCDoctor.ps1 -Mode Report in
   // the background so the dashboard has data on first launch. Fire-and-forget.
   triggerInitialScan: (): Promise<IpcResult<null>> => ipcRenderer.invoke('api:triggerInitialScan'),
+  // v2.6.0 (wizard W2): system hardware profile for the first-run wizard.
+  getSystemProfile: (): Promise<IpcResult<SystemProfile>> => ipcRenderer.invoke('api:getSystemProfile'),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

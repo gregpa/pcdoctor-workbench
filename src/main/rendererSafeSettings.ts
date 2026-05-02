@@ -36,6 +36,21 @@ export const RENDERER_SAFE_KEYS: ReadonlySet<string> = new Set<string>([
   // dismissed. Read renderer-side on mount to skip the wizard on subsequent
   // launches. Written by the wizard via api:setSetting.
   'first_run_complete',
+  // Configurable forecast thresholds (wizard-prep Task 3)
+  'forecast_cpu_temp_warn', 'forecast_cpu_temp_crit',
+  'forecast_gpu_temp_warn', 'forecast_gpu_temp_crit',
+  'forecast_ram_warn_pct', 'forecast_ram_crit_pct',
+  'forecast_cpu_load_warn', 'forecast_cpu_load_crit',
+  'forecast_disk_free_warn', 'forecast_disk_free_crit',
+  'forecast_events_warn', 'forecast_events_crit',
+  // v2.5.18: wizard-persisted settings
+  'nas_enabled', 'nas_brand',
+  'obsidian_enabled', 'wsl_memory_limit_gb', 'claude_detected',
+  'wizard_completed_at', 'wizard_version',
+  'autopilot_enabled',
+  // v2.5.26: first-run tools splash completion flag (renderer reads this to
+  // decide whether to render FirstRunToolsSplash before the dashboard).
+  'dashboard_tools_setup_complete',
 ]);
 
 /**

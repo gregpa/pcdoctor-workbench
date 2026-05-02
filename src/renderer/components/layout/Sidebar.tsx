@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { api } from '@renderer/lib/ipc.js';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '📊' },
@@ -15,10 +17,30 @@ const NAV_ITEMS = [
 ];
 
 export function Sidebar() {
+  // Task-18: hide Claude nav item when wizard set claude_detected='0'.
+  // Default true for backward compat (existing users without wizard).
+  const [claudeDetected, setClaudeDetected] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.getSettings();
+        if (!alive || !r.ok) return;
+        if (r.data['claude_detected'] === '0') setClaudeDetected(false);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const visibleItems = claudeDetected
+    ? NAV_ITEMS
+    : NAV_ITEMS.filter((item) => item.to !== '/claude');
+
   return (
     <nav className="w-44 shrink-0 bg-surface-800 border-r border-surface-600 min-h-screen p-3 flex flex-col gap-1">
       <div className="px-2 py-3 text-[10px] text-text-secondary uppercase tracking-wider">PCDoctor</div>
-      {NAV_ITEMS.map((item) => (
+      {visibleItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}

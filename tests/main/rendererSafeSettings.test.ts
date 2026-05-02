@@ -123,12 +123,29 @@ describe('rendererSafeSettings allowlist', () => {
       // silent drift.
       const expected = [
         'auto_block_rdp_bruteforce',
+        'autopilot_enabled',
+        'claude_detected',
+        'dashboard_tools_setup_complete',
         'digest_hour',
         'email_digest_recipient',
-        // v2.5.17: first-run wizard completion flag
         'first_run_complete',
+        'forecast_cpu_load_crit',
+        'forecast_cpu_load_warn',
+        'forecast_cpu_temp_crit',
+        'forecast_cpu_temp_warn',
+        'forecast_disk_free_crit',
+        'forecast_disk_free_warn',
+        'forecast_events_crit',
+        'forecast_events_warn',
+        'forecast_gpu_temp_crit',
+        'forecast_gpu_temp_warn',
+        'forecast_ram_crit_pct',
+        'forecast_ram_warn_pct',
+        'nas_brand',
+        'nas_enabled',
         'nvidia_check_cache',
         'obsidian_archive_dir',
+        'obsidian_enabled',
         'quiet_hours_end',
         'quiet_hours_start',
         'selftest_banner',
@@ -136,6 +153,9 @@ describe('rendererSafeSettings allowlist', () => {
         'telegram_chat_id',
         'telegram_enabled',
         'telegram_last_good_ts',
+        'wizard_completed_at',
+        'wizard_version',
+        'wsl_memory_limit_gb',
       ];
       const actual = Array.from(RENDERER_SAFE_KEYS).sort();
       expect(actual).toEqual(expected);
