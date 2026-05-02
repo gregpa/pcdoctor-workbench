@@ -260,11 +260,34 @@ export function Dashboard() {
     </div>
   );
   if (error || !status) {
+    // v2.5.24: empty-state Catch-22 fix. Pre-2.5.24 this branch rendered ONLY
+    // the warning banner. The "Run Scan" button at the page footer (line ~320,
+    // `onScan={handleRunScanNow}`) sits inside the populated-status JSX, so a
+    // user landing here with no latest.json had no way to trigger a scan from
+    // the dashboard — the wizard's W10 button was the only entry point and
+    // it's unreachable once `first_run_complete='1'`. Symptom on Greg's
+    // second-PC install (2026-05-01): dashboard stuck on "Status cache has
+    // not been populated yet" forever after a v2.5.21 wizard that errored
+    // through every step. The button on this empty branch reuses the same
+    // `handleRunScanNow` already wired up below.
     return (
-      <div className="p-6">
+      <div className="p-6 flex flex-col gap-3">
         <div className="bg-status-warn/10 border border-status-warn/40 rounded-lg p-4 text-sm">
           <div className="font-semibold text-status-warn mb-1">⚠ No diagnostic report available</div>
           <div className="text-text-secondary">{error?.message ?? 'Run a scan to generate one.'}</div>
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={handleRunScanNow}
+            disabled={scanning}
+            className="px-4 py-2 rounded-md bg-status-info text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50 transition"
+          >
+            {scanning ? 'Scanning…' : 'Run Scan Now'}
+          </button>
+          <span className="ml-3 text-xs text-text-secondary">
+            Generates the first diagnostic report (~30 s).
+          </span>
         </div>
       </div>
     );

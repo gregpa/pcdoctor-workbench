@@ -2,13 +2,51 @@ import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import {
   PCDOCTOR_ROOT,
   resolvePwshPath,
   PWSH_FALLBACK,
   DEFAULT_SCRIPT_TIMEOUT_MS,
 } from './constants.js';
+
+// v2.5.22: ProgramData → bundle fallback. Pre-2.5.22 every script path was
+// hardcoded to C:\ProgramData\PCDoctor\<rel>. On a fresh install where the
+// NSIS customInstall Copy-Item didn't fully populate ProgramData (Defender,
+// third-party AV, partial elevation, NSIS path quirks, Controlled Folder
+// Access) every wizard step that ran a Get-* / security/* / Sync- / Apply-
+// script failed with PowerShell error 4294770688 ("file not found"). Greg's
+// main box hid the bug because years of prior installs had left ProgramData
+// fully populated. The first true clean-PC install surfaced it.
+//
+// Self-healing fix: try ProgramData first (canonical runtime location for
+// Task Scheduler tasks + Sync-ScriptsFromBundle output). If the file isn't
+// there, fall back to the read-only copy that ships inside the app bundle
+// (resources/powershell/ when packaged; <repo>/powershell/ in dev). The app
+// stays functional even if ProgramData is partially populated; the next
+// Sync-ScriptsFromBundle pass will repopulate ProgramData for Task Scheduler.
+//
+// Returns the ProgramData path if neither location has the script — that
+// preserves the original "file not found" error message for genuinely
+// missing scripts (e.g. typo'd relative path in a caller).
+export function resolveScriptPath(relativeScriptPath: string): string {
+  const rel = relativeScriptPath.replace(/\//g, '\\');
+  const programDataPath = path.join(PCDOCTOR_ROOT, rel);
+  if (existsSync(programDataPath)) return programDataPath;
+
+  try {
+    const bundledRoot = app.isPackaged
+      ? path.join(process.resourcesPath, 'powershell')
+      : path.join(app.getAppPath(), 'powershell');
+    const bundledPath = path.join(bundledRoot, rel);
+    if (existsSync(bundledPath)) return bundledPath;
+  } catch {
+    // Electron app not initialized (e.g. running outside main process). Fall
+    // through to ProgramData path so the original error message is preserved.
+  }
+
+  return programDataPath;
+}
 
 // v2.4.31 B39: bring the app window to front + flash its taskbar icon
 // before every elevated spawn so the UAC prompt (which tracks focus)
@@ -70,7 +108,11 @@ export interface RunOptions {
 }
 
 /**
- * Spawn a PowerShell script under C:\ProgramData\PCDoctor\.
+ * Spawn a PowerShell script. The path is resolved by `resolveScriptPath()` —
+ * canonical location is `C:\ProgramData\PCDoctor\<rel>`, with a v2.5.22
+ * fallback to the bundled `resources/powershell/<rel>` (or `<repo>/powershell`
+ * in dev) when the ProgramData copy is missing.
+ *
  * Returns the parsed JSON written on stdout.
  * Throws PCDoctorScriptError on failure with a stable error code.
  */
@@ -79,7 +121,7 @@ export async function runPowerShellScript<T = unknown>(
   args: string[] = [],
   opts: RunOptions = {},
 ): Promise<T> {
-  const scriptPath = path.join(PCDOCTOR_ROOT, relativeScriptPath.replace(/\//g, '\\'));
+  const scriptPath = resolveScriptPath(relativeScriptPath);
   const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
 
@@ -240,7 +282,7 @@ export async function runElevatedPowerShellScript<T = unknown>(
   args: string[] = [],
   opts: RunOptions = {},
 ): Promise<T> {
-  const scriptPath = path.join(PCDOCTOR_ROOT, relativeScriptPath.replace(/\//g, '\\'));
+  const scriptPath = resolveScriptPath(relativeScriptPath);
   const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
 

@@ -1,5 +1,6 @@
 /**
- * W10 Finish — tenth and final step of the first-run wizard (index 9).
+ * W10 Finish — ninth and final step of the first-run wizard (index 8 after
+ * v2.5.25 W6 removal; was index 9 prior).
  *
  * Summarises every wizard decision in a compact grid, offers a one-click
  * initial scan trigger, and writes completion metadata to settings.
@@ -9,9 +10,10 @@
  *
  * Settings written on mount:
  *   wizard_completed_at (ISO timestamp)
- *   wizard_version ('2')
+ *   wizard_version ('3' as of v2.5.25 — bumped after W6 removal so the
+ *     stepper reset detects upgraders mid-wizard from a 10-step layout)
  *
- * On unmount: markComplete(9)
+ * On unmount: markComplete(8)
  */
 
 import { useEffect, useState, useRef } from 'react';
@@ -32,14 +34,14 @@ export function W10Finish() {
     settingsWritten.current = true;
     void Promise.all([
       window.api.setSetting('wizard_completed_at', new Date().toISOString()),
-      window.api.setSetting('wizard_version', '2'),
+      window.api.setSetting('wizard_version', '3'),
     ]).catch(() => { /* non-fatal */ });
   }, []);
 
   // -- Mark complete on unmount --
   useEffect(() => {
     return () => {
-      markComplete(9);
+      markComplete(8);  // v2.5.25: was 9 before W6 removal
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -62,10 +64,9 @@ export function W10Finish() {
 
   const notifSummary = state.telegramEnabled ? 'Telegram configured' : 'Telegram skipped';
 
-  const toolsSummary =
-    state.selectedTools.length > 0
-      ? `${state.selectedTools.length} tool${state.selectedTools.length !== 1 ? 's' : ''} selected`
-      : 'Skipped';
+  // v2.5.25: removed `toolsSummary` -- the W6 step that populated `selectedTools`
+  // was removed (it never actually installed anything). Tools are installed
+  // from the Tools page after the wizard completes.
 
   const autopilotSummary = state.autopilotEnabled ? 'Enabled' : 'Customized';
 
@@ -85,13 +86,12 @@ export function W10Finish() {
     dispatch({ type: 'SET_FIELD', field: 'initialScanTriggered', value: true });
   };
 
-  // -- Summary rows config --
+  // -- Summary rows config (v2.5.25: 8 rows, was 9 before W6/Tools removal) --
   const rows: Array<{ icon: string; label: string; value: string; active: boolean }> = [
     { icon: '\u{1F5A5}', label: 'System',        value: systemSummary,       active: !!sp },
     { icon: '\u{1F5C4}', label: 'NAS',           value: nasSummary,          active: !!state.nasServer },
     { icon: '\u{1F6E1}', label: 'Security',      value: securitySummary,     active: state.defenderExclusionApplied },
     { icon: '\u{1F4F1}', label: 'Notifications', value: notifSummary,        active: state.telegramEnabled },
-    { icon: '\u{1F6E0}', label: 'Tools',         value: toolsSummary,        active: state.selectedTools.length > 0 },
     { icon: '\u{1F916}', label: 'Autopilot',     value: autopilotSummary,    active: state.autopilotEnabled },
     { icon: '\u{1F50C}', label: 'Integrations',  value: integrationsSummary, active: integrationParts.length > 0 },
     { icon: '\u{1F4C5}', label: 'Tasks',         value: tasksSummary,        active: state.tasksRegistered },
@@ -145,6 +145,9 @@ export function W10Finish() {
           </button>
         )}
       </div>
+
+      {/* -- v2.5.25: Tools install reminder removed along with W6 step. Users
+            install tools from the Tools page after the wizard. -- */}
 
       {/* -- Final note -- */}
       <p className="text-xs text-text-secondary text-center">

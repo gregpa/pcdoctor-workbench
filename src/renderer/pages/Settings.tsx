@@ -662,6 +662,25 @@ export function Settings() {
         </button>
       </section>
 
+      {/* v2.5.26: Re-run tools setup splash */}
+      <section className="mb-6 pcd-section">
+        <h2 className="text-sm font-bold mb-3">Tools Setup</h2>
+        <p className="text-xs text-text-secondary mb-3">
+          Re-open the dashboard tools checklist (LibreHardwareMonitor, CrystalDiskInfo, OCCT,
+          HWiNFO64). Useful if you skipped a tool during initial setup or want to verify
+          everything is wired up.
+        </p>
+        <button
+          onClick={async () => {
+            await api.setSetting('dashboard_tools_setup_complete', '0');
+            window.dispatchEvent(new Event('pcd:rerun-tools-setup'));
+          }}
+          className="px-3 py-1.5 rounded-md text-xs pcd-button"
+        >
+          Re-run Tools Setup
+        </button>
+      </section>
+
       {/* About */}
       <section className="pcd-section">
         <h2 className="text-sm font-bold mb-3">About</h2>

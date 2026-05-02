@@ -1,11 +1,12 @@
 /**
- * W9 Scheduled Tasks -- ninth step of the first-run wizard (index 8).
+ * W9 Scheduled Tasks -- eighth step of the first-run wizard (index 7
+ * after v2.5.25 W6 removal; was index 8 prior).
  *
  * Checks which Windows Task Scheduler entries are already registered,
  * displays a count, and offers a one-click "Register All Tasks" button
  * that invokes Register-All-Tasks.ps1 via UAC elevation.
  *
- * On unmount: markComplete(8).
+ * On unmount: markComplete(7).
  */
 
 import { useEffect, useState, useCallback } from 'react';
@@ -77,7 +78,7 @@ export function W9ScheduledTasks() {
 
   // Mark complete on unmount
   useEffect(() => {
-    return () => { markComplete(8); };
+    return () => { markComplete(7); };  // v2.5.25: was 8 before W6 removal
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

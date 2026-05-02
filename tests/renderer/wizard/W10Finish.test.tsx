@@ -39,13 +39,13 @@ const fullProfile: SystemProfile = {
 // Helper: inject wizard state via dispatch
 // ---------------------------------------------------------------------------
 
+// v2.5.25: `selectedTools` injector prop removed along with the W6 step.
 function StateInjector({
   profile,
   nasServer,
   nasMappings,
   defenderExclusionApplied,
   telegramEnabled,
-  selectedTools,
   autopilotEnabled,
   claudeDetected,
   obsidianEnabled,
@@ -56,7 +56,6 @@ function StateInjector({
   nasMappings?: Array<{ drive: string; share: string }>;
   defenderExclusionApplied?: boolean;
   telegramEnabled?: boolean;
-  selectedTools?: string[];
   autopilotEnabled?: boolean;
   claudeDetected?: boolean;
   obsidianEnabled?: boolean;
@@ -69,12 +68,11 @@ function StateInjector({
     if (nasMappings !== undefined) dispatch({ type: 'SET_FIELD', field: 'nasMappings', value: nasMappings });
     if (defenderExclusionApplied !== undefined) dispatch({ type: 'SET_FIELD', field: 'defenderExclusionApplied', value: defenderExclusionApplied });
     if (telegramEnabled !== undefined) dispatch({ type: 'SET_FIELD', field: 'telegramEnabled', value: telegramEnabled });
-    if (selectedTools !== undefined) dispatch({ type: 'SET_FIELD', field: 'selectedTools', value: selectedTools });
     if (autopilotEnabled !== undefined) dispatch({ type: 'SET_FIELD', field: 'autopilotEnabled', value: autopilotEnabled });
     if (claudeDetected !== undefined) dispatch({ type: 'SET_FIELD', field: 'claudeDetected', value: claudeDetected });
     if (obsidianEnabled !== undefined) dispatch({ type: 'SET_FIELD', field: 'obsidianEnabled', value: obsidianEnabled });
     if (tasksRegistered !== undefined) dispatch({ type: 'SET_FIELD', field: 'tasksRegistered', value: tasksRegistered });
-  }, [dispatch, profile, nasServer, nasMappings, defenderExclusionApplied, telegramEnabled, selectedTools, autopilotEnabled, claudeDetected, obsidianEnabled, tasksRegistered]);
+  }, [dispatch, profile, nasServer, nasMappings, defenderExclusionApplied, telegramEnabled, autopilotEnabled, claudeDetected, obsidianEnabled, tasksRegistered]);
   return null;
 }
 
@@ -152,7 +150,9 @@ describe('<W10Finish>', () => {
   it('writes wizard_completed_at and wizard_version on mount', () => {
     renderW10();
     expect(mockApi.setSetting).toHaveBeenCalledWith('wizard_completed_at', expect.any(String));
-    expect(mockApi.setSetting).toHaveBeenCalledWith('wizard_version', '2');
+    // v2.5.25: bumped 2 -> 3 alongside W6 removal so upgraders mid-wizard
+    // can detect the layout change.
+    expect(mockApi.setSetting).toHaveBeenCalledWith('wizard_version', '3');
   });
 
   it('shows configured integration summary', () => {

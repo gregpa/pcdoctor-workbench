@@ -97,17 +97,20 @@ describe('<W8Integrations>', () => {
     expect(screen.getByText(/anthropic.com\/claude-code/)).toBeInTheDocument();
   });
 
-  it('Obsidian toggle is present and defaults to disabled', () => {
+  // v2.5.23: section was renamed from "Obsidian Archive" to "Weekly Report
+  // Archive" so non-Obsidian users aren't confused. Tests still cover the
+  // same toggle + reveal flow, just match the generic aria-label.
+  it('Weekly archive toggle is present and defaults to disabled', () => {
     renderW8(fullProfile);
-    const toggle = screen.getByRole('switch', { name: /Save weekly reports to Obsidian vault/ });
+    const toggle = screen.getByRole('switch', { name: /Save weekly reports to a folder/ });
     expect(toggle).toBeInTheDocument();
     expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
 
-  it('enabling Obsidian toggle reveals directory input', () => {
+  it('enabling weekly archive toggle reveals directory input', () => {
     renderW8(fullProfile);
     expect(screen.queryByLabelText('Archive Directory')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('switch', { name: /Save weekly reports to Obsidian vault/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /Save weekly reports to a folder/ }));
     expect(screen.getByLabelText('Archive Directory')).toBeInTheDocument();
   });
 

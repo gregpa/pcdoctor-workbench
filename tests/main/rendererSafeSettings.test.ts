@@ -125,6 +125,7 @@ describe('rendererSafeSettings allowlist', () => {
         'auto_block_rdp_bruteforce',
         'autopilot_enabled',
         'claude_detected',
+        'dashboard_tools_setup_complete',
         'digest_hour',
         'email_digest_recipient',
         'first_run_complete',

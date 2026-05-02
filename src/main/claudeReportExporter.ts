@@ -12,6 +12,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { listActionLog, type ActionLogRow } from './dataStore.js';
 import { PCDOCTOR_ROOT, LATEST_JSON_PATH } from './constants.js';
+import { resolveScriptPath } from './scriptRunner.js';
 
 export interface ClaudeReport {
   markdown: string;
@@ -85,7 +86,9 @@ function collectScheduledTasks(): Array<{ name: string; state: string; lastRun: 
   // via powershell wrapping; on boxes with Defender real-time scan each
   // PS spawn took ~6s, so the 5s timeout hit on 19 of 20 tasks and the
   // report claimed they were NOT REGISTERED when they were fine.
-  const scriptPath = path.join(PCDOCTOR_ROOT, 'Get-ScheduledTasksStatus.ps1');
+  // v2.5.23: ProgramData -> bundle fallback so a fresh install where the
+  // scripts didn't fully populate ProgramData still works.
+  const scriptPath = resolveScriptPath('Get-ScheduledTasksStatus.ps1');
   try {
     const r = spawnSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',

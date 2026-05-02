@@ -15,7 +15,7 @@ import log from 'electron-log/main';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
 import { getStatus, refreshStatusCache } from './pcdoctorBridge.js';
-import { POLL_INTERVAL_MS, LOG_DIR } from './constants.js';
+import { POLL_INTERVAL_MS, LOG_DIR, LATEST_JSON_PATH } from './constants.js';
 
 // v2.4.52 (B52-MIG-1): wire electron-log for the main process. Pre-2.4.52
 // the LOG_DIR constant was defined but never used — console.warn / console.log
@@ -711,6 +711,52 @@ app.whenReady().then(() => {
   // window creation still proceeds and the UI sees cache-empty instead of
   // becoming the first latest.json reader.
   void refreshStatusCache('startup-preload').catch(() => {});
+
+  // v2.5.25: auto-trigger an initial scan on first launch when no diagnostic
+  // report exists yet. Pre-2.5.25 a fresh-install user landed on the dashboard
+  // with "Status cache has not been populated yet" and had no obvious way to
+  // populate it -- the W10 wizard's Run Scan button was the only entry point
+  // and unreachable once first_run_complete='1'. Greg's second-PC install
+  // (2026-05-01) sat in this dead state until he ran Invoke-PCDoctor.ps1
+  // manually from a PowerShell terminal.
+  //
+  // This IIFE waits for the bundle-sync probe (so any newly-synced scripts
+  // are on disk for scheduled-task callers) then checks for latest.json. If
+  // missing, it spawns Invoke-PCDoctor.ps1 via runPowerShellScript -- which
+  // already has the v2.5.22 ProgramData -> bundle fallback -- with stdout/
+  // stderr piped to electron-log so silent failures are debuggable. After
+  // the scan completes, it refreshes the status cache so the renderer's
+  // poll picks up the new findings without a manual reload.
+  (async () => {
+    try {
+      await bundleSyncPromise.catch(() => {});
+      // Use fs.existsSync directly to keep this synchronous + dependency-free.
+      const { existsSync } = await import('node:fs');
+      if (existsSync(LATEST_JSON_PATH)) {
+        log.info('[initial-scan] latest.json present, skipping auto-scan');
+        return;
+      }
+      log.info('[initial-scan] latest.json missing -- triggering auto-scan');
+      const { runPowerShellScript } = await import('./scriptRunner.js');
+      const tStart = Date.now();
+      try {
+        await runPowerShellScript('Invoke-PCDoctor.ps1', ['-Mode', 'Report'], {
+          timeoutMs: 5 * 60 * 1000, // 5 min — same as the script's default
+          onStdout: (chunk) => log.info('[initial-scan]', chunk.trimEnd()),
+          onStderr: (chunk) => log.warn('[initial-scan stderr]', chunk.trimEnd()),
+        });
+        log.info(`[initial-scan] completed in ${Date.now() - tStart}ms`);
+        // Refresh the cache so the dashboard's next poll picks up the report.
+        await refreshStatusCache('initial-scan-complete').catch((e) =>
+          log.warn('[initial-scan] post-scan refresh failed:', e?.message ?? e),
+        );
+      } catch (e: any) {
+        log.error('[initial-scan] script failed:', e?.code ?? '', e?.message ?? e);
+      }
+    } catch (e: any) {
+      log.warn('[initial-scan] outer error:', e?.message ?? e);
+    }
+  })();
 
   createWindow();
   createTray({

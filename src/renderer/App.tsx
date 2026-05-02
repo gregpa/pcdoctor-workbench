@@ -13,6 +13,7 @@ import { Autopilot } from './pages/Autopilot.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ClaudeApprovalListener } from './components/layout/ClaudeApprovalListener.js';
 import { WizardShell } from './components/wizard/WizardShell.js';
+import { FirstRunToolsSplash } from './components/firstRunTools/FirstRunToolsSplash.js';
 import { ConfirmProvider } from './lib/confirmContext.js';
 import './styles/globals.css';
 
@@ -20,6 +21,10 @@ export function App() {
   return (
     <ConfirmProvider>
       <WizardShell />
+      {/* v2.5.26: tools setup splash. Renders only when first_run_complete='1'
+          AND dashboard_tools_setup_complete!='1' (i.e. wizard done but tools
+          not yet confirmed). The component self-gates internally. */}
+      <FirstRunToolsSplash />
       <ClaudeApprovalListener />
       <HashRouter>
         {/* v2.4.24: outer container is fixed to viewport height + hides

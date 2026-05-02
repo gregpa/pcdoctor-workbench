@@ -88,7 +88,7 @@ export function W8Integrations() {
   useEffect(() => {
     return () => {
       void saveSettings();
-      markComplete(7);
+      markComplete(6);  // v2.5.25: was 7 before W6 removal
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveSettings]);
@@ -134,15 +134,15 @@ export function W8Integrations() {
         )}
       </div>
 
-      {/* ── Section B: Obsidian Archive ── */}
+      {/* ── Section B: Weekly Report Archive (v2.5.23: genericized) ── */}
       <div className="rounded-lg border border-surface-600 bg-surface-700/50 px-4 py-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">Obsidian Archive</h3>
+          <h3 className="text-sm font-semibold text-text-primary">Weekly Report Archive</h3>
           <button
             type="button"
             role="switch"
             aria-checked={obsEnabled}
-            aria-label="Save weekly reports to Obsidian vault"
+            aria-label="Save weekly reports to a folder"
             onClick={() => setObsEnabled(!obsEnabled)}
             className={`relative w-11 h-6 rounded-full transition-colors ${
               obsEnabled ? 'bg-status-info' : 'bg-surface-600'
@@ -156,8 +156,8 @@ export function W8Integrations() {
           </button>
         </div>
         <p className="text-xs text-text-secondary mt-1">
-          Save weekly review reports to a local folder (e.g. an Obsidian vault or any directory).
-          {obsidianInstalled && ' Obsidian was detected on this system.'}
+          Save weekly review reports to a folder of your choice.
+          {obsidianInstalled && ' An Obsidian vault was detected — its path is suggested below.'}
         </p>
 
         {obsEnabled && (

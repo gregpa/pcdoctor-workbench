@@ -21,7 +21,10 @@ import { W2SystemProfile } from './steps/W2SystemProfile.js';
 import { W3NetworkNas } from './steps/W3NetworkNas.js';
 import { W4SecurityBaseline } from './steps/W4SecurityBaseline.js';
 import { W5Notifications } from './steps/W5Notifications.js';
-import { W6ToolsCatalog } from './steps/W6ToolsCatalog.js';
+// v2.5.25: W6ToolsCatalog removed -- the wizard never actually triggered any
+// tool installs (W6 only persisted a `selectedTools` array that was never
+// read by an installer), so the step was pure friction. Tools are installed
+// from the Tools page after the wizard completes.
 import { W7AutopilotRules } from './steps/W7AutopilotRules.js';
 import { W8Integrations } from './steps/W8Integrations.js';
 import { W9ScheduledTasks } from './steps/W9ScheduledTasks.js';
@@ -37,11 +40,10 @@ const STEP_LABELS = [
   'Network',       // 2 — W3
   'Security',      // 3 — W4
   'Notifications', // 4 — W5
-  'Tools',         // 5 — W6
-  'Autopilot',     // 6 — W7
-  'Integrations',  // 7 — W8
-  'Tasks',         // 8 — W9
-  'Finish',        // 9 — W10
+  'Autopilot',     // 5 — W7  (v2.5.25: was index 6 before W6 removal)
+  'Integrations',  // 6 — W8
+  'Tasks',         // 7 — W9
+  'Finish',        // 8 — W10
 ] as const;
 
 const TOTAL_STEPS = STEP_LABELS.length;
@@ -159,11 +161,10 @@ function WizardOverlay({ onDone }: { onDone: () => void }) {
             : currentStep === 2 ? <W3NetworkNas />
             : currentStep === 3 ? <W4SecurityBaseline />
             : currentStep === 4 ? <W5Notifications />
-            : currentStep === 5 ? <W6ToolsCatalog />
-            : currentStep === 6 ? <W7AutopilotRules />
-            : currentStep === 7 ? <W8Integrations />
-            : currentStep === 8 ? <W9ScheduledTasks />
-            : currentStep === 9 ? <W10Finish />
+            : currentStep === 5 ? <W7AutopilotRules />
+            : currentStep === 6 ? <W8Integrations />
+            : currentStep === 7 ? <W9ScheduledTasks />
+            : currentStep === 8 ? <W10Finish />
             : <StepPlaceholder index={currentStep} label={STEP_LABELS[currentStep]} />}
         </div>
 

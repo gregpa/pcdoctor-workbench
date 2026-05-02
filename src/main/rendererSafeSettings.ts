@@ -48,6 +48,9 @@ export const RENDERER_SAFE_KEYS: ReadonlySet<string> = new Set<string>([
   'obsidian_enabled', 'wsl_memory_limit_gb', 'claude_detected',
   'wizard_completed_at', 'wizard_version',
   'autopilot_enabled',
+  // v2.5.26: first-run tools splash completion flag (renderer reads this to
+  // decide whether to render FirstRunToolsSplash before the dashboard).
+  'dashboard_tools_setup_complete',
 ]);
 
 /**

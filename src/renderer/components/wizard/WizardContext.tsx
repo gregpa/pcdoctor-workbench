@@ -14,7 +14,7 @@ import type { SystemProfile } from '@shared/types.js';
 // ---------------------------------------------------------------------------
 
 export interface WizardState {
-  currentStep: number;            // 0-9 (W1=0 through W10=9)
+  currentStep: number;            // 0-8 (W1=0 through W10=8 after v2.5.25 W6 removal)
   completedSteps: Set<number>;
 
   // W2 — System profile (Get-SystemProfile.ps1 output)
@@ -34,8 +34,8 @@ export interface WizardState {
   quietHoursStart: number;
   quietHoursEnd: number;
 
-  // W6 — Tools
-  selectedTools: string[];        // tool IDs the user wants installed
+  // (v2.5.25: W6 selectedTools field removed -- the wizard never installed
+  //  the tools the user picked. Tools are installed from the Tools page.)
 
   // W7 — Autopilot
   autopilotEnabled: boolean;
@@ -65,7 +65,6 @@ const INITIAL_STATE: WizardState = {
   telegramChatId: '',
   quietHoursStart: 22,
   quietHoursEnd: 7,
-  selectedTools: [],
   autopilotEnabled: true,
   claudeDetected: false,
   obsidianEnabled: false,
@@ -88,7 +87,7 @@ type WizardAction =
   | { type: 'NEXT_STEP' }
   | { type: 'PREV_STEP' };
 
-const TOTAL_STEPS = 10;
+const TOTAL_STEPS = 9;  // v2.5.25: 10 -> 9 after W6 (Tools) removal
 
 function wizardReducer(state: WizardState, action: WizardAction): WizardState {
   switch (action.type) {
