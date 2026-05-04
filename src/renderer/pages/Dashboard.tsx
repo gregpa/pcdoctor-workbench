@@ -473,6 +473,31 @@ export function Dashboard() {
         </div>
         );
       })()}
+      {/* v2.5.29: Surface-class compat banner. Distinct from the v2.5.2 LHM-off
+          banner above: that one fires when LHM HTTP is unreachable (server off
+          or LHM not running). This one fires when LHM HTTP IS reachable but
+          reports zero temps and no cache exists -- the symptom on Microsoft
+          Surface, certain OEM laptops, and VMs whose firmware doesn't expose
+          temperature sensors to LHM. Greg's Surface Pro 5 hit this pre-2.5.28
+          (then v2.5.28's degree-symbol fix recovered the temps); kept the
+          banner because the same shape can mask other genuine no-sensor cases. */}
+      {status?.cpu_temp_status
+        && status.cpu_temp_status.lhm_http_open === true
+        && status.cpu_temp_status.source === 'none'
+        && status.cpu_temp_status.from_cache === false && (
+        <div className="mb-3 p-3 bg-status-info/10 border border-status-info/40 rounded-lg flex items-start gap-2">
+          <span className="text-status-info">ℹ</span>
+          <div className="text-[12px] flex-1">
+            <div className="font-semibold text-status-info">No temperature sensors detected</div>
+            <div className="text-text-secondary mt-0.5">
+              LHM is connected but reading no temperature sensors. Common on
+              Microsoft Surface, certain OEM laptops, and virtualized
+              environments. Try opening HWiNFO64 for an alternate temperature
+              view.
+            </div>
+          </div>
+        </div>
+      )}
       {/* v2.4.39 (B45): trend charts need width to be legible -- stack below
           lg rather than squeezing 3-up too narrow. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 mb-3">
