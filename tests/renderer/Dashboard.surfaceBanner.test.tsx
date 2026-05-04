@@ -124,4 +124,10 @@ describe('Dashboard > Surface compat banner (v2.5.29)', () => {
     expect(screen.queryByText(SURFACE_HEADING)).not.toBeInTheDocument();
     expect(screen.queryByText(LHM_OFF_HEADING)).not.toBeInTheDocument();
   });
+
+  it("hides when source='cache' (no live read but cache-marker shape, distinct from Surface)", () => {
+    setupHooks(makeStatus({ source: 'cache', from_cache: false, lhm_http_open: true }));
+    render(<Dashboard />);
+    expect(screen.queryByText(SURFACE_HEADING)).not.toBeInTheDocument();
+  });
 });

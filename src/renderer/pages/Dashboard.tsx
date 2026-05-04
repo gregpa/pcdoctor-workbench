@@ -473,14 +473,10 @@ export function Dashboard() {
         </div>
         );
       })()}
-      {/* v2.5.29: Surface-class compat banner. Distinct from the v2.5.2 LHM-off
-          banner above: that one fires when LHM HTTP is unreachable (server off
-          or LHM not running). This one fires when LHM HTTP IS reachable but
-          reports zero temps and no cache exists -- the symptom on Microsoft
-          Surface, certain OEM laptops, and VMs whose firmware doesn't expose
-          temperature sensors to LHM. Greg's Surface Pro 5 hit this pre-2.5.28
-          (then v2.5.28's degree-symbol fix recovered the temps); kept the
-          banner because the same shape can mask other genuine no-sensor cases. */}
+      {/* v2.5.29: Surface Pro 5 hit a no-temps-with-LHM-reachable shape pre-
+          2.5.28 (degree-symbol parser bug); the same shape also occurs on OEM
+          laptops and VMs whose firmware doesn't expose thermal zones to LHM,
+          so the banner stayed even after the parser fix recovered Greg's box. */}
       {status?.cpu_temp_status
         && status.cpu_temp_status.lhm_http_open === true
         && status.cpu_temp_status.source === 'none'
