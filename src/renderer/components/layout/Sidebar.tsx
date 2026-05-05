@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/security', label: 'Security', icon: '🛡' },
   { to: '/updates', label: 'Updates', icon: '🪟' },
   { to: '/tools', label: 'Tools', icon: '🧰' },
+  { to: '/services', label: 'Services', icon: '🔧' },
   { to: '/memtest86', label: 'MemTest86', icon: '🧠' },
   { to: '/claude', label: 'Claude', icon: '🤖' },
   { to: '/autopilot', label: 'Autopilot', icon: '🧭' },

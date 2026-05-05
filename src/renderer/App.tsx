@@ -6,6 +6,7 @@ import { Forecast } from './pages/Forecast.js';
 import { WeeklyReview } from './pages/WeeklyReview.js';
 import { Security } from './pages/Security.js';
 import { Tools } from './pages/Tools.js';
+import { Services } from './pages/Services.js';
 import { Updates } from './pages/Updates.js';
 import { MemTest86 } from './pages/MemTest86.js';
 import { Claude } from './pages/Claude.js';
@@ -42,6 +43,7 @@ export function App() {
               <Route path="/weekly-review" element={<WeeklyReview />} />
               <Route path="/security" element={<Security />} />
               <Route path="/tools" element={<Tools />} />
+              <Route path="/services" element={<Services />} />
               <Route path="/updates" element={<Updates />} />
               <Route path="/memtest86" element={<MemTest86 />} />
               <Route path="/claude" element={<Claude />} />
