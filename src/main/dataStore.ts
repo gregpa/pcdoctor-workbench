@@ -448,6 +448,42 @@ export function markRollbackReverted(id: number) {
   openDb().prepare(`UPDATE rollbacks SET reverted_at = ? WHERE id = ?`).run(Date.now(), id);
 }
 
+// ============== UNDO CENTER (v2.5.30) ==============
+
+export interface UndoableActionRow {
+  action_id: number;
+  rollback_id: number;
+  ts: number;
+  action_name: string;
+  action_label: string;
+  expires_at: number;
+  params_json: string | null;
+  result_json: string | null;
+}
+
+/**
+ * v2.5.30: Service actions that are still undoable -- successful, not yet
+ * reverted, with a live (non-expired) rollback row. Powers the UndoCenter
+ * page's long-term undo list. Scoped to service mutate action_names; if
+ * processMutate (P3) ever gains rollback rows we extend the IN clause.
+ */
+export function listUndoableServiceActions(now: number = Date.now()): UndoableActionRow[] {
+  return openDb().prepare(`
+    SELECT
+      a.id AS action_id, r.id AS rollback_id,
+      a.ts, a.action_name, a.action_label,
+      r.expires_at, a.params_json, a.result_json
+    FROM actions_log a
+    JOIN rollbacks r ON r.action_id = a.id
+    WHERE a.status = 'success'
+      AND a.reverted_at IS NULL
+      AND r.reverted_at IS NULL
+      AND r.expires_at > ?
+      AND a.action_name IN ('set_service_startup', 'stop_service', 'start_service')
+    ORDER BY a.ts DESC
+  `).all(now) as UndoableActionRow[];
+}
+
 export function pruneExpiredRollbacks(): number {
   const info = openDb().prepare(`DELETE FROM rollbacks WHERE expires_at < ?`).run(Date.now());
   return Number(info.changes);

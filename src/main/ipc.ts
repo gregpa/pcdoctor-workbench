@@ -75,10 +75,13 @@ import { buildClaudeReport, type ClaudeReport } from './claudeReportExporter.js'
 import { getAutopilotActivity, evaluateRule, dispatchDecision } from './autopilotEngine.js';
 import { listAutopilotRules, suppressAutopilotRule, setAutopilotRuleEnabled, getAutopilotRule, insertAutopilotActivity } from './dataStore.js';
 import { writeRenderPerfLine } from './renderPerfLog.js';
+import * as serviceMutate from './serviceMutate.js';
+import * as processMutate from './processMutate.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
   SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus, ScheduledTaskInfo,
+  ServiceRow, ProcessRow, ProcessPriorityClass,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -1607,6 +1610,210 @@ export function registerIpcHandlers() {
       return { ok: true, data: r };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_SYSTEM_PROFILE', message: e?.message ?? 'Failed to collect system profile' } };
+    }
+  });
+
+  // v2.5.30: full Windows services list for the new Services page. Distinct
+  // from the curated ~10-row ServiceHealth set on the Dashboard. Returns ~250
+  // rows with start_type, dependency arrays, and a load_bearing safety flag
+  // computed in PS via a hardcoded shortlist (RpcSs, EventLog, CryptSvc, ...).
+  // Driver services (Boot/System start types) are filtered out -- their boot-
+  // loop blast radius is too high for a UI action surface. Read-only path,
+  // unelevated; ~600-900ms on a typical box.
+  ipcMain.handle('api:listAllServices', async (): Promise<IpcResult<ServiceRow[]>> => {
+    try {
+      const r = await runPowerShellScript<{ success: boolean; services: ServiceRow[]; count: number }>(
+        'Get-AllServices.ps1', ['-JsonOutput'], { timeoutMs: 30_000 },
+      );
+      return { ok: true, data: r.services };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_LIST_SERVICES', message: e?.message ?? 'Failed to enumerate services' } };
+    }
+  });
+
+  // v2.5.30: service mutate handlers. All four route through the elevated
+  // batch worker (UAC once per session). dryRun=true skips DB writes and
+  // returns just the projected before/after for the renderer's confirm
+  // dialog. Real runs persist to actions_log + rollbacks tables for the
+  // 7-day undo path.
+  async function handleServiceMutate(
+    fn: () => Promise<serviceMutate.ServiceMutateResult>,
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> {
+    try {
+      const data = await fn();
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_SERVICE_MUTATE', message: e?.message ?? 'Service mutation failed' } };
+    }
+  }
+
+  ipcMain.handle('api:setServiceStartup', async (
+    _evt, service: string, startupType: serviceMutate.ServiceStartupType, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof service !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(service)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid service name' } };
+    }
+    if (!['Automatic', 'AutomaticDelayedStart', 'Manual', 'Disabled'].includes(startupType)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid startup type' } };
+    }
+    return handleServiceMutate(() => serviceMutate.setServiceStartup(service, startupType, opts ?? {}));
+  });
+
+  ipcMain.handle('api:stopService', async (
+    _evt, service: string, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof service !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(service)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid service name' } };
+    }
+    return handleServiceMutate(() => serviceMutate.stopService(service, opts ?? {}));
+  });
+
+  ipcMain.handle('api:startService', async (
+    _evt, service: string, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof service !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(service)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid service name' } };
+    }
+    return handleServiceMutate(() => serviceMutate.startService(service, opts ?? {}));
+  });
+
+  ipcMain.handle('api:undoServiceAction', async (
+    _evt, actionLogId: number,
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof actionLogId !== 'number' || !Number.isInteger(actionLogId) || actionLogId <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid action log id' } };
+    }
+    return handleServiceMutate(() => serviceMutate.undoServiceAction(actionLogId));
+  });
+
+  // v2.5.30 (S6): UndoCenter feed. Returns undoable service actions that
+  // are still within their 7-day rollback window. Each row carries enough
+  // metadata for the renderer to render a label, age, expiry countdown,
+  // and an Undo button (which dispatches the existing api:undoServiceAction).
+  // v2.5.30: full process list for the new Processes page. Read-only,
+  // unelevated; ~120ms via Get-Process. system_critical flag drives the
+  // confirm-dialog "I understand" gate.
+  ipcMain.handle('api:listAllProcesses', async (): Promise<IpcResult<ProcessRow[]>> => {
+    try {
+      const r = await runPowerShellScript<{ success: boolean; processes: ProcessRow[]; count: number }>(
+        'Get-AllProcesses.ps1', ['-JsonOutput'], { timeoutMs: 30_000 },
+      );
+      return { ok: true, data: r.processes };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_LIST_PROCESSES', message: e?.message ?? 'Failed to enumerate processes' } };
+    }
+  });
+
+  // v2.5.30: process mutate handlers. Route through the same elevated
+  // batch worker as the service mutates (single UAC per session).
+  // Process mutations are NOT undoable -- there's no rollback row, just
+  // an actions_log entry per mutation.
+  async function handleProcessMutate(
+    fn: () => Promise<processMutate.ProcessMutateResult>,
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> {
+    try {
+      const data = await fn();
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_PROCESS_MUTATE', message: e?.message ?? 'Process mutation failed' } };
+    }
+  }
+
+  ipcMain.handle('api:killProcess', async (
+    _evt, target: number | string, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (typeof target === 'number') {
+      if (!Number.isInteger(target) || target < 0) {
+        return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a non-negative integer' } };
+      }
+    } else if (typeof target === 'string') {
+      if (!/^[a-zA-Z0-9._-]{1,128}$/.test(target)) {
+        return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'process name has invalid characters' } };
+      }
+    } else {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'target must be pid or name' } };
+    }
+    return handleProcessMutate(() => processMutate.killProcess(target, opts ?? {}));
+  });
+
+  ipcMain.handle('api:setProcessPriority', async (
+    _evt, pid: number, priorityClass: ProcessPriorityClass, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    if (!['Idle','BelowNormal','Normal','AboveNormal','High','RealTime'].includes(priorityClass)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'invalid priority class' } };
+    }
+    return handleProcessMutate(() => processMutate.setProcessPriority(pid, priorityClass, opts ?? {}));
+  });
+
+  ipcMain.handle('api:setProcessAffinity', async (
+    _evt, pid: number, mask: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    if (!Number.isInteger(mask) || mask <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'mask must be a positive integer' } };
+    }
+    return handleProcessMutate(() => processMutate.setProcessAffinity(pid, mask, opts ?? {}));
+  });
+
+  ipcMain.handle('api:suspendProcess', async (
+    _evt, pid: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    return handleProcessMutate(() => processMutate.suspendProcess(pid, opts ?? {}));
+  });
+
+  ipcMain.handle('api:resumeProcess', async (
+    _evt, pid: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    return handleProcessMutate(() => processMutate.resumeProcess(pid, opts ?? {}));
+  });
+
+  ipcMain.handle('api:listUndoableServiceActions', async (): Promise<IpcResult<{
+    rows: Array<{
+      action_id: number;
+      rollback_id: number;
+      ts: number;
+      action_name: string;
+      action_label: string;
+      expires_at: number;
+      service: string | null;
+    }>;
+    server_now: number;
+  }>> => {
+    try {
+      const { listUndoableServiceActions } = await import('./dataStore.js');
+      const rawRows = listUndoableServiceActions();
+      const rows = rawRows.map((r) => {
+        let service: string | null = null;
+        if (r.params_json) {
+          try {
+            const p = JSON.parse(r.params_json) as Record<string, unknown>;
+            if (typeof p.service === 'string') service = p.service;
+          } catch { /* ignore */ }
+        }
+        return {
+          action_id: r.action_id,
+          rollback_id: r.rollback_id,
+          ts: r.ts,
+          action_name: r.action_name,
+          action_label: r.action_label,
+          expires_at: r.expires_at,
+          service,
+        };
+      });
+      return { ok: true, data: { rows, server_now: Date.now() } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_LIST_UNDOABLE', message: e?.message ?? 'Failed to list undoable actions' } };
     }
   });
 }

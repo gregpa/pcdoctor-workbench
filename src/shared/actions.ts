@@ -706,6 +706,80 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Registers all PCDoctor maintenance tasks with Windows Task Scheduler. Requires administrator elevation.',
   },
 
+  // ============== v2.5.30: SERVICES PAGE MUTATES ==============
+  // These three are surfaced via the Services page (not the Quick Actions
+  // grid) and route through the elevated batch worker. Marked
+  // informational=false (real mutations) but informational-style icons
+  // because they lack a Quick Actions tile. params_schema is omitted --
+  // the renderer always passes service+startupType (or service alone)
+  // through the dedicated api:setServiceStartup / api:stopService /
+  // api:startService IPC handlers, never via the generic api:runAction.
+  set_service_startup: {
+    name: 'set_service_startup', label: 'Set Service StartupType',
+    ps_script: 'actions/Set-ServiceStartup.ps1',
+    // Tier C: undo lives in actions_log.params_json (the prior StartupType
+    // string), not in a file snapshot. Tier B would require snapshot_paths
+    // which doesn't apply to a single registry value flip.
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 3,
+    needs_admin: true,
+    category: 'service', icon: '⚙️',
+    tooltip: 'Change a service\'s StartupType (Automatic/AutomaticDelayedStart/Manual/Disabled). 7-day undo.',
+  },
+  stop_service: {
+    name: 'stop_service', label: 'Stop Service',
+    ps_script: 'actions/Stop-Service.ps1',
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
+    category: 'service', icon: '⏹️',
+    tooltip: 'Stop a running service (force-stops dependents). 7-day undo.',
+  },
+  start_service: {
+    name: 'start_service', label: 'Start Service',
+    ps_script: 'actions/Start-Service.ps1',
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
+    category: 'service', icon: '▶️',
+    tooltip: 'Start a stopped service. Refuses if startup type is Disabled. 7-day undo.',
+  },
+
+  // ============== v2.5.30: PROCESSES PAGE MUTATES ==============
+  // Surfaced via the Processes page. Process actions are NOT undoable
+  // (rollback_tier: 'none') -- there's no meaningful before-state for a
+  // killed process. Suspend/resume could be reversed but the user already
+  // has a Suspend/Resume button pair on the row, so no rollback row.
+  set_process_priority: {
+    name: 'set_process_priority', label: 'Set Process Priority',
+    ps_script: 'actions/Set-ProcessPriority.ps1',
+    confirm_level: 'info', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '⚡',
+    tooltip: 'Change a process\'s PriorityClass (Idle/BelowNormal/Normal/AboveNormal/High/RealTime).',
+  },
+  set_process_affinity: {
+    name: 'set_process_affinity', label: 'Set CPU Affinity',
+    ps_script: 'actions/Set-ProcessAffinity.ps1',
+    confirm_level: 'info', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '🧮',
+    tooltip: 'Set the CPU affinity bitmask -- pin a process to specific logical CPUs.',
+  },
+  suspend_process: {
+    name: 'suspend_process', label: 'Suspend Process',
+    ps_script: 'actions/Suspend-Process.ps1',
+    confirm_level: 'risky', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '⏸',
+    tooltip: 'Suspend (pause) a process via NtSuspendProcess. Resume later from the same row.',
+  },
+  resume_process: {
+    name: 'resume_process', label: 'Resume Process',
+    ps_script: 'actions/Resume-Process.ps1',
+    confirm_level: 'info', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '▶',
+    tooltip: 'Resume a suspended process via NtResumeProcess.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

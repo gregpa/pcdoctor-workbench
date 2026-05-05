@@ -2,7 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
-  SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile,
+  SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile, ServiceRow,
+  ProcessRow, ProcessPriorityClass,
 } from '@shared/types.js';
 
 const api = {
@@ -117,6 +118,53 @@ const api = {
   triggerInitialScan: (): Promise<IpcResult<null>> => ipcRenderer.invoke('api:triggerInitialScan'),
   // v2.6.0 (wizard W2): system hardware profile for the first-run wizard.
   getSystemProfile: (): Promise<IpcResult<SystemProfile>> => ipcRenderer.invoke('api:getSystemProfile'),
+  // v2.5.30: Services page data (full enumerate, ~250 rows). Distinct from
+  // SystemStatus.services (curated 10-row health view on Dashboard).
+  listAllServices: (): Promise<IpcResult<ServiceRow[]>> => ipcRenderer.invoke('api:listAllServices'),
+  // v2.5.30: service mutate handlers. dryRun=true returns projected
+  // before/after for the renderer's confirm dialog without DB writes; the
+  // real run persists to actions_log + rollbacks for the 7-day undo path.
+  setServiceStartup: (
+    service: string,
+    startupType: 'Automatic' | 'AutomaticDelayedStart' | 'Manual' | 'Disabled',
+    opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<any>> => ipcRenderer.invoke('api:setServiceStartup', service, startupType, opts),
+  stopService: (service: string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:stopService', service, opts),
+  startService: (service: string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:startService', service, opts),
+  undoServiceAction: (actionLogId: number): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:undoServiceAction', actionLogId),
+  // v2.5.30 (P1-P3): Processes page bridges.
+  listAllProcesses: (): Promise<IpcResult<ProcessRow[]>> =>
+    ipcRenderer.invoke('api:listAllProcesses'),
+  killProcess: (target: number | string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:killProcess', target, opts),
+  setProcessPriority: (
+    pid: number, priorityClass: ProcessPriorityClass, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<any>> => ipcRenderer.invoke('api:setProcessPriority', pid, priorityClass, opts),
+  setProcessAffinity: (
+    pid: number, mask: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<any>> => ipcRenderer.invoke('api:setProcessAffinity', pid, mask, opts),
+  suspendProcess: (pid: number, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:suspendProcess', pid, opts),
+  resumeProcess: (pid: number, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:resumeProcess', pid, opts),
+
+  // v2.5.30 (S6): UndoCenter feed. Lists undoable service actions whose
+  // rollback row is still within the 7-day TTL.
+  listUndoableServiceActions: (): Promise<IpcResult<{
+    rows: Array<{
+      action_id: number;
+      rollback_id: number;
+      ts: number;
+      action_name: string;
+      action_label: string;
+      expires_at: number;
+      service: string | null;
+    }>;
+    server_now: number;
+  }>> => ipcRenderer.invoke('api:listUndoableServiceActions'),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

@@ -71,6 +71,60 @@ export interface ServiceHealth {
   detail?: string;
 }
 
+/**
+ * v2.5.30 — full row for the Services page (distinct from the curated
+ * `ServiceHealth` set above which powers the Dashboard ServicePill tile).
+ *
+ * Sourced from `powershell/Get-AllServices.ps1`. One row per Win32_Service
+ * after filtering out driver services (start_type = Boot | System) which
+ * are out-of-scope for the user-facing UI.
+ */
+export type ServiceStartType =
+  | 'Automatic'
+  | 'AutomaticDelayedStart'
+  | 'Manual'
+  | 'Disabled';
+
+export type ServiceMutableStartType = ServiceStartType;
+
+export interface ServiceRow {
+  key: string;                  // service short name (e.g. 'Spooler')
+  display: string;              // display name ('Print Spooler')
+  status: string;               // 'Running' | 'Stopped' | 'StartPending' | ...
+  start_type: ServiceStartType | string;  // string fallback for transitional shapes (e.g. 'Unknown')
+  binary_path: string;          // possibly empty
+  description: string;
+  depends_on: string[];
+  dependents: string[];
+  load_bearing: boolean;
+  /** Short reason text shown on the load-bearing safety badge; null when load_bearing=false. */
+  load_bearing_reason: string | null;
+}
+
+/**
+ * v2.5.30 — full row for the Processes page. Sourced from
+ * `powershell/Get-AllProcesses.ps1`. One row per running process
+ * (Get-Process). `system_critical=true` for kernel-level pseudo-
+ * processes and the well-known names whose kill blue-screens the box
+ * (csrss, winlogon, lsass, smss, wininit, services, plus virtualization
+ * hosts). The renderer uses this for the red "I understand" gate before
+ * any kill / suspend on these rows.
+ */
+export type ProcessKind = 'user' | 'system';
+
+export interface ProcessRow {
+  pid: number;
+  name: string;
+  ws_mb: number;
+  cpu_pct: number | null;       // null when not sampled this scan
+  kind: ProcessKind;
+  system_critical: boolean;
+  system_critical_reason: string | null;
+}
+
+export type ProcessPriorityClass =
+  | 'Idle' | 'BelowNormal' | 'Normal' | 'AboveNormal' | 'High' | 'RealTime';
+
 /** v2.3.0 — optional rich system metrics surfaced from Invoke-PCDoctor.ps1 */
 export interface WslConfigMetric {
   exists: boolean;
@@ -235,6 +289,16 @@ export type ActionName =
   | 'add_pcdoctor_exclusion'
   // v2.5.18 (first-run wizard W9) - Register all scheduled tasks
   | 'register_scheduled_tasks'
+  // v2.5.30 - Services & Processes management. Action names match the
+  // mutate-handler keys in src/main/serviceMutate.ts (services) and
+  // src/main/processMutate.ts (processes).
+  | 'set_service_startup'
+  | 'stop_service'
+  | 'start_service'
+  | 'set_process_priority'
+  | 'set_process_affinity'
+  | 'suspend_process'
+  | 'resume_process'
   // Internal (not shown in UI)
   | 'create_restore_point';
 
