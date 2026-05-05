@@ -93,15 +93,17 @@ if (-not (Test-Path $QueueDir)) {
 }
 
 $heartbeatFile = Join-Path $QueueDir '.heartbeat'
-$pid = $PID
+# $PID is a read-only automatic variable; assigning to $pid (case-insensitive
+# alias) crashes the worker on startup. Use a distinct name.
+$workerPid = $PID
 $startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
 function Update-Heartbeat {
     $hb = @{
-        pid        = $pid
+        pid        = $workerPid
         started_at = $startedAt
         last_seen  = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        version    = '2.5.30'
+        version    = '2.5.31'
     } | ConvertTo-Json -Compress
     # Best-effort write: heartbeat is informational, never block the worker
     # if a transient AV scan locks the file.

@@ -102,7 +102,7 @@ function setHeartbeat(opts: { ageMs?: number; pid?: number; version?: string } =
     pid: opts.pid ?? 1234,
     started_at: last,
     last_seen: last,
-    version: opts.version ?? '2.5.30',
+    version: opts.version ?? '2.5.31',
   }));
 }
 
@@ -125,7 +125,7 @@ describe('elevatedWorker > heartbeat', () => {
     setHeartbeat({ pid: 9999 });
     const hb = readHeartbeat();
     expect(hb?.pid).toBe(9999);
-    expect(hb?.version).toBe('2.5.30');
+    expect(hb?.version).toBe('2.5.31');
   });
 
   it('readHeartbeat returns null on malformed JSON', () => {
@@ -167,7 +167,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
-  it('throws E_UAC_DENIED when heartbeat never appears within timeout', async () => {
+  it('throws E_WORKER_NO_HEARTBEAT when heartbeat never appears within timeout', async () => {
     fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
     // We need to override the spawn timeout for this test or it would take
     // 60s. Use vi.useFakeTimers to fast-forward through the 250ms-poll loop.
@@ -177,7 +177,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     const err = await promise;
     vi.useRealTimers();
     expect(err).toBeInstanceOf(ElevatedWorkerError);
-    expect((err as ElevatedWorkerError).code).toBe('E_UAC_DENIED');
+    expect((err as ElevatedWorkerError).code).toBe('E_WORKER_NO_HEARTBEAT');
   });
 });
 

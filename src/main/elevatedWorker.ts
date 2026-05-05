@@ -224,8 +224,8 @@ async function spawnWorker(): Promise<void> {
  * missing or stale; waits up to WORKER_SPAWN_TIMEOUT_MS for the heartbeat
  * to appear after spawn. Returns once the worker is alive.
  *
- * @throws ElevatedWorkerError(E_UAC_DENIED) if heartbeat doesn't appear
- *   within the timeout (most likely cause: user dismissed the UAC prompt).
+ * @throws ElevatedWorkerError(E_WORKER_NO_HEARTBEAT) if heartbeat doesn't
+ *   appear within the timeout (UAC dismissed OR worker crashed on startup).
  */
 export async function ensureWorkerRunning(): Promise<void> {
   if (isWorkerAlive()) return;
@@ -235,9 +235,16 @@ export async function ensureWorkerRunning(): Promise<void> {
     if (isWorkerAlive(HEARTBEAT_STALE_MS)) return;
     await new Promise((r) => setTimeout(r, HEARTBEAT_POLL_INTERVAL_MS));
   }
+  // Heartbeat never appeared. Two failure modes look identical from here:
+  //   (1) UAC prompt was dismissed -- worker process never started
+  //   (2) Worker process started but crashed before writing heartbeat
+  //       (e.g. a PS startup error like the v2.5.30 $PID-shadowing bug)
+  // The error message reflects both possibilities; main.log will show the
+  // [elevated-worker] spawn entry either way, but only (2) leaves no
+  // pwsh.exe / consent.exe trace.
   throw new ElevatedWorkerError(
-    'E_UAC_DENIED',
-    'Elevated worker did not start within timeout. UAC prompt was likely dismissed.',
+    'E_WORKER_NO_HEARTBEAT',
+    `Elevated worker did not write heartbeat within ${WORKER_SPAWN_TIMEOUT_MS / 1000}s. Either UAC was dismissed, or the worker crashed on startup. Check main.log.`,
   );
 }
 
@@ -256,9 +263,9 @@ interface DispatchOpts {
  * error, or worker-reported failure.
  *
  * @throws ElevatedWorkerError with codes:
- *   - E_INVALID_ACTION  unknown action name
- *   - E_UAC_DENIED      worker spawn timed out
- *   - E_CMD_TIMEOUT     result file didn't appear within timeoutMs
+ *   - E_INVALID_ACTION       unknown action name
+ *   - E_WORKER_NO_HEARTBEAT  worker spawn timed out (UAC denied OR crashed)
+ *   - E_CMD_TIMEOUT          result file didn't appear within timeoutMs
  *   - E_BAD_RESULT      result file unparseable
  *   - <action's code>   action-specific error from the worker
  */
