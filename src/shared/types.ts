@@ -265,6 +265,12 @@ export type ActionName =
   | 'add_pcdoctor_exclusion'
   // v2.5.18 (first-run wizard W9) - Register all scheduled tasks
   | 'register_scheduled_tasks'
+  // v2.5.30 - Services & Processes management. Action names match the
+  // mutate-handler keys in src/main/serviceMutate.ts (services) and
+  // src/main/processMutate.ts (processes, P3 in v2.5.30 plan).
+  | 'set_service_startup'
+  | 'stop_service'
+  | 'start_service'
   // Internal (not shown in UI)
   | 'create_restore_point';
 

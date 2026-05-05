@@ -706,6 +706,42 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Registers all PCDoctor maintenance tasks with Windows Task Scheduler. Requires administrator elevation.',
   },
 
+  // ============== v2.5.30: SERVICES PAGE MUTATES ==============
+  // These three are surfaced via the Services page (not the Quick Actions
+  // grid) and route through the elevated batch worker. Marked
+  // informational=false (real mutations) but informational-style icons
+  // because they lack a Quick Actions tile. params_schema is omitted --
+  // the renderer always passes service+startupType (or service alone)
+  // through the dedicated api:setServiceStartup / api:stopService /
+  // api:startService IPC handlers, never via the generic api:runAction.
+  set_service_startup: {
+    name: 'set_service_startup', label: 'Set Service StartupType',
+    ps_script: 'actions/Set-ServiceStartup.ps1',
+    // Tier C: undo lives in actions_log.params_json (the prior StartupType
+    // string), not in a file snapshot. Tier B would require snapshot_paths
+    // which doesn't apply to a single registry value flip.
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 3,
+    needs_admin: true,
+    category: 'service', icon: '⚙️',
+    tooltip: 'Change a service\'s StartupType (Automatic/AutomaticDelayedStart/Manual/Disabled). 7-day undo.',
+  },
+  stop_service: {
+    name: 'stop_service', label: 'Stop Service',
+    ps_script: 'actions/Stop-Service.ps1',
+    confirm_level: 'risky', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
+    category: 'service', icon: '⏹️',
+    tooltip: 'Stop a running service (force-stops dependents). 7-day undo.',
+  },
+  start_service: {
+    name: 'start_service', label: 'Start Service',
+    ps_script: 'actions/Start-Service.ps1',
+    confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 5,
+    needs_admin: true,
+    category: 'service', icon: '▶️',
+    tooltip: 'Start a stopped service. Refuses if startup type is Disabled. 7-day undo.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

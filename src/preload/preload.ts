@@ -120,6 +120,20 @@ const api = {
   // v2.5.30: Services page data (full enumerate, ~250 rows). Distinct from
   // SystemStatus.services (curated 10-row health view on Dashboard).
   listAllServices: (): Promise<IpcResult<ServiceRow[]>> => ipcRenderer.invoke('api:listAllServices'),
+  // v2.5.30: service mutate handlers. dryRun=true returns projected
+  // before/after for the renderer's confirm dialog without DB writes; the
+  // real run persists to actions_log + rollbacks for the 7-day undo path.
+  setServiceStartup: (
+    service: string,
+    startupType: 'Automatic' | 'AutomaticDelayedStart' | 'Manual' | 'Disabled',
+    opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<any>> => ipcRenderer.invoke('api:setServiceStartup', service, startupType, opts),
+  stopService: (service: string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:stopService', service, opts),
+  startService: (service: string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:startService', service, opts),
+  undoServiceAction: (actionLogId: number): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:undoServiceAction', actionLogId),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

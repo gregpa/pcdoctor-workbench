@@ -75,6 +75,7 @@ import { buildClaudeReport, type ClaudeReport } from './claudeReportExporter.js'
 import { getAutopilotActivity, evaluateRule, dispatchDecision } from './autopilotEngine.js';
 import { listAutopilotRules, suppressAutopilotRule, setAutopilotRuleEnabled, getAutopilotRule, insertAutopilotActivity } from './dataStore.js';
 import { writeRenderPerfLine } from './renderPerfLog.js';
+import * as serviceMutate from './serviceMutate.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
@@ -1627,6 +1628,61 @@ export function registerIpcHandlers() {
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_LIST_SERVICES', message: e?.message ?? 'Failed to enumerate services' } };
     }
+  });
+
+  // v2.5.30: service mutate handlers. All four route through the elevated
+  // batch worker (UAC once per session). dryRun=true skips DB writes and
+  // returns just the projected before/after for the renderer's confirm
+  // dialog. Real runs persist to actions_log + rollbacks tables for the
+  // 7-day undo path.
+  async function handleServiceMutate(
+    fn: () => Promise<serviceMutate.ServiceMutateResult>,
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> {
+    try {
+      const data = await fn();
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_SERVICE_MUTATE', message: e?.message ?? 'Service mutation failed' } };
+    }
+  }
+
+  ipcMain.handle('api:setServiceStartup', async (
+    _evt, service: string, startupType: serviceMutate.ServiceStartupType, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof service !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(service)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid service name' } };
+    }
+    if (!['Automatic', 'AutomaticDelayedStart', 'Manual', 'Disabled'].includes(startupType)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid startup type' } };
+    }
+    return handleServiceMutate(() => serviceMutate.setServiceStartup(service, startupType, opts ?? {}));
+  });
+
+  ipcMain.handle('api:stopService', async (
+    _evt, service: string, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof service !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(service)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid service name' } };
+    }
+    return handleServiceMutate(() => serviceMutate.stopService(service, opts ?? {}));
+  });
+
+  ipcMain.handle('api:startService', async (
+    _evt, service: string, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof service !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(service)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid service name' } };
+    }
+    return handleServiceMutate(() => serviceMutate.startService(service, opts ?? {}));
+  });
+
+  ipcMain.handle('api:undoServiceAction', async (
+    _evt, actionLogId: number,
+  ): Promise<IpcResult<serviceMutate.ServiceMutateResult>> => {
+    if (typeof actionLogId !== 'number' || !Number.isInteger(actionLogId) || actionLogId <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'Invalid action log id' } };
+    }
+    return handleServiceMutate(() => serviceMutate.undoServiceAction(actionLogId));
   });
 }
 
