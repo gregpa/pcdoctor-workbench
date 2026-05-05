@@ -134,6 +134,20 @@ const api = {
     ipcRenderer.invoke('api:startService', service, opts),
   undoServiceAction: (actionLogId: number): Promise<IpcResult<any>> =>
     ipcRenderer.invoke('api:undoServiceAction', actionLogId),
+  // v2.5.30 (S6): UndoCenter feed. Lists undoable service actions whose
+  // rollback row is still within the 7-day TTL.
+  listUndoableServiceActions: (): Promise<IpcResult<{
+    rows: Array<{
+      action_id: number;
+      rollback_id: number;
+      ts: number;
+      action_name: string;
+      action_label: string;
+      expires_at: number;
+      service: string | null;
+    }>;
+    server_now: number;
+  }>> => ipcRenderer.invoke('api:listUndoableServiceActions'),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),

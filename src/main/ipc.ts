@@ -1684,6 +1684,49 @@ export function registerIpcHandlers() {
     }
     return handleServiceMutate(() => serviceMutate.undoServiceAction(actionLogId));
   });
+
+  // v2.5.30 (S6): UndoCenter feed. Returns undoable service actions that
+  // are still within their 7-day rollback window. Each row carries enough
+  // metadata for the renderer to render a label, age, expiry countdown,
+  // and an Undo button (which dispatches the existing api:undoServiceAction).
+  ipcMain.handle('api:listUndoableServiceActions', async (): Promise<IpcResult<{
+    rows: Array<{
+      action_id: number;
+      rollback_id: number;
+      ts: number;
+      action_name: string;
+      action_label: string;
+      expires_at: number;
+      service: string | null;
+    }>;
+    server_now: number;
+  }>> => {
+    try {
+      const { listUndoableServiceActions } = await import('./dataStore.js');
+      const rawRows = listUndoableServiceActions();
+      const rows = rawRows.map((r) => {
+        let service: string | null = null;
+        if (r.params_json) {
+          try {
+            const p = JSON.parse(r.params_json) as Record<string, unknown>;
+            if (typeof p.service === 'string') service = p.service;
+          } catch { /* ignore */ }
+        }
+        return {
+          action_id: r.action_id,
+          rollback_id: r.rollback_id,
+          ts: r.ts,
+          action_name: r.action_name,
+          action_label: r.action_label,
+          expires_at: r.expires_at,
+          service,
+        };
+      });
+      return { ok: true, data: { rows, server_now: Date.now() } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_LIST_UNDOABLE', message: e?.message ?? 'Failed to list undoable actions' } };
+    }
+  });
 }
 
 /**
