@@ -79,6 +79,7 @@ import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
   SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus, ScheduledTaskInfo,
+  ServiceRow,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -1607,6 +1608,24 @@ export function registerIpcHandlers() {
       return { ok: true, data: r };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_SYSTEM_PROFILE', message: e?.message ?? 'Failed to collect system profile' } };
+    }
+  });
+
+  // v2.5.30: full Windows services list for the new Services page. Distinct
+  // from the curated ~10-row ServiceHealth set on the Dashboard. Returns ~250
+  // rows with start_type, dependency arrays, and a load_bearing safety flag
+  // computed in PS via a hardcoded shortlist (RpcSs, EventLog, CryptSvc, ...).
+  // Driver services (Boot/System start types) are filtered out -- their boot-
+  // loop blast radius is too high for a UI action surface. Read-only path,
+  // unelevated; ~600-900ms on a typical box.
+  ipcMain.handle('api:listAllServices', async (): Promise<IpcResult<ServiceRow[]>> => {
+    try {
+      const r = await runPowerShellScript<{ success: boolean; services: ServiceRow[]; count: number }>(
+        'Get-AllServices.ps1', ['-JsonOutput'], { timeoutMs: 30_000 },
+      );
+      return { ok: true, data: r.services };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_LIST_SERVICES', message: e?.message ?? 'Failed to enumerate services' } };
     }
   });
 }

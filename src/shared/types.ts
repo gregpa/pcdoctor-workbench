@@ -71,6 +71,36 @@ export interface ServiceHealth {
   detail?: string;
 }
 
+/**
+ * v2.5.30 — full row for the Services page (distinct from the curated
+ * `ServiceHealth` set above which powers the Dashboard ServicePill tile).
+ *
+ * Sourced from `powershell/Get-AllServices.ps1`. One row per Win32_Service
+ * after filtering out driver services (start_type = Boot | System) which
+ * are out-of-scope for the user-facing UI.
+ */
+export type ServiceStartType =
+  | 'Automatic'
+  | 'AutomaticDelayedStart'
+  | 'Manual'
+  | 'Disabled';
+
+export type ServiceMutableStartType = ServiceStartType;
+
+export interface ServiceRow {
+  key: string;                  // service short name (e.g. 'Spooler')
+  display: string;              // display name ('Print Spooler')
+  status: string;               // 'Running' | 'Stopped' | 'StartPending' | ...
+  start_type: ServiceStartType | string;  // string fallback for transitional shapes (e.g. 'Unknown')
+  binary_path: string;          // possibly empty
+  description: string;
+  depends_on: string[];
+  dependents: string[];
+  load_bearing: boolean;
+  /** Short reason text shown on the load-bearing safety badge; null when load_bearing=false. */
+  load_bearing_reason: string | null;
+}
+
 /** v2.3.0 — optional rich system metrics surfaced from Invoke-PCDoctor.ps1 */
 export interface WslConfigMetric {
   exists: boolean;

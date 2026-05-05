@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
-  SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile,
+  SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile, ServiceRow,
 } from '@shared/types.js';
 
 const api = {
@@ -117,6 +117,9 @@ const api = {
   triggerInitialScan: (): Promise<IpcResult<null>> => ipcRenderer.invoke('api:triggerInitialScan'),
   // v2.6.0 (wizard W2): system hardware profile for the first-run wizard.
   getSystemProfile: (): Promise<IpcResult<SystemProfile>> => ipcRenderer.invoke('api:getSystemProfile'),
+  // v2.5.30: Services page data (full enumerate, ~250 rows). Distinct from
+  // SystemStatus.services (curated 10-row health view on Dashboard).
+  listAllServices: (): Promise<IpcResult<ServiceRow[]>> => ipcRenderer.invoke('api:listAllServices'),
   claudePty: {
     available: (): Promise<{ available: boolean; error?: string }> =>
       ipcRenderer.invoke('api:claudePty:available'),
