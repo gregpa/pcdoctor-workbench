@@ -742,6 +742,44 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     tooltip: 'Start a stopped service. Refuses if startup type is Disabled. 7-day undo.',
   },
 
+  // ============== v2.5.30: PROCESSES PAGE MUTATES ==============
+  // Surfaced via the Processes page. Process actions are NOT undoable
+  // (rollback_tier: 'none') -- there's no meaningful before-state for a
+  // killed process. Suspend/resume could be reversed but the user already
+  // has a Suspend/Resume button pair on the row, so no rollback row.
+  set_process_priority: {
+    name: 'set_process_priority', label: 'Set Process Priority',
+    ps_script: 'actions/Set-ProcessPriority.ps1',
+    confirm_level: 'info', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '⚡',
+    tooltip: 'Change a process\'s PriorityClass (Idle/BelowNormal/Normal/AboveNormal/High/RealTime).',
+  },
+  set_process_affinity: {
+    name: 'set_process_affinity', label: 'Set CPU Affinity',
+    ps_script: 'actions/Set-ProcessAffinity.ps1',
+    confirm_level: 'info', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '🧮',
+    tooltip: 'Set the CPU affinity bitmask -- pin a process to specific logical CPUs.',
+  },
+  suspend_process: {
+    name: 'suspend_process', label: 'Suspend Process',
+    ps_script: 'actions/Suspend-Process.ps1',
+    confirm_level: 'risky', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '⏸',
+    tooltip: 'Suspend (pause) a process via NtSuspendProcess. Resume later from the same row.',
+  },
+  resume_process: {
+    name: 'resume_process', label: 'Resume Process',
+    ps_script: 'actions/Resume-Process.ps1',
+    confirm_level: 'info', rollback_tier: 'none', estimated_duration_s: 1,
+    needs_admin: false,
+    category: 'service', icon: '▶',
+    tooltip: 'Resume a suspended process via NtResumeProcess.',
+  },
+
   // ============== INTERNAL ==============
   create_restore_point: {
     name: 'create_restore_point', label: 'Create Restore Point',

@@ -3,6 +3,7 @@ import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
   SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile, ServiceRow,
+  ProcessRow, ProcessPriorityClass,
 } from '@shared/types.js';
 
 const api = {
@@ -134,6 +135,22 @@ const api = {
     ipcRenderer.invoke('api:startService', service, opts),
   undoServiceAction: (actionLogId: number): Promise<IpcResult<any>> =>
     ipcRenderer.invoke('api:undoServiceAction', actionLogId),
+  // v2.5.30 (P1-P3): Processes page bridges.
+  listAllProcesses: (): Promise<IpcResult<ProcessRow[]>> =>
+    ipcRenderer.invoke('api:listAllProcesses'),
+  killProcess: (target: number | string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:killProcess', target, opts),
+  setProcessPriority: (
+    pid: number, priorityClass: ProcessPriorityClass, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<any>> => ipcRenderer.invoke('api:setProcessPriority', pid, priorityClass, opts),
+  setProcessAffinity: (
+    pid: number, mask: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<any>> => ipcRenderer.invoke('api:setProcessAffinity', pid, mask, opts),
+  suspendProcess: (pid: number, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:suspendProcess', pid, opts),
+  resumeProcess: (pid: number, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
+    ipcRenderer.invoke('api:resumeProcess', pid, opts),
+
   // v2.5.30 (S6): UndoCenter feed. Lists undoable service actions whose
   // rollback row is still within the 7-day TTL.
   listUndoableServiceActions: (): Promise<IpcResult<{

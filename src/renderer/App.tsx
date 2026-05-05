@@ -7,6 +7,7 @@ import { WeeklyReview } from './pages/WeeklyReview.js';
 import { Security } from './pages/Security.js';
 import { Tools } from './pages/Tools.js';
 import { Services } from './pages/Services.js';
+import { Processes } from './pages/Processes.js';
 import { UndoCenter } from './pages/UndoCenter.js';
 import { Updates } from './pages/Updates.js';
 import { MemTest86 } from './pages/MemTest86.js';
@@ -45,6 +46,7 @@ export function App() {
               <Route path="/security" element={<Security />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/services" element={<Services />} />
+              <Route path="/processes" element={<Processes />} />
               <Route path="/undo" element={<UndoCenter />} />
               <Route path="/updates" element={<Updates />} />
               <Route path="/memtest86" element={<MemTest86 />} />

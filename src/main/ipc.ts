@@ -76,11 +76,12 @@ import { getAutopilotActivity, evaluateRule, dispatchDecision } from './autopilo
 import { listAutopilotRules, suppressAutopilotRule, setAutopilotRuleEnabled, getAutopilotRule, insertAutopilotActivity } from './dataStore.js';
 import { writeRenderPerfLine } from './renderPerfLog.js';
 import * as serviceMutate from './serviceMutate.js';
+import * as processMutate from './processMutate.js';
 import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
   SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus, ScheduledTaskInfo,
-  ServiceRow,
+  ServiceRow, ProcessRow, ProcessPriorityClass,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -1689,6 +1690,94 @@ export function registerIpcHandlers() {
   // are still within their 7-day rollback window. Each row carries enough
   // metadata for the renderer to render a label, age, expiry countdown,
   // and an Undo button (which dispatches the existing api:undoServiceAction).
+  // v2.5.30: full process list for the new Processes page. Read-only,
+  // unelevated; ~120ms via Get-Process. system_critical flag drives the
+  // confirm-dialog "I understand" gate.
+  ipcMain.handle('api:listAllProcesses', async (): Promise<IpcResult<ProcessRow[]>> => {
+    try {
+      const r = await runPowerShellScript<{ success: boolean; processes: ProcessRow[]; count: number }>(
+        'Get-AllProcesses.ps1', ['-JsonOutput'], { timeoutMs: 30_000 },
+      );
+      return { ok: true, data: r.processes };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_LIST_PROCESSES', message: e?.message ?? 'Failed to enumerate processes' } };
+    }
+  });
+
+  // v2.5.30: process mutate handlers. Route through the same elevated
+  // batch worker as the service mutates (single UAC per session).
+  // Process mutations are NOT undoable -- there's no rollback row, just
+  // an actions_log entry per mutation.
+  async function handleProcessMutate(
+    fn: () => Promise<processMutate.ProcessMutateResult>,
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> {
+    try {
+      const data = await fn();
+      return { ok: true, data };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_PROCESS_MUTATE', message: e?.message ?? 'Process mutation failed' } };
+    }
+  }
+
+  ipcMain.handle('api:killProcess', async (
+    _evt, target: number | string, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (typeof target === 'number') {
+      if (!Number.isInteger(target) || target < 0) {
+        return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a non-negative integer' } };
+      }
+    } else if (typeof target === 'string') {
+      if (!/^[a-zA-Z0-9._-]{1,128}$/.test(target)) {
+        return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'process name has invalid characters' } };
+      }
+    } else {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'target must be pid or name' } };
+    }
+    return handleProcessMutate(() => processMutate.killProcess(target, opts ?? {}));
+  });
+
+  ipcMain.handle('api:setProcessPriority', async (
+    _evt, pid: number, priorityClass: ProcessPriorityClass, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    if (!['Idle','BelowNormal','Normal','AboveNormal','High','RealTime'].includes(priorityClass)) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'invalid priority class' } };
+    }
+    return handleProcessMutate(() => processMutate.setProcessPriority(pid, priorityClass, opts ?? {}));
+  });
+
+  ipcMain.handle('api:setProcessAffinity', async (
+    _evt, pid: number, mask: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    if (!Number.isInteger(mask) || mask <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'mask must be a positive integer' } };
+    }
+    return handleProcessMutate(() => processMutate.setProcessAffinity(pid, mask, opts ?? {}));
+  });
+
+  ipcMain.handle('api:suspendProcess', async (
+    _evt, pid: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    return handleProcessMutate(() => processMutate.suspendProcess(pid, opts ?? {}));
+  });
+
+  ipcMain.handle('api:resumeProcess', async (
+    _evt, pid: number, opts?: { dryRun?: boolean },
+  ): Promise<IpcResult<processMutate.ProcessMutateResult>> => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a positive integer' } };
+    }
+    return handleProcessMutate(() => processMutate.resumeProcess(pid, opts ?? {}));
+  });
+
   ipcMain.handle('api:listUndoableServiceActions', async (): Promise<IpcResult<{
     rows: Array<{
       action_id: number;
