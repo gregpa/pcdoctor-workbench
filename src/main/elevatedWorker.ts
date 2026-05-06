@@ -215,13 +215,27 @@ async function spawnWorker(): Promise<void> {
   const launchCmd = buildLaunchCmd({ pwsh, workerScript, basePath, queueDir });
 
   log.info('[elevated-worker] spawning via UAC');
+  // v2.5.33: detached:true BREAKS Windows UAC elevation. The DETACHED_PROCESS
+  // flag interferes with Start-Process -Verb RunAs / ShellExecuteEx and the
+  // UAC prompt never fires. Empirically verified: { detached:false } makes
+  // UAC appear and the worker spawn within ~5s; { detached:true } produces
+  // no UAC and no worker even after 30s, regardless of stdio settings. This
+  // bug shipped in v2.5.30, was unaffected by v2.5.31's $PID worker fix and
+  // v2.5.32's launchCmd quoting fix, and made every Services/Processes
+  // mutate hang for 60s in production.
+  //
+  // Safe to keep detached:false because (a) the launcher PS is short-lived
+  // (~1s -- it just calls Start-Process and exits) and (b) the elevated
+  // worker spawned through UAC is NOT a child of the launcher; Windows
+  // reparents elevated processes to the elevated session, so the worker
+  // survives even if Electron exits.
   const child = spawn(pwsh, [
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-WindowStyle', 'Hidden',
     '-Command', launchCmd,
   ], {
-    detached: true,
+    detached: false,
     stdio: 'ignore',
     windowsHide: true,
   });

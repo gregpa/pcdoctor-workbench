@@ -103,7 +103,7 @@ function setHeartbeat(opts: { ageMs?: number; pid?: number; version?: string } =
     pid: opts.pid ?? 1234,
     started_at: last,
     last_seen: last,
-    version: opts.version ?? '2.5.32',
+    version: opts.version ?? '2.5.33',
   }));
 }
 
@@ -126,7 +126,7 @@ describe('elevatedWorker > heartbeat', () => {
     setHeartbeat({ pid: 9999 });
     const hb = readHeartbeat();
     expect(hb?.pid).toBe(9999);
-    expect(hb?.version).toBe('2.5.32');
+    expect(hb?.version).toBe('2.5.33');
   });
 
   it('readHeartbeat returns null on malformed JSON', () => {
@@ -179,6 +179,25 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     vi.useRealTimers();
     expect(err).toBeInstanceOf(ElevatedWorkerError);
     expect((err as ElevatedWorkerError).code).toBe('E_WORKER_NO_HEARTBEAT');
+  });
+
+  // v2.5.33 regression: passing { detached: true } to child_process.spawn on
+  // Windows breaks the UAC elevation propagation through ShellExecuteEx, so
+  // the UAC prompt never appears and the worker never spawns. Empirically
+  // verified against Electron production. Pin detached:false so the bug
+  // can't reappear during a future "let's clean up the spawn opts" pass.
+  it('spawn opts have detached:false (v2.5.33 regression)', async () => {
+    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
+    await ensureWorkerRunning();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const lastCall = spawnMock.mock.calls[0];
+    const opts = lastCall[2] as { detached?: boolean; stdio?: unknown; windowsHide?: boolean };
+    // detached MUST be false (or absent). Anything else regresses v2.5.30-32.
+    expect(opts.detached).not.toBe(true);
+    // While we're here, pin the rest of the production options too.
+    expect(opts.stdio).toBe('ignore');
+    expect(opts.windowsHide).toBe(true);
   });
 });
 
