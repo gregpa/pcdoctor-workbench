@@ -3,7 +3,7 @@ import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
   SecurityPosture, ToolStatus, ScheduledTaskInfo, SystemProfile, ServiceRow,
-  ProcessRow, ProcessPriorityClass,
+  ProcessRow, ProcessPriorityClass, ProcessDetail,
 } from '@shared/types.js';
 
 const api = {
@@ -138,6 +138,9 @@ const api = {
   // v2.5.30 (P1-P3): Processes page bridges.
   listAllProcesses: (): Promise<IpcResult<ProcessRow[]>> =>
     ipcRenderer.invoke('api:listAllProcesses'),
+  // v2.5.34: rich detail for one PID (powers RamPressurePanel inspect modal)
+  getProcessDetail: (pid: number): Promise<IpcResult<ProcessDetail>> =>
+    ipcRenderer.invoke('api:getProcessDetail', pid),
   killProcess: (target: number | string, opts?: { dryRun?: boolean }): Promise<IpcResult<any>> =>
     ipcRenderer.invoke('api:killProcess', target, opts),
   setProcessPriority: (

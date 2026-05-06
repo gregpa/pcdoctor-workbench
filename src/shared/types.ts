@@ -122,6 +122,32 @@ export interface ProcessRow {
   system_critical_reason: string | null;
 }
 
+/**
+ * v2.5.34 — rich per-process details for the dashboard's
+ * RamPressurePanel "click row to inspect" affordance. Fetched on-demand
+ * from Get-ProcessDetail.ps1 (api:getProcessDetail) when the user clicks
+ * a top-consumer row, NOT included in the per-scan top_processes payload
+ * (kept tiny to avoid bloating latest.json).
+ */
+export interface ProcessDetail {
+  pid: number;
+  name: string;
+  description: string | null;
+  path: string | null;
+  command_line: string | null;
+  start_time: string | null;          // ISO 8601
+  cpu_pct: number | null;
+  ws_bytes: number;
+  pm_bytes: number | null;
+  thread_count: number;
+  handle_count: number;
+  parent_pid: number | null;
+  parent_name: string | null;
+  kind: ProcessKind;
+  system_critical: boolean;
+  system_critical_reason: string | null;
+}
+
 export type ProcessPriorityClass =
   | 'Idle' | 'BelowNormal' | 'Normal' | 'AboveNormal' | 'High' | 'RealTime';
 

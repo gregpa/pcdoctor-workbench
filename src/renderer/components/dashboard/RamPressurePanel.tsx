@@ -5,8 +5,10 @@
  * Uses status.metrics.memory_pressure (scanner emits this via Get-Counter) to
  * surface commit state, top consumers, and a contextual advice sentence.
  */
+import { useState } from 'react';
 import type { SystemStatus } from '@shared/types.js';
 import { useConfirm } from '@renderer/lib/confirmContext.js';
+import { ProcessDetailModal } from './ProcessDetailModal.js';
 
 interface TopProcess {
   name: string;
@@ -74,6 +76,8 @@ function advice(status: SystemStatus): string | null {
 
 export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProps) {
   const confirm = useConfirm();
+  // v2.5.34: which row's detail modal is open. null = none.
+  const [inspect, setInspect] = useState<{ pid: number; name: string; kind: TopProcess['kind'] } | null>(null);
   // v2.4.31 B22: gate the Kill button behind a destructive confirm.
   // Previously a single mis-click terminated a user-process with its
   // unsaved work. All dashboard action buttons go through confirm at
@@ -141,35 +145,53 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
       {/* Top consumers */}
       {top.length > 0 && (
         <div className="mt-2">
-          <div className="text-[10px] text-text-secondary mb-1">Top memory consumers</div>
+          <div className="text-[10px] text-text-secondary mb-1">Top memory consumers <span className="opacity-70">(click to inspect)</span></div>
           <div className="space-y-0.5">
-            {top.map((p, i) => (
-              <div key={`${p.name}-${p.pid}-${i}`} className="flex items-center gap-2 text-[11px]">
-                <span className="w-4 text-text-secondary">
-                  {p.kind === 'system' ? '⚙' : p.kind === 'service' ? '🔧' : '📦'}
-                </span>
-                <span className="font-mono flex-1 truncate">{p.name}{p.pid > 0 ? ` (${p.pid})` : ''}</span>
-                <span className="text-text-secondary">{gb(p.ws_bytes)}</span>
-                {p.kind === 'user' && onKillProcess && (
-                  <button
-                    onClick={() => { void handleKillClick(p.name); }}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-status-crit/20 text-status-crit border border-status-crit/40"
-                  >
-                    Kill
-                  </button>
-                )}
-                {p.kind === 'service' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary">
-                    service
+            {top.map((p, i) => {
+              // v2.5.34: aggregated rows (e.g. groupClaudeProcesses sets pid=-1)
+              // can't be inspected because we don't know which PID to fetch.
+              const inspectable = p.pid > 0;
+              return (
+                <div
+                  key={`${p.name}-${p.pid}-${i}`}
+                  role={inspectable ? 'button' : undefined}
+                  tabIndex={inspectable ? 0 : undefined}
+                  aria-label={inspectable ? `Inspect ${p.name}` : undefined}
+                  onClick={inspectable ? () => setInspect({ pid: p.pid, name: p.name, kind: p.kind }) : undefined}
+                  onKeyDown={inspectable ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setInspect({ pid: p.pid, name: p.name, kind: p.kind });
+                    }
+                  } : undefined}
+                  className={`flex items-center gap-2 text-[11px] rounded px-1 -mx-1 ${inspectable ? 'cursor-pointer hover:bg-surface-700/50 focus:bg-surface-700/50 outline-none' : ''}`}
+                >
+                  <span className="w-4 text-text-secondary">
+                    {p.kind === 'system' ? '⚙' : p.kind === 'service' ? '🔧' : '📦'}
                   </span>
-                )}
-                {p.kind === 'system' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary opacity-60">
-                    system
-                  </span>
-                )}
-              </div>
-            ))}
+                  <span className="font-mono flex-1 truncate">{p.name}{p.pid > 0 ? ` (${p.pid})` : ''}</span>
+                  <span className="text-text-secondary">{gb(p.ws_bytes)}</span>
+                  {p.kind === 'user' && onKillProcess && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); void handleKillClick(p.name); }}
+                      className="px-1.5 py-0.5 rounded text-[10px] bg-status-crit/20 text-status-crit border border-status-crit/40"
+                    >
+                      Kill
+                    </button>
+                  )}
+                  {p.kind === 'service' && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary">
+                      service
+                    </span>
+                  )}
+                  {p.kind === 'system' && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] pcd-button text-text-secondary opacity-60">
+                      system
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -178,6 +200,17 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
         <div className="mt-2 text-[10px] text-status-info border-t border-surface-700 pt-2">
           {tip}
         </div>
+      )}
+
+      {inspect && (
+        <ProcessDetailModal
+          pid={inspect.pid}
+          nameHint={inspect.name}
+          onClose={() => setInspect(null)}
+          onKill={inspect.kind === 'user' && onKillProcess
+            ? async (_pid, name) => { await onKillProcess(name); }
+            : undefined}
+        />
       )}
     </div>
   );

@@ -81,7 +81,7 @@ import type {
   IpcResult, SystemStatus, ActionResult,
   AuditLogEntry, RunActionRequest, RevertResult, Trend, ForecastData, WeeklyReview,
   SecurityPosture, PersistenceItem, ThreatIndicator, ToolStatus, ScheduledTaskInfo,
-  ServiceRow, ProcessRow, ProcessPriorityClass,
+  ServiceRow, ProcessRow, ProcessPriorityClass, ProcessDetail,
 } from '@shared/types.js';
 
 const weeklyDir = path.join(PCDOCTOR_ROOT, 'reports', 'weekly');
@@ -1701,6 +1701,25 @@ export function registerIpcHandlers() {
       return { ok: true, data: r.processes };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_LIST_PROCESSES', message: e?.message ?? 'Failed to enumerate processes' } };
+    }
+  });
+
+  // v2.5.34: rich per-process details for the dashboard RamPressurePanel
+  // "click row to inspect" affordance. On-demand, single-PID lookup; not
+  // tied to the per-scan top_processes payload.
+  ipcMain.handle('api:getProcessDetail', async (
+    _evt, pid: unknown,
+  ): Promise<IpcResult<ProcessDetail>> => {
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid < 0) {
+      return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'pid must be a non-negative integer' } };
+    }
+    try {
+      const r = await runPowerShellScript<ProcessDetail>(
+        'Get-ProcessDetail.ps1', ['-ProcessId', String(pid), '-JsonOutput'], { timeoutMs: 10_000 },
+      );
+      return { ok: true, data: r };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_GET_PROCESS_DETAIL', message: e?.message ?? 'Failed to fetch process detail' } };
     }
   });
 
