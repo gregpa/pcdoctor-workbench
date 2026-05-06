@@ -174,9 +174,10 @@ export function RamPressurePanel({ status, onKillProcess }: RamPressurePanelProp
                   {p.kind === 'user' && onKillProcess && (
                     <button
                       onClick={(e) => { e.stopPropagation(); void handleKillClick(p.name); }}
+                      title="Asks for confirmation, then terminates the process"
                       className="px-1.5 py-0.5 rounded text-[10px] bg-status-crit/20 text-status-crit border border-status-crit/40"
                     >
-                      Kill
+                      Kill…
                     </button>
                   )}
                   {p.kind === 'service' && (

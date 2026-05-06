@@ -205,9 +205,10 @@ export function ProcessDetailModal({ pid, nameHint, onClose, onKill }: ProcessDe
           {onKill && detail && !detail.system_critical && (
             <button
               onClick={() => { void handleKill(); }}
+              title="Asks for confirmation, then terminates the process"
               className="px-3 py-1.5 rounded-md bg-status-crit/20 text-status-crit border border-status-crit/40 text-xs hover:bg-status-crit/30"
             >
-              Kill
+              Kill…
             </button>
           )}
           {onKill && detail && detail.system_critical && (

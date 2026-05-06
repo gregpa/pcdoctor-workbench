@@ -111,7 +111,21 @@ if ($CriticalPidsMap.ContainsKey([int]$ProcessId)) {
 }
 $kind = if ($rowIsCritical) { 'system' } else { 'user' }
 
-# Description from main module's version info. May be null for system procs.
+# Path: prefer Get-Process Path; fall back to CIM ExecutablePath. Resolve
+# this BEFORE description so we can use the path for a version-info fallback.
+$path = $null
+try { if ($proc.Path) { $path = $proc.Path } } catch { }
+if (-not $path -and $cim -and $cim.ExecutablePath) { $path = $cim.ExecutablePath }
+
+# v2.5.35: description discovery is layered:
+#   1. FileVersionInfo via the live process's MainModule (most accurate, but
+#      throws for protected processes like MsMpEng, lsass, SgrmBroker, etc.)
+#   2. FileVersionInfo via the file on disk (works when path is known but
+#      MainModule is blocked; still fails for files inside Defender's
+#      protected platform dir or other ACL-locked locations)
+#   3. Curated fallback map keyed on the lower-cased process name -- covers
+#      the well-known Windows + common-app names whose path can't be read at
+#      all (Greg's report: MsMpEng v2.5.34 modal showed Description blank)
 $description = $null
 try {
     if ($proc.MainModule -and $proc.MainModule.FileVersionInfo) {
@@ -119,11 +133,110 @@ try {
         if ($fvi.FileDescription) { $description = $fvi.FileDescription.Trim() }
     }
 } catch { }
-
-# Path: prefer Get-Process Path; fall back to CIM ExecutablePath.
-$path = $null
-try { if ($proc.Path) { $path = $proc.Path } } catch { }
-if (-not $path -and $cim -and $cim.ExecutablePath) { $path = $cim.ExecutablePath }
+if (-not $description -and $path) {
+    try {
+        $item = Get-Item -LiteralPath $path -ErrorAction Stop
+        if ($item.VersionInfo -and $item.VersionInfo.FileDescription) {
+            $description = $item.VersionInfo.FileDescription.Trim()
+        }
+    } catch { }
+}
+if (-not $description) {
+    # Curated map. Keys are LOWER-CASED process names. Source: Microsoft Docs
+    # for built-in Windows processes; vendor product pages for third-party.
+    # Only include entries we're confident about -- ambiguous names (e.g.
+    # 'TbService' which could be Acronis, Lenovo, or Telegram) are NOT in
+    # the map; better to show blank than misidentify.
+    $KnownProcessDescriptions = @{
+        # Windows core + security
+        'msmpeng'                = 'Microsoft Defender Antimalware Service core engine'
+        'mssense'                = 'Microsoft Defender for Endpoint sensor'
+        'securityhealthservice'  = 'Windows Security agent service'
+        'securityhealthsystray'  = 'Windows Security tray icon'
+        'securityhealthhost'     = 'Windows Security host'
+        'sgrmbroker'             = 'System Guard Runtime Monitor Broker'
+        'lsaiso'                 = 'Credential Guard / LSA isolation'
+        'lsass'                  = 'Local Security Authority Subsystem (handles auth)'
+        'lsm'                    = 'Local Session Manager'
+        # Shell + UI
+        'dwm'                    = 'Desktop Window Manager (composes the Windows desktop)'
+        'explorer'               = 'File Explorer & taskbar shell'
+        'sihost'                 = 'Shell infrastructure host (UI shell composition)'
+        'shellexperiencehost'    = 'Start menu, action center, and taskbar UI'
+        'startmenuexperiencehost' = 'Start menu UI'
+        'searchhost'             = 'Windows Search UI'
+        'searchapp'              = 'Windows Search UI (legacy)'
+        'searchindexer'          = 'Windows Search file content indexer'
+        'ctfmon'                 = 'Text Services & language input framework'
+        'lockapp'                = 'Windows lock screen UI'
+        'logonui'                = 'Windows logon UI'
+        'taskmgr'                = 'Task Manager'
+        'mmc'                    = 'Microsoft Management Console'
+        # System services & infrastructure
+        'svchost'                = 'Service Host (hosts one or more Windows services)'
+        'services'               = 'Service Control Manager'
+        'taskhostw'              = 'Host process for tasks scheduled by services'
+        'runtimebroker'          = 'Permission broker for UWP apps'
+        'wudfhost'               = 'Windows User-Mode Driver Framework host'
+        'wmiprvse'               = 'WMI provider host'
+        'unsecapp'               = 'WMI sink for asynchronous client callbacks'
+        'dllhost'                = 'COM+ Surrogate / COM component host'
+        'fontdrvhost'            = 'Font driver host'
+        'audiodg'                = 'Windows Audio Device Graph Isolation'
+        'spoolsv'                = 'Print spooler'
+        'wermgr'                 = 'Windows Error Reporting'
+        'conhost'                = 'Console Window Host (terminal renderer)'
+        'crashpad_handler'       = 'Crash report uploader (Chromium / Electron)'
+        'mscorsvw'               = '.NET runtime optimization service'
+        'wsmprovhost'            = 'WS-Management host (PowerShell Remoting)'
+        # Kernel + reserved
+        'system'                 = 'Windows kernel'
+        'idle'                   = 'CPU idle time accounting (not a real process)'
+        'csrss'                  = 'Client/Server Runtime Subsystem (Win32 console + GUI)'
+        'winlogon'               = 'Windows Logon process'
+        'wininit'                = 'Windows initialization process'
+        'smss'                   = 'Session Manager Subsystem'
+        'registry'               = 'In-memory hive of the Windows Registry'
+        'memory compression'     = 'Windows memory compression (compresses RAM in-place)'
+        'secure system'          = 'Virtual secure mode (VBS) container'
+        # Virtualization
+        'vmmem'                  = 'Hyper-V virtual machine memory backing process'
+        'vmmemwsl'               = 'WSL2 memory backing process (Linux container memory)'
+        'wslservice'             = 'Windows Subsystem for Linux service'
+        'wsl'                    = 'Windows Subsystem for Linux'
+        # Browsers / WebView
+        'msedge'                 = 'Microsoft Edge browser'
+        'chrome'                 = 'Google Chrome browser'
+        'firefox'                = 'Mozilla Firefox browser'
+        'msedgewebview2'         = 'Edge WebView2 (embedded browser used by other apps)'
+        'opera'                  = 'Opera browser'
+        'brave'                  = 'Brave browser'
+        # Dev tools
+        'code'                   = 'Visual Studio Code'
+        'devenv'                 = 'Visual Studio IDE'
+        'pwsh'                   = 'PowerShell 7+ (cross-platform)'
+        'powershell'             = 'Windows PowerShell 5.1'
+        'cmd'                    = 'Command Prompt (cmd.exe)'
+        'node'                   = 'Node.js runtime'
+        'python'                 = 'Python interpreter'
+        # Common third-party apps
+        'discord'                = 'Discord chat client'
+        'slack'                  = 'Slack desktop'
+        'teams'                  = 'Microsoft Teams'
+        'zoom'                   = 'Zoom video conferencing'
+        'spotify'                = 'Spotify music player'
+        'steam'                  = 'Steam gaming client'
+        'everything'             = 'Everything (instant file search by voidtools)'
+        # GPU vendors
+        'nvcontainer'            = 'NVIDIA Container (driver subsystem)'
+        'nvtelemetrycontainer'   = 'NVIDIA Telemetry'
+        'amdrsserv'              = 'AMD Radeon Software service'
+        'igccservicemodule'      = 'Intel Graphics Command Center service'
+    }
+    if ($KnownProcessDescriptions.ContainsKey($lower)) {
+        $description = $KnownProcessDescriptions[$lower]
+    }
+}
 
 # Parent
 $parentPid = $null
