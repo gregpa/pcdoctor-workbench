@@ -170,6 +170,35 @@ function resolveBasePath(): string {
  * `Start-Process -Verb RunAs powershell.exe ...` to escalate. The outer
  * powershell exits immediately; we don't track the elevated PID directly.
  */
+/**
+ * Build the launchCmd string passed to the unelevated PowerShell whose only
+ * job is to invoke `Start-Process -Verb RunAs` to elevate the worker.
+ *
+ * v2.5.32: every token in -ArgumentList @(...) MUST be wrapped in single
+ * quotes. PowerShell parses bare `-NoProfile` inside `@(...)` as the unary
+ * minus operator and the whole expression fails with "Missing argument in
+ * parameter list." -- which is what shipped from v2.5.30 to v2.5.31. The
+ * outer PS exited before Start-Process ever ran, so UAC never fired.
+ */
+export function buildLaunchCmd(opts: {
+  pwsh: string;
+  workerScript: string;
+  basePath: string;
+  queueDir: string;
+}): string {
+  // PowerShell single-quote escape: '' inside single-quoted strings.
+  const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const innerArgs = [
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-WindowStyle', 'Hidden',
+    '-File', opts.workerScript,
+    '-BasePath', opts.basePath,
+    '-QueueDir', opts.queueDir,
+  ].map(q).join(',');
+  return `Start-Process -FilePath ${q(opts.pwsh)} -ArgumentList @(${innerArgs}) -Verb RunAs -WindowStyle Hidden`;
+}
+
 async function spawnWorker(): Promise<void> {
   ensureQueueDir();
   const workerScript = resolveScriptPath('worker/Elevated-Worker.ps1');
@@ -183,24 +212,7 @@ async function spawnWorker(): Promise<void> {
   const queueDir = getQueueDir();
   const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
 
-  // PowerShell single-quote escape: '' inside single-quoted strings.
-  const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
-
-  // Build the argument list for the elevated PowerShell. Each token is a
-  // single -ArgumentList element so Start-Process passes them cleanly.
-  const innerArgs = [
-    '-NoProfile',
-    '-ExecutionPolicy', 'Bypass',
-    '-WindowStyle', 'Hidden',
-    '-File', q(workerScript),
-    '-BasePath', q(basePath),
-    '-QueueDir', q(queueDir),
-  ].join(',');
-
-  const launchCmd =
-    `Start-Process -FilePath ${q(pwsh)} ` +
-    `-ArgumentList @(${innerArgs}) ` +
-    `-Verb RunAs -WindowStyle Hidden`;
+  const launchCmd = buildLaunchCmd({ pwsh, workerScript, basePath, queueDir });
 
   log.info('[elevated-worker] spawning via UAC');
   const child = spawn(pwsh, [

@@ -82,6 +82,7 @@ import {
   ensureWorkerRunning,
   dispatchCommand,
   getQueueDir,
+  buildLaunchCmd,
   _testing,
 } from '@main/elevatedWorker.js';
 
@@ -102,7 +103,7 @@ function setHeartbeat(opts: { ageMs?: number; pid?: number; version?: string } =
     pid: opts.pid ?? 1234,
     started_at: last,
     last_seen: last,
-    version: opts.version ?? '2.5.31',
+    version: opts.version ?? '2.5.32',
   }));
 }
 
@@ -125,7 +126,7 @@ describe('elevatedWorker > heartbeat', () => {
     setHeartbeat({ pid: 9999 });
     const hb = readHeartbeat();
     expect(hb?.pid).toBe(9999);
-    expect(hb?.version).toBe('2.5.31');
+    expect(hb?.version).toBe('2.5.32');
   });
 
   it('readHeartbeat returns null on malformed JSON', () => {
@@ -300,5 +301,65 @@ describe('elevatedWorker > action allowlist', () => {
       'suspend-process',
       'resume-process',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.5.32 regression: launchCmd construction
+// ---------------------------------------------------------------------------
+//
+// v2.5.30 + v2.5.31 shipped with bare `-NoProfile,-ExecutionPolicy,Bypass`
+// inside `-ArgumentList @(...)`. PowerShell parses bare `-X` inside an
+// array literal as the unary minus operator and the whole expression
+// errors with "Missing argument in parameter list." -- which means the
+// outer unelevated PS exited before Start-Process ever fired, so UAC
+// never prompted, so no worker existed, so no heartbeat ever appeared.
+// These tests pin the v2.5.32 fix: every token in the array literal MUST
+// be wrapped in single quotes.
+
+describe('elevatedWorker > buildLaunchCmd (v2.5.32 regression)', () => {
+  const opts = {
+    pwsh: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+    workerScript: 'C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1',
+    basePath: 'C:\\ProgramData\\PCDoctor',
+    queueDir: 'C:\\Users\\someone\\AppData\\Local\\PCDoctor\\worker-queue',
+  };
+
+  it('every token inside @(...) is single-quoted (no bare -NoProfile, etc.)', () => {
+    const cmd = buildLaunchCmd(opts);
+    const m = cmd.match(/-ArgumentList @\((.*?)\) -Verb RunAs/);
+    expect(m).not.toBeNull();
+    const tokens = m![1].split(',');
+    expect(tokens.length).toBeGreaterThan(0);
+    for (const t of tokens) {
+      // Each token must start AND end with a single quote. Anything bare
+      // (e.g. `-NoProfile` or `Bypass`) regresses the v2.5.30 bug.
+      expect(t).toMatch(/^'.*'$/);
+    }
+  });
+
+  it('does NOT emit the v2.5.30/v2.5.31 broken pattern', () => {
+    const cmd = buildLaunchCmd(opts);
+    // The exact substring that broke production for ~24 hours.
+    expect(cmd).not.toContain('@(-NoProfile');
+    expect(cmd).not.toContain(',-ExecutionPolicy,');
+    expect(cmd).not.toContain(',Bypass,');
+  });
+
+  it('preserves all required worker args in order', () => {
+    const cmd = buildLaunchCmd(opts);
+    // Sanity-check the worker still receives -File, -BasePath, -QueueDir.
+    expect(cmd).toContain("'-File'");
+    expect(cmd).toContain("'-BasePath'");
+    expect(cmd).toContain("'-QueueDir'");
+    expect(cmd).toContain(`'${opts.workerScript}'`);
+    expect(cmd).toContain(`'${opts.basePath}'`);
+    expect(cmd).toContain(`'${opts.queueDir}'`);
+  });
+
+  it('escapes single quotes in paths using PS doubled-single-quote rule', () => {
+    const cmd = buildLaunchCmd({ ...opts, queueDir: "C:\\path with 'quote' in it\\queue" });
+    // The single quote inside the path becomes '' inside the surrounding '...'.
+    expect(cmd).toContain("'C:\\path with ''quote'' in it\\queue'");
   });
 });
