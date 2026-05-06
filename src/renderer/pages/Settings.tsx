@@ -662,6 +662,15 @@ export function Settings() {
         </button>
       </section>
 
+      {/* v2.5.37: pcd_force_wizard dev override clear button.
+        * Background: WizardShell.tsx checks localStorage.pcd_force_wizard
+        * BEFORE the DB-driven wizard gate, so anyone who set this flag during
+        * v2.5.21-era testing (e.g. via DevTools) sees the wizard on every
+        * launch until they clear it. v2.5.30 had a real-world casualty:
+        * Greg's Alienware was stuck on the wizard for days. Now there's a
+        * visible escape hatch in Settings instead of needing DevTools. */}
+      <ForceWizardOverrideSection />
+
       {/* v2.5.26: Re-run tools setup splash */}
       <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">Tools Setup</h2>
@@ -696,5 +705,61 @@ export function Settings() {
         <div className="fixed bottom-4 right-4 pcd-button rounded-lg px-4 py-3 text-sm shadow-xl">{toast}</div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// v2.5.37: ForceWizardOverrideSection
+// ---------------------------------------------------------------------------
+//
+// Surfaces the pcd_force_wizard localStorage flag with a Clear button.
+// WizardShell.tsx checks this flag BEFORE the DB-driven wizard gate, so a
+// stale '1' value (e.g. set during v2.5.21-era manual testing) makes the
+// wizard reappear on every launch. Greg's Alienware hit this in v2.5.28 and
+// only DevTools could clear it.
+//
+// Render rules:
+//   - flag set        -> active state with Clear button
+//   - flag absent     -> inactive state (rationale only) so the section is
+//                        self-documenting if a future-Greg goes looking for
+//                        "where do I clear that override flag?"
+function ForceWizardOverrideSection() {
+  const [active, setActive] = useState<boolean>(() =>
+    typeof window !== 'undefined' && window.localStorage?.getItem('pcd_force_wizard') === '1');
+  const [cleared, setCleared] = useState(false);
+
+  function clear() {
+    try { window.localStorage.removeItem('pcd_force_wizard'); } catch { /* ignore */ }
+    setActive(false);
+    setCleared(true);
+  }
+
+  return (
+    <section className="mb-6 pcd-section">
+      <h2 className="text-sm font-bold mb-3">Wizard Force-Display Override</h2>
+      {active ? (
+        <>
+          <p className="text-xs text-status-warn mb-3">
+            ⚠ <strong>Active.</strong> The first-run wizard will appear on every launch until you clear this flag,
+            even if you've already completed setup. This flag was likely set via DevTools during testing.
+          </p>
+          <button
+            onClick={clear}
+            className="px-3 py-1.5 rounded-md text-xs pcd-button"
+          >
+            Clear override (next launch will use the normal first-run check)
+          </button>
+        </>
+      ) : (
+        <p className="text-xs text-text-secondary">
+          Inactive. (Developers can force the wizard to re-appear by setting{' '}
+          <code>localStorage.pcd_force_wizard = '1'</code> in DevTools. If that ever gets stuck,
+          this button appears here so you can clear it without DevTools.)
+          {cleared && (
+            <span className="block mt-2 text-status-good">✓ Override cleared. Reload the app to verify.</span>
+          )}
+        </p>
+      )}
+    </section>
   );
 }

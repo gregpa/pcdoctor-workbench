@@ -126,6 +126,7 @@ const sampleDetail: ProcessDetail = {
   kind: 'user',
   system_critical: false,
   system_critical_reason: null,
+  services_hosted: [],
 };
 
 describe('api:getProcessDetail (v2.5.34)', () => {

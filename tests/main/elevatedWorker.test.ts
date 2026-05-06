@@ -103,7 +103,7 @@ function setHeartbeat(opts: { ageMs?: number; pid?: number; version?: string } =
     pid: opts.pid ?? 1234,
     started_at: last,
     last_seen: last,
-    version: opts.version ?? '2.5.36',
+    version: opts.version ?? '2.5.37',
   }));
 }
 
@@ -126,7 +126,7 @@ describe('elevatedWorker > heartbeat', () => {
     setHeartbeat({ pid: 9999 });
     const hb = readHeartbeat();
     expect(hb?.pid).toBe(9999);
-    expect(hb?.version).toBe('2.5.36');
+    expect(hb?.version).toBe('2.5.37');
   });
 
   it('readHeartbeat returns null on malformed JSON', () => {

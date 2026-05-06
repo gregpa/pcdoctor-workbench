@@ -190,6 +190,31 @@ export function ProcessDetailModal({ pid, nameHint, onClose, onKill }: ProcessDe
                 <div className="text-text-secondary">Handles</div>
                 <div>{detail.handle_count}</div>
               </div>
+
+              {/* v2.5.37: services hosted by this PID. Mostly relevant for
+                * svchost.exe -- a single svchost process can host 1-15 Win32
+                * services and the running set is otherwise opaque from outside.
+                * Hidden when empty so non-host processes don't waste space. */}
+              {detail.services_hosted.length > 0 && (
+                <div>
+                  <div className="text-text-secondary mb-1.5 mt-2">
+                    Services hosted ({detail.services_hosted.length})
+                  </div>
+                  <div className="rounded-md border border-surface-600 bg-surface-800/50 p-2 space-y-1 max-h-40 overflow-y-auto">
+                    {detail.services_hosted.map((s) => (
+                      <div key={s.key} className="flex items-baseline gap-2 text-[11px]">
+                        <span className={`inline-block w-14 text-[9px] uppercase tracking-wider ${
+                          s.state === 'Running' ? 'text-status-good'
+                            : s.state === 'Stopped' ? 'text-text-secondary'
+                            : 'text-status-warn'
+                        }`}>{s.state}</span>
+                        <span className="font-mono text-text-secondary">{s.key}</span>
+                        <span className="text-text-primary truncate">{s.display}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

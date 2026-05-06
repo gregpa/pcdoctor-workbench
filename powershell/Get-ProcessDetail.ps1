@@ -259,6 +259,25 @@ try {
     }
 } catch { }
 
+# v2.5.37: services hosted by this PID. Mainly meaningful for svchost.exe
+# (each instance hosts a varying set of Win32 services, otherwise the
+# inspect modal can't tell two svchost rows apart). Empty array for all
+# other processes -- a non-svchost row simply isn't a service host.
+# Always-emit even when empty so the renderer can rely on the field shape.
+$servicesHosted = @()
+try {
+    $svcs = Get-CimInstance -ClassName Win32_Service -Filter "ProcessId=$ProcessId" -ErrorAction Stop
+    if ($svcs) {
+        foreach ($s in @($svcs)) {
+            $servicesHosted += [ordered]@{
+                key      = "$($s.Name)"
+                display  = "$($s.DisplayName)"
+                state    = "$($s.State)"     # Running / Stopped / Paused / etc.
+            }
+        }
+    }
+} catch { }
+
 $detail = [ordered]@{
     pid                    = [int]$ProcessId
     name                   = $name
@@ -276,6 +295,7 @@ $detail = [ordered]@{
     kind                   = $kind
     system_critical        = $rowIsCritical
     system_critical_reason = $rowCriticalReason
+    services_hosted        = $servicesHosted
 }
 
 if ($JsonOutput) {

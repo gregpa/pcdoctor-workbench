@@ -146,6 +146,9 @@ export interface ProcessDetail {
   kind: ProcessKind;
   system_critical: boolean;
   system_critical_reason: string | null;
+  /** v2.5.37 — Win32 services running inside this PID (mostly meaningful
+   *  for svchost.exe; empty array for non-host processes). */
+  services_hosted: Array<{ key: string; display: string; state: string }>;
 }
 
 export type ProcessPriorityClass =
