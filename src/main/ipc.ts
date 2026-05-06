@@ -1544,6 +1544,39 @@ export function registerIpcHandlers() {
     }
   });
 
+  // v2.5.38: enable LHM's Remote Web Server automatically. Runs the PS
+  // script which: (1) finds the config XML next to the exe, (2) stops
+  // any running LHM (in-flight LHM clobbers config edits on exit),
+  // (3) flips runWebServerMenuItem=true, (4) relaunches LHM, (5) probes
+  // localhost:8085 to verify. Replaces the manual "open LHM tray icon →
+  // Options → Remote Web Server → Run" dance.
+  ipcMain.handle('api:enableLhmRemoteWebServer', async (): Promise<IpcResult<{
+    exe_path: string; config_path: string; was_running: boolean;
+    was_already_enabled: boolean; port: number; http_check: string;
+  }>> => {
+    try {
+      const candidates = await resolveLhmCandidatePaths();
+      const exePath = candidates.find((c) => existsSync(c));
+      if (!exePath) {
+        return { ok: false, error: { code: 'E_LHM_NOT_FOUND', message: 'LibreHardwareMonitor.exe could not be located.' } };
+      }
+      const r = await runPowerShellScript<{
+        success: boolean; exe_path: string; config_path: string; was_running: boolean;
+        was_already_enabled: boolean; port: number; http_check: string;
+      }>(
+        'Enable-LhmRemoteServer.ps1',
+        ['-ExePath', exePath, '-JsonOutput'],
+        { timeoutMs: 30_000 },
+      );
+      if (r.success) {
+        return { ok: true, data: r };
+      }
+      return { ok: false, error: { code: 'E_LHM_HTTP_UNREACHABLE', message: `LHM was launched but the web server did not come up on port ${r.port}. Try opening LHM and verifying Options → Remote Web Server → Run is checked.` } };
+    } catch (e: any) {
+      return { ok: false, error: { code: e?.code ?? 'E_LHM_ENABLE_FAILED', message: e?.message ?? 'Failed to enable LHM remote web server' } };
+    }
+  });
+
   // v2.5.17 (first-run wizard W5): fire Invoke-PCDoctor.ps1 -Mode Report in
   // the background so the dashboard has data on first launch. Fire-and-forget —
   // the wizard shows "Scan started" and advances; the scanner writes

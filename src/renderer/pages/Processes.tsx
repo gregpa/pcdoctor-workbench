@@ -15,6 +15,7 @@ import { api } from '@renderer/lib/ipc.js';
 import type { ProcessRow, ProcessPriorityClass } from '@shared/types.js';
 import { LoadingSpinner } from '@renderer/components/layout/LoadingSpinner.js';
 import { ProcessConfirmDialog, type ProcessActionKind } from '@renderer/components/processes/ProcessConfirmDialog.js';
+import { AffinityModal } from '@renderer/components/processes/AffinityModal.js';
 
 type FilterChip = 'all' | 'system' | 'user' | 'critical';
 type SortKey = 'name' | 'pid' | 'memory';
@@ -66,6 +67,8 @@ export function Processes() {
   // Track suspended PIDs locally (PS-side status detection cross-shell isn't
   // reliable; clearing on next refresh restores authoritative state).
   const [suspendedPids, setSuspendedPids] = useState<Set<number>>(new Set());
+  // v2.5.38: which row's affinity modal is open
+  const [affinityFor, setAffinityFor] = useState<ProcessRow | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -307,6 +310,16 @@ export function Processes() {
                         <button
                           type="button"
                           disabled={busy}
+                          onClick={() => setAffinityFor(p)}
+                          title="Set CPU affinity (pin to specific cores)"
+                          className="px-2 py-0.5 rounded border border-surface-600 text-[11px] text-text-secondary hover:bg-surface-700 disabled:opacity-30"
+                          aria-label={`Set CPU affinity for ${p.name}`}
+                        >
+                          🧮 CPU
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
                           onClick={() => setPending({ process: p, kind: 'kill' })}
                           className="px-2 py-0.5 rounded border border-status-crit/40 text-[11px] text-status-crit hover:bg-status-crit/10 disabled:opacity-30"
                           aria-label={`Kill ${p.name}`}
@@ -335,6 +348,16 @@ export function Processes() {
           systemCriticalReason={pending.process.system_critical_reason}
           onCancel={() => setPending(null)}
           onConfirm={handleConfirm}
+        />
+      )}
+
+      {affinityFor && (
+        <AffinityModal
+          pid={affinityFor.pid}
+          name={affinityFor.name}
+          systemCritical={affinityFor.system_critical}
+          onClose={() => setAffinityFor(null)}
+          onApplied={() => setToast({ message: `${affinityFor.name}: CPU affinity updated` })}
         />
       )}
 

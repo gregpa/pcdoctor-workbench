@@ -113,6 +113,12 @@ const api = {
   // Server is off" banner. Main-side resolves the install path via
   // hardcoded WinGet default + glob fallback + live Get-Process lookup.
   openLhm: (): Promise<IpcResult<{ path: string }>> => ipcRenderer.invoke('api:openLhm'),
+  // v2.5.38: enable LHM's Remote Web Server automatically (kill, edit
+  // config, relaunch, probe localhost:8085).
+  enableLhmRemoteWebServer: (): Promise<IpcResult<{
+    exe_path: string; config_path: string; was_running: boolean;
+    was_already_enabled: boolean; port: number; http_check: string;
+  }>> => ipcRenderer.invoke('api:enableLhmRemoteWebServer'),
   // v2.5.17 (first-run wizard W5): fire Invoke-PCDoctor.ps1 -Mode Report in
   // the background so the dashboard has data on first launch. Fire-and-forget.
   triggerInitialScan: (): Promise<IpcResult<null>> => ipcRenderer.invoke('api:triggerInitialScan'),

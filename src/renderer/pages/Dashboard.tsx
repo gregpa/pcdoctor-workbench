@@ -451,25 +451,59 @@ export function Dashboard() {
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const r = await window.api.openLhm();
-                if (!r.ok) {
+          <div className="flex flex-col gap-1.5 self-start">
+            {/* v2.5.38: one-click auto-enable. Spawns a PS script that kills LHM
+              * (so it doesn't clobber the config edit on exit), flips
+              * runWebServerMenuItem=true in LibreHardwareMonitor.config, relaunches
+              * LHM, and probes localhost:8085 to verify. Sits above the "Open LHM"
+              * button as the recommended action; "Open LHM" remains as the manual
+              * fallback. */}
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const r = await window.api.enableLhmRemoteWebServer();
+                  if (r.ok) {
+                    // eslint-disable-next-line no-alert
+                    alert(
+                      `LHM Remote Web Server is now reachable on http://localhost:${r.data.port}/.`
+                      + (r.data.was_already_enabled ? ' (Was already enabled in config; restart confirmed it.)' : '')
+                      + ' The dashboard will pick up live temps on the next scan tick.'
+                    );
+                  } else {
+                    // eslint-disable-next-line no-alert
+                    alert(`Auto-enable failed: ${r.error?.code}: ${r.error?.message ?? 'unknown'}`);
+                  }
+                } catch (err) {
                   // eslint-disable-next-line no-alert
-                  alert(`Could not open LHM: ${r.error?.message ?? 'unknown'}`);
+                  alert(`Auto-enable failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
-              } catch (err) {
-                // eslint-disable-next-line no-alert
-                alert(`Could not open LHM: ${err instanceof Error ? err.message : String(err)}`);
-              }
-            }}
-            className="px-3 py-1 rounded-md text-[11px] pcd-button text-text-primary self-start whitespace-nowrap"
-            title="Bring LibreHardwareMonitor to the foreground (or launch it if not running)."
-          >
-            Open LHM
-          </button>
+              }}
+              className="px-3 py-1 rounded-md text-[11px] bg-status-info/20 text-status-info border border-status-info/40 hover:bg-status-info/30 whitespace-nowrap"
+              title="Stops LHM, edits its config to enable the Remote Web Server, restarts LHM, and verifies port 8085 is responding."
+            >
+              Auto-enable
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const r = await window.api.openLhm();
+                  if (!r.ok) {
+                    // eslint-disable-next-line no-alert
+                    alert(`Could not open LHM: ${r.error?.message ?? 'unknown'}`);
+                  }
+                } catch (err) {
+                  // eslint-disable-next-line no-alert
+                  alert(`Could not open LHM: ${err instanceof Error ? err.message : String(err)}`);
+                }
+              }}
+              className="px-3 py-1 rounded-md text-[11px] pcd-button text-text-primary whitespace-nowrap"
+              title="Bring LibreHardwareMonitor to the foreground (or launch it if not running)."
+            >
+              Open LHM
+            </button>
+          </div>
         </div>
         );
       })()}

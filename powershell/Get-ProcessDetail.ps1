@@ -278,6 +278,16 @@ try {
     }
 } catch { }
 
+# v2.5.38: CPU affinity bitmask. Powers the AffinityModal in the renderer.
+# $proc.ProcessorAffinity is IntPtr; cast to int64 so it round-trips through
+# JSON cleanly (JS Number is fine up to 2^53; JS bitwise ops are 32-bit but
+# the renderer treats this as a bigint for >32-CPU systems if it ever
+# matters). Throws on protected processes -> field is null in that case.
+$affinityMask = $null
+try {
+    $affinityMask = [int64]$proc.ProcessorAffinity
+} catch { }
+
 $detail = [ordered]@{
     pid                    = [int]$ProcessId
     name                   = $name
@@ -296,6 +306,7 @@ $detail = [ordered]@{
     system_critical        = $rowIsCritical
     system_critical_reason = $rowCriticalReason
     services_hosted        = $servicesHosted
+    affinity_mask          = $affinityMask
 }
 
 if ($JsonOutput) {

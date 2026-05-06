@@ -149,6 +149,9 @@ export interface ProcessDetail {
   /** v2.5.37 — Win32 services running inside this PID (mostly meaningful
    *  for svchost.exe; empty array for non-host processes). */
   services_hosted: Array<{ key: string; display: string; state: string }>;
+  /** v2.5.38 — CPU affinity bitmask (bit N = process can run on logical CPU N).
+   *  null for protected processes where ProcessorAffinity throws. */
+  affinity_mask: number | null;
 }
 
 export type ProcessPriorityClass =

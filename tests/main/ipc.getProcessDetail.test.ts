@@ -127,6 +127,7 @@ const sampleDetail: ProcessDetail = {
   system_critical: false,
   system_critical_reason: null,
   services_hosted: [],
+  affinity_mask: 0xFFFF,
 };
 
 describe('api:getProcessDetail (v2.5.34)', () => {
