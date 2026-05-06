@@ -23,8 +23,14 @@ export function ConfirmModal({ title, body, confirmLabel = 'Run', cancelLabel = 
     tier === 'destructive' ? '⚠'
     : tier === 'risky'     ? '▶'
     :                         'ℹ';
+  // v2.5.36: z-[60] (everyone else is z-50). The confirm dialog is the
+  // highest-priority interaction in the app — any modal can trigger one
+  // (Greg report v2.5.35: clicked Kill in ProcessDetailModal at z-50,
+  // confirm rendered BEHIND the inspect modal because both shared z-50
+  // and the inspect modal's portal mounted later in DOM order). New
+  // modals MUST stay <= z-50 so the confirm always wins.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
       <div className="pcd-modal w-full max-w-md p-5 shadow-2xl">
         <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
           <span>{icon}</span>{title}
