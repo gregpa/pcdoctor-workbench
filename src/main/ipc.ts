@@ -1594,16 +1594,23 @@ export function registerIpcHandlers() {
       }
       const r = await runPowerShellScript<{
         success: boolean; exe_path: string; config_path: string; was_running: boolean;
-        was_already_enabled: boolean; port: number; http_check: string;
+        was_already_enabled: boolean; port: number; http_check: string; message?: string;
       }>(
         'Enable-LhmRemoteServer.ps1',
         ['-ExePath', exePath, '-JsonOutput'],
         { timeoutMs: 30_000 },
       );
+      // v2.5.41: success now reflects whether the deterministic mutations
+      // (config write + LHM relaunch) succeeded. http_check is informational:
+      // 'reachable' (probe verified), 'starting' (mutations done, server
+      // still booting — happens on slow systems where LHM takes minutes to
+      // register http.sys), 'launch_failed' (LHM didn't relaunch). The
+      // 'starting' case used to surface as E_LHM_HTTP_UNREACHABLE despite
+      // the action actually succeeding; renderer now handles both cases.
       if (r.success) {
         return { ok: true, data: r };
       }
-      return { ok: false, error: { code: 'E_LHM_HTTP_UNREACHABLE', message: `LHM was launched but the web server did not come up on port ${r.port}. Try opening LHM and verifying Options → Remote Web Server → Run is checked.` } };
+      return { ok: false, error: { code: 'E_LHM_LAUNCH_FAILED', message: r.message ?? `LHM did not relaunch successfully after the config edit. The web server is not reachable on port ${r.port}.` } };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_LHM_ENABLE_FAILED', message: e?.message ?? 'Failed to enable LHM remote web server' } };
     }

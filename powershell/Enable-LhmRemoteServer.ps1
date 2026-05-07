@@ -146,9 +146,45 @@ Move-Item -LiteralPath $tmp -Destination $configPath -Force
 #    so this is non-interactive.
 Start-Process -FilePath $ExePath -ErrorAction SilentlyContinue | Out-Null
 
-# 6. Wait for the web server to come up. LHM takes ~3-5 seconds to boot
-#    its listener on a typical desktop. Poll for up to 12 seconds.
-$httpCheck = 'unreachable'
+# 5b. v2.5.41: verify LHM actually came back up. Without this, a Start-Process
+#     that silently failed (exe quarantined, AV blocked, etc.) would slip
+#     through to the HTTP probe path and surface as a misleading "web server
+#     unreachable" message. Poll up to 5s for the process to appear.
+$lhmAlive = $false
+$launchDeadline = (Get-Date).AddSeconds(5)
+while ((Get-Date) -lt $launchDeadline) {
+    if (Get-Process -Name 'LibreHardwareMonitor' -ErrorAction SilentlyContinue) {
+        $lhmAlive = $true
+        break
+    }
+    Start-Sleep -Milliseconds 250
+}
+
+if (-not $lhmAlive) {
+    # Script-level failure: deterministic action did not complete.
+    $result = [ordered]@{
+        success             = $false
+        exe_path            = $ExePath
+        config_path         = $configPath
+        was_running         = $wasRunning
+        was_already_enabled = $wasAlreadyEnabled
+        port                = $Port
+        http_check          = 'launch_failed'
+        message             = "LHM did not appear in the process list after Start-Process. Check whether the exe at $ExePath was moved, quarantined, or blocked by an AV/SmartScreen policy."
+    }
+    if ($JsonOutput) { $result | ConvertTo-Json -Compress } else { [pscustomobject]$result }
+    exit 0
+}
+
+# 6. v2.5.41: HTTP probe is now INFORMATIONAL, not gating. The probe stayed
+#    at 12s for the fast-path verification, but on Greg's R11 the LHM web
+#    server registers with http.sys ~3 minutes after relaunch (sensor
+#    enumeration is slow on a fully-loaded system). Pre-2.5.41 this surfaced
+#    as a failure dialog despite the action having actually succeeded; the
+#    dashboard correctly picked up live temps a few minutes later.
+#    Now: 'reachable' = verified, 'starting' = mutations done, server still
+#    coming up (still success). Only 'launch_failed' above is a real fail.
+$httpCheck = 'starting'
 $deadline = (Get-Date).AddSeconds(12)
 while ((Get-Date) -lt $deadline) {
     try {
@@ -162,7 +198,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 $result = [ordered]@{
-    success             = ($httpCheck -eq 'reachable')
+    success             = $true
     exe_path            = $ExePath
     config_path         = $configPath
     was_running         = $wasRunning

@@ -464,11 +464,20 @@ export function Dashboard() {
                 try {
                   const r = await window.api.enableLhmRemoteWebServer();
                   if (r.ok) {
+                    // v2.5.41: branch on http_check. 'reachable' = probe
+                    // verified within 12s. 'starting' = mutations succeeded
+                    // but probe timed out — LHM's http.sys registration
+                    // can take minutes on busy systems (Greg's R11 saw
+                    // ~3 min). Both are user-visible successes, but the
+                    // message has to be honest about which one.
+                    const verified = r.data.http_check === 'reachable';
+                    const enabledSuffix = r.data.was_already_enabled ? ' (Was already enabled in config; restart confirmed it.)' : '';
+                    const tickSuffix = ' The dashboard will pick up live temps on the next scan tick.';
                     // eslint-disable-next-line no-alert
                     alert(
-                      `LHM Remote Web Server is now reachable on http://localhost:${r.data.port}/.`
-                      + (r.data.was_already_enabled ? ' (Was already enabled in config; restart confirmed it.)' : '')
-                      + ' The dashboard will pick up live temps on the next scan tick.'
+                      verified
+                        ? `LHM Remote Web Server is now reachable on http://localhost:${r.data.port}/.${enabledSuffix}${tickSuffix}`
+                        : `Config saved + LHM relaunched. The web server can take 1–3 minutes to register on port ${r.data.port} on slower systems.${enabledSuffix}${tickSuffix}`
                     );
                   } else {
                     // eslint-disable-next-line no-alert
