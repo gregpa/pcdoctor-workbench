@@ -17,6 +17,7 @@ const api = {
   upgradeTool: (wingetId: string): Promise<IpcResult<any>> => ipcRenderer.invoke('api:upgradeTool', wingetId),
   upgradeAllTools: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:upgradeAllTools'),
   getLastActionSuccessMap: (): Promise<IpcResult<Record<string, number>>> => ipcRenderer.invoke('api:getLastActionSuccessMap'),
+  getLastActionResult: (action_name: string): Promise<IpcResult<{ ts: number; result: any } | null>> => ipcRenderer.invoke('api:getLastActionResult', action_name),
   getStatus: (): Promise<IpcResult<SystemStatus>> => ipcRenderer.invoke('api:getStatus'),
   runAction: (req: RunActionRequest): Promise<IpcResult<ActionResult>> => ipcRenderer.invoke('api:runAction', req),
   getAuditLog: (limit?: number): Promise<IpcResult<AuditLogEntry[]>> => ipcRenderer.invoke('api:getAuditLog', limit ?? 200),

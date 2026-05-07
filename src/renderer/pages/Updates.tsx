@@ -59,6 +59,11 @@ export function Updates() {
   // which queries actions_log for the most recent successful run.
   const [nvCheckedTs, setNvCheckedTs] = useState<number | null>(null);
   const [dellLastScanTs, setDellLastScanTs] = useState<number | null>(null);
+  // v2.5.40: persistent display of the most recent Dell action result so the
+  // tile can show "Applied N update(s)" + the list of titles inline. Replaces
+  // the v2.5.39 toast-only path which evaporated after 6s while a 5+ min
+  // action ran in the background.
+  const [dellLastResult, setDellLastResult] = useState<any>(null);
 
   const load = async () => {
     setLoading(true);
@@ -80,10 +85,18 @@ export function Updates() {
         if (raw) {
           const cached = JSON.parse(raw);
           if (cached?.ts) {
+            // v2.5.40: persist all PS-script fields (download_url, details_url,
+            // is_outdated, release_date) so the Download button is available on
+            // cold mount without re-running the network check. Older caches
+            // (pre-v2.5.40) lack these fields; the UI gracefully degrades.
             setNvInfo({
               installed_version: cached.installed_version,
               latest_version: cached.latest_version,
               message: cached.message,
+              is_outdated: cached.is_outdated ?? null,
+              download_url: cached.download_url ?? null,
+              details_url: cached.details_url ?? null,
+              release_date: cached.release_date ?? null,
             });
             setNvCheckedTs(cached.ts);
           }
@@ -100,6 +113,15 @@ export function Updates() {
       }
     } catch (e) {
       if (import.meta.env.DEV) console.warn('loadDriverStaleness (dell):', e);
+    }
+    // v2.5.40: hydrate the parsed Dell result so the tile can render inline
+    // "Applied N update(s)" + applied_titles list. Surfaces the structured
+    // outcome of the most recent successful run; null if never run.
+    try {
+      const r = await api.getLastActionResult('run_dell_command_update');
+      if (r.ok && r.data?.result) setDellLastResult(r.data.result);
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('loadDriverStaleness (dell result):', e);
     }
   };
 
@@ -340,25 +362,86 @@ export function Updates() {
                 {nvCheckedTs !== null && (
                   <div className="text-text-secondary text-[10px]">Last checked {timeAgoShort(nvCheckedTs)}</div>
                 )}
-                <button onClick={checkNvidia} className="mt-2 px-2.5 py-1 rounded-md text-[11px] pcd-button">Re-check</button>
+                {/* v2.5.40: actionable links when out of date. target="_blank" */}
+                {/* routes through main.ts setWindowOpenHandler -> shell.openExternal, */}
+                {/* which opens the URL in the user's default browser. No new IPC. */}
+                <div className="flex gap-2 mt-2 items-center">
+                  {nvInfo.is_outdated && nvInfo.download_url && (
+                    <a
+                      href={nvInfo.download_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Opens the Nvidia download page in your default browser. You'll need to run the installer manually."
+                      className="px-2.5 py-1 rounded-md text-[11px] bg-[#238636] text-white font-semibold no-underline hover:opacity-90"
+                    >
+                      📥 Download driver
+                    </a>
+                  )}
+                  {nvInfo.details_url && (
+                    <a
+                      href={nvInfo.details_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-status-info underline hover:opacity-90"
+                    >
+                      Release notes
+                    </a>
+                  )}
+                  <button onClick={checkNvidia} className="px-2.5 py-1 rounded-md text-[11px] pcd-button">Re-check</button>
+                </div>
               </div>
             )}
           </div>
           <div className="pcd-panel p-4">
             <div className="font-semibold text-sm mb-1">💻 Dell Command Update</div>
             <p className="text-[11px] text-text-secondary mb-2">Alienware-specific updates (BIOS, chipset, GPU). Requires the Dell Command | Update app installed on your machine.</p>
-            {dellLastScanTs !== null ? (
-              <p className="text-[10px] text-text-secondary mb-2">Last scan {timeAgoShort(dellLastScanTs)}</p>
+
+            {/* v2.5.40: in-progress state. dcu-cli /scan + /applyUpdates can run */}
+            {/* 5-10 minutes; without this, the user clicks the button, UAC fires, */}
+            {/* the button greys out, and they think nothing happened. */}
+            {running === 'run_dell_command_update' ? (
+              <div className="mb-2 p-2 rounded-md bg-status-info/10 border border-status-info/40 flex items-center gap-2">
+                <LoadingSpinner size={14} />
+                <div className="text-[11px]">
+                  <div className="font-semibold">Scanning + applying Dell updates…</div>
+                  <div className="text-text-secondary">This can take 5–10 minutes. Safe to leave the page open or come back later.</div>
+                </div>
+              </div>
+            ) : dellLastResult ? (
+              <div className="mb-2 p-2 rounded-md bg-surface-700/50 border border-surface-600 text-[11px]">
+                {dellLastScanTs !== null && (
+                  <div className="text-text-secondary text-[10px] mb-1">Last scan {timeAgoShort(dellLastScanTs)}</div>
+                )}
+                {dellLastResult.mode === 'scan_no_updates' ? (
+                  <div className="text-status-good">✓ No updates available</div>
+                ) : dellLastResult.mode === 'applied' ? (
+                  <div>
+                    <div className="text-status-good font-semibold">✓ Applied {dellLastResult.updates_applied} update(s)</div>
+                    {Array.isArray(dellLastResult.applied_titles) && dellLastResult.applied_titles.length > 0 && (
+                      <ul className="mt-1 ml-4 list-disc text-[10px] text-text-secondary space-y-0.5">
+                        {dellLastResult.applied_titles.map((t: string, i: number) => (
+                          <li key={i}>{t}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="text-text-secondary text-[10px] mt-1">Reboot may be required for BIOS/firmware to take effect.</div>
+                  </div>
+                ) : (
+                  // Legacy v2.5.38 scan_only result, or unrecognized mode.
+                  <div className="text-text-secondary">{dellLastResult.message ?? 'Last scan complete.'}</div>
+                )}
+              </div>
             ) : (
-              <p className="text-[10px] text-text-secondary mb-2 italic">Not scanned yet — click below to run for the first time. Will display "Last scan Xd ago" after.</p>
+              <p className="text-[10px] text-text-secondary mb-2 italic">Not scanned yet — click below to run for the first time.</p>
             )}
+
             <button
               onClick={() => install('run_dell_command_update')}
               disabled={running !== null}
-              title="Runs Dell Command | Update CLI to scan + apply available BIOS/chipset/firmware updates. Admin required. May require reboot."
+              title="Runs Dell Command | Update CLI to scan + apply available BIOS/chipset/firmware updates. Admin required. May require reboot. Takes 5-10 minutes."
               className="px-3 py-1.5 rounded-md text-xs bg-[#238636] text-white font-semibold disabled:opacity-50"
             >
-              Run Dell Scan + Apply
+              {running === 'run_dell_command_update' ? 'Running…' : 'Run Dell Scan + Apply'}
             </button>
           </div>
         </div>

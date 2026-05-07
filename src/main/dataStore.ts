@@ -413,6 +413,21 @@ export function getActionLogById(id: number): ActionLogRow | null {
   ).get(id) as ActionLogRow | undefined) ?? null;
 }
 
+/**
+ * Most-recent successful row for a given action_name. Used by tiles that need
+ * to show "last result" inline — e.g. the Dell Command Update tile in
+ * Updates.tsx surfaces "Applied N update(s)" and the list of titles, sourced
+ * from the parsed result_json. v2.5.40.
+ */
+export function getLastActionResult(action_name: string): { ts: number; result_json: string | null } | null {
+  const row = openDb().prepare(
+    `SELECT ts, result_json FROM actions_log
+     WHERE action_name = ? AND status = 'success'
+     ORDER BY ts DESC LIMIT 1`,
+  ).get(action_name) as { ts: number; result_json: string | null } | undefined;
+  return row ?? null;
+}
+
 // ============== ROLLBACKS ==============
 
 export interface RollbackInsert {

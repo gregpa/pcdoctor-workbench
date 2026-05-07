@@ -353,6 +353,30 @@ export function registerIpcHandlers() {
     }
   });
 
+  // v2.5.40: most-recent successful result for a single action, including the
+  // parsed PS JSON. Used by Updates.tsx Dell tile to show "Applied N update(s)"
+  // + the list of titles inline (instead of relying on a 6-second toast that
+  // disappears before a 5-minute action finishes).
+  ipcMain.handle('api:getLastActionResult', async (_e, action_name: string): Promise<IpcResult<{ ts: number; result: any } | null>> => {
+    try {
+      if (typeof action_name !== 'string' || !/^[a-z_][a-z0-9_]*$/.test(action_name)) {
+        return { ok: false, error: { code: 'E_INVALID_PARAM', message: 'action_name must be snake_case identifier' } };
+      }
+      const { getLastActionResult } = await import('./dataStore.js');
+      const row = getLastActionResult(action_name);
+      if (!row) return { ok: true, data: null };
+      let parsed: any = null;
+      if (row.result_json) {
+        try { parsed = JSON.parse(row.result_json); } catch {
+          // Corrupt/malformed result_json — surface the row but with null result.
+        }
+      }
+      return { ok: true, data: { ts: row.ts, result: parsed } };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
+    }
+  });
+
   ipcMain.handle('api:getStatus', async (): Promise<IpcResult<SystemStatus>> => {
     try {
       const data = await getStatus();
@@ -801,6 +825,14 @@ export function registerIpcHandlers() {
           installed_version: data?.installed_version ?? null,
           latest_version: data?.latest_version ?? null,
           message: data?.message ?? null,
+          // v2.5.40: persist actionable links so the Updates tile can show
+          // a "Download driver" button on cold mount without re-running the
+          // PowerShell check. Both fields default to null when feed is
+          // unreachable or the GPU is workstation-class.
+          is_outdated: data?.is_outdated ?? false,
+          download_url: data?.download_url ?? null,
+          details_url: data?.details_url ?? null,
+          release_date: data?.release_date ?? null,
         }));
       } catch (cacheErr: any) {
         // Non-fatal — return the live result regardless of cache write.
