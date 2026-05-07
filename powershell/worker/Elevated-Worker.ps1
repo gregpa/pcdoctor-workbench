@@ -103,7 +103,7 @@ function Update-Heartbeat {
         pid        = $workerPid
         started_at = $startedAt
         last_seen  = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        version    = '2.5.38'
+        version    = '2.5.39'
     } | ConvertTo-Json -Compress
     # Best-effort write: heartbeat is informational, never block the worker
     # if a transient AV scan locks the file.

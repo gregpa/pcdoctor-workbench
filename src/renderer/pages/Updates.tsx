@@ -115,9 +115,20 @@ export function Updates() {
     });
     if (!ok) return;
     await run({ name });
-    setToast(`${def.label} completed`);
+    // v2.5.39: Dell tile previously stayed on "Not scanned yet" until next
+    // page mount because install() only refreshed the WU detail. Pull the
+    // result-shaped fields off __lastActionResult (set by useAction) so the
+    // toast can show the real update count instead of a generic "completed".
+    const r: any = (window as any).__lastActionResult ?? null;
+    let toastMsg = `${def.label} completed`;
+    if (name === 'run_dell_command_update' && r) {
+      if (r.mode === 'scan_no_updates') toastMsg = 'Dell scan complete — no updates available.';
+      else if (r.mode === 'applied') toastMsg = `Applied ${r.updates_applied} Dell update(s). Reboot may be required.`;
+    }
+    setToast(toastMsg);
     setTimeout(() => setToast(null), 6000);
     await load();
+    await loadDriverStaleness();
   }
 
   async function checkReadiness() {
