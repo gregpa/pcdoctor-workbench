@@ -681,7 +681,19 @@ export function registerIpcHandlers() {
         overall_severity: posture.overall_severity ?? 'good',
         partial_errors,  // v2.4.51 (B51-IPC-1)
       };
-      setCachedSmart(data.smart);
+      // v2.5.42: guard against cache-clobber. A transient Get-SMART
+       // failure (timeout, WMI hiccup, AV interference) lands in the
+       // settled-rejected branch above with smart={drives:[]}, then
+       // data.smart=[]. Unconditionally writing that empty array used to
+       // wipe a previously-populated cache, which presented to the user
+       // as the dashboard SMART tile "going from drives to no data" mid-
+       // session. Now we only update the cache when the scan completed
+       // AND returned at least one drive. Edge case: if the user truly
+       // has zero drives the stale cache survives until app restart,
+       // which is acceptable on a personal PC tool.
+      if (settledSmart.status === 'fulfilled' && data.smart.length > 0) {
+        setCachedSmart(data.smart);
+      }
 
       // Auto-block RDP brute-force source IPs if setting enabled.
       // Reviewer P1: previously this called runPowerShellScript directly,
