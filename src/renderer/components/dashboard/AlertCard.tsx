@@ -200,9 +200,12 @@ export function AlertCard({ finding, onApply, onOpenDetail }: AlertCardProps) {
             }}
             disabled={busy}
             className="px-2.5 py-1.5 rounded-md bg-status-info/20 border border-status-info/40 text-status-info text-[11px] font-bold disabled:opacity-50 flex items-center gap-1.5"
-            title="Analyze the most recent BSOD minidump with WinDbg"
+            title="Analyze the most recent BSOD minidump with WinDbg. ~30-90s on first run (downloading Windows symbols), <10s after."
           >
-            <span>🔍</span><span>Analyze Minidump</span>
+            {/* v2.5.47: show in-progress state. Pre-2.5.47 the button only */}
+            {/* greyed out while busy, with no spinner or text — looked silent */}
+            {/* during the 30-90s symbol-download window on first run. */}
+            {busy ? (<><LoadingSpinner size={10} /> <span>Analyzing…</span></>) : (<><span>🔍</span><span>Analyze Minidump</span></>)}
           </button>
         ) : (
           <span className="px-2.5 py-1.5 rounded-md pcd-button text-[11px] text-text-secondary">

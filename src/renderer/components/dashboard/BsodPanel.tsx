@@ -24,8 +24,19 @@ export function BsodPanel() {
         <button onClick={analyze} className="px-2.5 py-1.5 rounded-md bg-[#238636] text-white text-[11px] font-semibold">Analyze Latest</button>
       )}
       {loading && (
-        <div className="flex items-center gap-2 text-xs text-text-secondary">
-          <LoadingSpinner size={14} /><span>Running cdb !analyze -v…</span>
+        <div className="flex items-start gap-2 text-xs text-text-secondary">
+          <div className="mt-0.5"><LoadingSpinner size={14} /></div>
+          <div>
+            <div>Running cdb !analyze -v…</div>
+            {/* v2.5.47: set duration expectations. First run downloads */}
+            {/* Windows symbols from msdl.microsoft.com (~30-90s, depends on */}
+            {/* network + Win build). Subsequent runs hit C:\SymCache and */}
+            {/* finish in under 10s. Without this the user just sees a */}
+            {/* spinner for a minute and assumes the action is hung. */}
+            <div className="text-[10px] mt-0.5">
+              ~30–90s on first run (downloading Windows symbols), &lt;10s after.
+            </div>
+          </div>
         </div>
       )}
       {result && !loading && (
