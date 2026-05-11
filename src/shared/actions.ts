@@ -490,8 +490,19 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
     name: 'analyze_minidump', label: 'Analyze Latest Minidump',
     ps_script: 'actions/Analyze-Minidump.ps1',
     confirm_level: 'info', rollback_tier: 'C', estimated_duration_s: 60,
+    // v2.5.46: needs_admin. C:\Windows\Minidump\*.dmp requires admin to
+    // read. Pre-2.5.46 the action ran unelevated, cdb returned Win32
+    // error 0n5 (ACCESS_DENIED) at the open-file step, and the script
+    // surfaced success=true because cdb's exit code was 0 — every
+    // interpretive field (bug_check, faulting_module, probable_cause)
+    // came back null. Routing through the elevated worker gives cdb an
+    // admin token so it can actually open the dump.
+    needs_admin: true,
+    // 5 min: first-run symbol download from msdl.microsoft.com can take
+    // 30-90s on a fresh C:\SymCache; subsequent runs are sub-10s.
+    timeout_ms: 5 * 60 * 1000,
     category: 'repair', icon: '💥', informational: true,
-    tooltip: 'Runs WinDbg cdb !analyze -v on the most recent BSOD minidump. Requires Windows Debugging Tools installed.',
+    tooltip: 'Runs WinDbg cdb !analyze -v on the most recent BSOD minidump. Requires Windows Debugging Tools installed. Asks for admin — needed to read C:\\Windows\\Minidump\\.',
     params_schema: { dump_path: { type: 'string', required: false, description: 'Optional explicit dump path (default: latest C:\\Windows\\Minidump)' } },
   },
   run_mbam_scan: {

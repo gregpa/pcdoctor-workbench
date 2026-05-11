@@ -66,6 +66,45 @@ $symbolPath = 'SRV*C:\SymCache*https://msdl.microsoft.com/download/symbols'
 $cdbArgs = @('-z', $DumpPath, '-y', $symbolPath, '-c', '!analyze -v; q')
 $output = & $cdb @cdbArgs 2>&1 | Out-String
 
+# v2.5.46: detect dump-open failures BEFORE claiming success. Pre-2.5.46
+# the script returned success=true based on cdb's exit code (which is 0
+# even when the dump can't be opened); every interpretive field came back
+# null and the renderer surfaced a misleading "analysis complete" toast.
+# We now scan cdb output for known failure markers and surface a
+# structured error so the caller knows the analysis didn't actually run.
+$openFailureMarkers = @(
+    'Could not open dump file',
+    'Win32 error 0n5',                  # ERROR_ACCESS_DENIED (the v2.5.46 trigger)
+    'Win32 error 0n2',                  # ERROR_FILE_NOT_FOUND (dump deleted mid-run)
+    'Win32 error 0n32',                 # ERROR_SHARING_VIOLATION (another process has lock)
+    'Debuggee initialization failed',
+    'No system symbols found'           # SYM_FAILED at load — analyze never gets meaningful output
+)
+$dumpFailure = $null
+foreach ($marker in $openFailureMarkers) {
+    if ($output -match [regex]::Escape($marker)) {
+        # Capture the matching line + 1 line of context for the message.
+        $contextLines = ($output -split "`r?`n" | Where-Object { $_ -match [regex]::Escape($marker) } | Select-Object -First 1)
+        $dumpFailure = "$contextLines".Trim()
+        break
+    }
+}
+
+if ($dumpFailure) {
+    $hint = if ($dumpFailure -match 'Win32 error 0n5|Access is denied') {
+        ' Re-run the action as Administrator — C:\Windows\Minidump\ is not readable by standard users.'
+    } else { '' }
+    @{
+        success = $false
+        code = 'E_DUMP_ANALYZE_FAILED'
+        duration_ms = $sw.ElapsedMilliseconds
+        dump_path = $DumpPath
+        message = "cdb could not analyze the dump: $dumpFailure.$hint"
+        full_output_tail = ($output.Trim() -split "`r?`n" | Select-Object -Last 40) -join "`n"
+    } | ConvertTo-Json -Depth 4 -Compress
+    exit 0
+}
+
 # Extract key fields
 $bugCheck = $null; $bugCheckHex = $null; $probableCause = $null; $faultingModule = $null
 if ($output -match 'BUGCHECK_CODE:\s*([0-9a-fA-Fx]+)') { $bugCheckHex = $Matches[1] }
