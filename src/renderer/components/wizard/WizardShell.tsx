@@ -112,6 +112,19 @@ function WizardOverlay({ onDone }: { onDone: () => void }) {
     onDone();
   }, [onDone]);
 
+  // v2.5.43: Cancel path. The wizard had no exit other than clicking
+  // through all 9 steps. After Greg accidentally clicked "Re-run Setup
+  // Wizard" in Settings (which also flips first_run_complete to '0'),
+  // there was no way back. Cancel writes first_run_complete='1' (same
+  // as Finish) so the wizard doesn't re-appear on next launch — which
+  // matches user intent: "I opened this by accident, I'm not configuring."
+  const handleCancel = useCallback(async () => {
+    try {
+      await window.api.setSetting('first_run_complete', '1');
+    } catch { /* non-fatal */ }
+    onDone();
+  }, [onDone]);
+
   const handleNext = useCallback(() => {
     if (isLast) {
       void handleFinish();
@@ -122,7 +135,18 @@ function WizardOverlay({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-[640px] max-h-[90vh] rounded-xl bg-surface-800 border border-surface-600 shadow-2xl flex flex-col">
+      <div className="w-[640px] max-h-[90vh] rounded-xl bg-surface-800 border border-surface-600 shadow-2xl flex flex-col relative">
+
+        {/* ── Close (X) button — v2.5.43 ── */}
+        <button
+          type="button"
+          onClick={() => void handleCancel()}
+          aria-label="Cancel wizard"
+          title="Cancel and dismiss — won't re-appear on next launch. Re-open from Settings → Setup Wizard."
+          className="absolute top-3 right-3 w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-surface-700 hover:text-text-primary transition text-base leading-none z-10"
+        >
+          ×
+        </button>
 
         {/* ── Progress bar ── */}
         <div className="px-6 pt-5 pb-4 border-b border-surface-600">
