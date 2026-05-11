@@ -29,12 +29,25 @@ $cdbCandidates = @(
 $cdb = $cdbCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if (-not $cdb) {
-    # MS Store WinDbg install (per-package-version path)
-    $storeHit = Get-ChildItem -Path 'C:\Program Files\WindowsApps\Microsoft.WinDbg_*' -Filter 'cdb.exe' -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.DirectoryName -match '\\amd64$' -or $_.DirectoryName -match '\\x64$' } |
-                Sort-Object { $_.DirectoryName } -Descending |
-                Select-Object -First 1
-    if ($storeHit) { $cdb = $storeHit.FullName }
+    # v2.5.45: MS Store WinDbg install. The previous Get-ChildItem -Recurse
+    # approach against C:\Program Files\WindowsApps\ returned nothing under
+    # unelevated context because that directory is ACL-locked to
+    # TrustedInstaller — enumeration is blocked, but point-lookup via
+    # Test-Path on a specific file path still works. Use Get-AppxPackage
+    # to discover the per-version InstallLocation (a documented API that
+    # doesn't need filesystem enumeration), then Test-Path the known
+    # subdirectory layouts.
+    try {
+        $pkg = Get-AppxPackage -Name 'Microsoft.WinDbg' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pkg -and $pkg.InstallLocation) {
+            $storeCandidates = @(
+                (Join-Path $pkg.InstallLocation 'amd64\cdb.exe'),
+                (Join-Path $pkg.InstallLocation 'x64\cdb.exe'),
+                (Join-Path $pkg.InstallLocation 'cdb.exe')
+            )
+            $cdb = $storeCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        }
+    } catch { }
 }
 
 if (-not $cdb) {
