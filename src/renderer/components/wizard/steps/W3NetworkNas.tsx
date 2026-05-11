@@ -141,11 +141,37 @@ export function W3NetworkNas() {
   // Track whether auto-detection populated values (for defaulting toggle)
   const autoDetectedRef = useRef(false);
 
-  // ── Fetch drives on mount ──
+  // v2.5.44: distinguish "user clicked the toggle" from "code set state on
+  // mount." Pre-2.5.44 the save-on-unmount handler unconditionally wrote
+  // nas_enabled to whatever the React state held — so if the wizard was
+  // dismissed before auto-detect finished (or auto-detect returned empty
+  // due to a transient network hiccup), saveConfig wrote '0' over a
+  // previously-good '1'. Greg's box hit this 2026-05-04: his nas_mappings
+  // (7 shares) was correctly written by a May 2 run, but the May 4 run
+  // silently flipped nas_enabled to '0'. Tracking real interaction means
+  // we only persist when the user expressed an actual preference.
+  const userInteractedRef = useRef(false);
+  const handleToggleNas = useCallback((next: boolean) => {
+    userInteractedRef.current = true;
+    setNasEnabled(next);
+  }, []);
+
+  // ── Fetch drives + load existing nas_enabled on mount ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        // v2.5.44: seed nasEnabled from the persisted setting BEFORE
+        // auto-detect runs, so an aborted wizard doesn't reset to the
+        // default 'false'. Auto-detect can still flip it if it finds
+        // drives. Either path is a non-user-interaction change.
+        try {
+          const sr = await window.api.getSettings();
+          if (!cancelled && sr.ok && sr.data['nas_enabled'] === '1') {
+            setNasEnabled(true);
+          }
+        } catch { /* non-fatal */ }
+
         const result = await window.api.getNasDrives();
         if (cancelled) return;
         if (result.ok) {
@@ -168,9 +194,11 @@ export function W3NetworkNas() {
               source: 'detected' as const,
             }));
             setMappings(detected);
-          } else {
-            setNasEnabled(false);
           }
+          // v2.5.44: removed the `setNasEnabled(false)` branch here. The
+          // "no drives detected" outcome should NOT silently flip an
+          // existing nas_enabled='1' to false. If the user truly wants
+          // to disable, they click the toggle.
         } else {
           setError(result.error?.message ?? 'Failed to detect network drives.');
         }
@@ -208,8 +236,15 @@ export function W3NetworkNas() {
   // ── Save on unmount ──
   const saveConfig = useCallback(async () => {
     try {
-      // Always save nas_enabled
-      await window.api.setSetting('nas_enabled', nasEnabled ? '1' : '0');
+      // v2.5.44: only write nas_enabled when the user actually expressed a
+      // preference (clicked the toggle). Auto-detect setting state OR a
+      // race-with-unmount default value should NOT overwrite the persisted
+      // setting. This is the fix for Greg's 2026-05-04 incident: a wizard
+      // re-run with no user interaction silently wrote nas_enabled='0',
+      // hiding his NAS panel on every subsequent dashboard launch.
+      if (userInteractedRef.current) {
+        await window.api.setSetting('nas_enabled', nasEnabled ? '1' : '0');
+      }
       await window.api.setSetting('nas_brand', brand);
 
       if (nasEnabled && server.trim()) {
@@ -278,7 +313,7 @@ export function W3NetworkNas() {
         <span className="text-sm text-text-primary font-medium">
           Do you have a NAS?
         </span>
-        <ToggleButtons value={nasEnabled} onChange={setNasEnabled} />
+        <ToggleButtons value={nasEnabled} onChange={handleToggleNas} />
       </div>
 
       {/* ── NAS Disabled ── */}

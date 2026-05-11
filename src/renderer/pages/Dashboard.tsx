@@ -145,8 +145,13 @@ export function Dashboard() {
   const [expandedTrend, setExpandedTrend] = useState<null | { title: string; trend: Trend; unit: string; yDomain?: [number, number] }>(null);
   // v2.4.13: bump after a NAS @Recycle empty so the panel re-fetches sizes.
   const [nasRefreshToken, setNasRefreshToken] = useState(0);
-  // Task-18: hide NAS panel when wizard set nas_enabled='0'. Default true for backward compat.
-  const [nasEnabled, setNasEnabled] = useState(true);
+  // Task-18: hide NAS panel when wizard set nas_enabled='0'. v2.5.44: default
+  // to null (unknown) instead of true. The previous "default true, async-flip
+  // to false" pattern caused a visible flicker — panel painted during initial
+  // render, then unmounted seconds later when the settings useEffect read '0'.
+  // To the user it looked like "the drives appeared then disappeared." Now we
+  // hold render until the setting is known.
+  const [nasEnabled, setNasEnabled] = useState<boolean | null>(null);
   // v2.4.6: Event Log chart click-to-expand. Opens a modal that fetches
   // Get-EventLogBreakdown.ps1 on demand and lists the top providers/IDs.
   const [showEventLogDetail, setShowEventLogDetail] = useState(false);
@@ -164,15 +169,23 @@ export function Dashboard() {
   }, []);
   useEffect(() => { refreshLastSuccess(); }, [refreshLastSuccess]);
 
-  // Task-18: read wizard nas_enabled setting
+  // Task-18: read wizard nas_enabled setting. v2.5.44: always set the state
+  // explicitly (true OR false) rather than only flipping to false. Required
+  // because the initial state is null (unknown), and the gate `nasEnabled ===
+  // true` below skips rendering until we have a definitive answer.
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const r = await api.getSettings();
-        if (!alive || !r.ok) return;
-        if (r.data['nas_enabled'] === '0') setNasEnabled(false);
-      } catch { /* non-fatal */ }
+        if (!alive || !r.ok) { setNasEnabled(true); return; }
+        // Missing key defaults to enabled (backward compat with installs
+        // that pre-date the wizard's W3 step).
+        const enabled = r.data['nas_enabled'] !== '0';
+        setNasEnabled(enabled);
+      } catch {
+        if (alive) setNasEnabled(true);
+      }
     })();
     return () => { alive = false; };
   }, []);
@@ -587,7 +600,7 @@ export function Dashboard() {
          mapped network drives via Get-NasDrives.ps1; shows offline ones
          grayed out with a reachable=false flag. Per-drive confirm button
          only (no "empty all" to avoid misclicks across 14 TB shares). */}
-      {nasEnabled && (
+      {nasEnabled === true && (
         <NasRecycleBinPanel
           refreshToken={nasRefreshToken}
           onEmptyDrive={async (letter) => {

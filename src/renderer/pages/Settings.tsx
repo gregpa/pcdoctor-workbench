@@ -671,6 +671,13 @@ export function Settings() {
         * visible escape hatch in Settings instead of needing DevTools. */}
       <ForceWizardOverrideSection />
 
+      {/* v2.5.44: NAS panel toggle. Previously the only way to flip
+        * nas_enabled was via the W3 wizard step (whose save-on-unmount
+        * logic could silently overwrite it with '0' on a wizard re-run).
+        * This Settings toggle gives users a direct, non-destructive
+        * way to show or hide the dashboard's Drives & Storage panel. */}
+      <NasPanelToggleSection />
+
       {/* v2.5.26: Re-run tools setup splash */}
       <section className="mb-6 pcd-section">
         <h2 className="text-sm font-bold mb-3">Tools Setup</h2>
@@ -709,6 +716,85 @@ export function Settings() {
 }
 
 // ---------------------------------------------------------------------------
+// v2.5.44: NasPanelToggleSection
+// ---------------------------------------------------------------------------
+//
+// Surfaces the nas_enabled setting with a toggle button. Reads/writes the
+// same key the wizard's W3 step touches; intentional shared source-of-truth
+// so a user who turns it off here stays off until they turn it back on.
+//
+// Background: Greg's 2026-05-04 incident — the W3 step's save-on-unmount
+// handler overwrote nas_enabled with '0' on a wizard re-run that the user
+// canceled mid-flow. Pre-2.5.44 there was no UI to fix this short of
+// DevTools (`window.api.setSetting('nas_enabled', '1')`). Now Settings
+// hosts the toggle directly.
+function NasPanelToggleSection() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.getSettings();
+        if (!alive) return;
+        if (r.ok) setEnabled(r.data['nas_enabled'] !== '0');
+        else setEnabled(true);
+      } catch {
+        if (alive) setEnabled(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  async function toggle() {
+    if (enabled === null || busy) return;
+    setBusy(true);
+    setError(null);
+    const next = !enabled;
+    try {
+      const r = await api.setSetting('nas_enabled', next ? '1' : '0');
+      if (r.ok) setEnabled(next);
+      else setError(r.error?.message ?? 'Failed to update setting');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update setting');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (enabled === null) {
+    return (
+      <section className="mb-6 pcd-section">
+        <h2 className="text-sm font-bold mb-3">NAS Drives Panel</h2>
+        <p className="text-xs text-text-secondary">Loading…</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-6 pcd-section">
+      <h2 className="text-sm font-bold mb-3">NAS Drives Panel</h2>
+      <p className="text-xs text-text-secondary mb-3">
+        Controls whether the Dashboard's <strong>Drives &amp; Storage</strong> panel
+        is shown. It lists every mapped/local/USB drive with used/free space, and
+        offers a per-drive @Recycle empty button for NAS shares. Disable if you
+        don't use mapped network drives. Currently <strong>{enabled ? 'enabled' : 'hidden'}</strong>.
+      </p>
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        disabled={busy}
+        className="px-3 py-1.5 rounded-md text-xs pcd-button disabled:opacity-50"
+      >
+        {busy ? 'Saving…' : enabled ? 'Hide Drives & Storage panel' : 'Show Drives & Storage panel'}
+      </button>
+      {error && <p className="text-xs text-status-warn mt-2">{error}</p>}
+    </section>
+  );
+}
+
 // v2.5.37: ForceWizardOverrideSection
 // ---------------------------------------------------------------------------
 //
