@@ -36,7 +36,10 @@ vi.mock('@main/dataStore.js', () => ({
 }));
 vi.mock('@main/forecastEngine.js', () => ({ generateForecasts: vi.fn() }));
 vi.mock('@main/scriptRunner.js', () => ({ runPowerShellScript: vi.fn(), runElevatedPowerShellScript: vi.fn() }));
-vi.mock('@main/constants.js', () => ({ PCDOCTOR_ROOT: '/tmp/pcdoctor' }));
+vi.mock('@main/constants.js', () => ({
+  PCDOCTOR_ROOT: '/tmp/pcdoctor',
+  PWSH_FALLBACK: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+}));
 vi.mock('@main/toolLauncher.js', () => ({ listAllToolStatuses: vi.fn(() => []), launchTool: vi.fn(), installToolViaWinget: vi.fn(), installToolViaDirectDownload: vi.fn() }));
 vi.mock('@shared/tools.js', () => ({ TOOLS: {} }));
 vi.mock('@main/claudeBridge.js', () => ({ launchClaudeInTerminal: vi.fn(), launchClaudeWithContext: vi.fn(), resolveClaudePath: vi.fn() }));

@@ -48,6 +48,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-TrustedScExecutable {
+    # The worker replaces SystemRoot with the OS-reported Windows directory before
+    # launching actions. Resolve sc.exe from that absolute Windows-owned location
+    # so neither PATH nor the current directory participates in executable lookup.
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        throw 'Trusted SystemRoot is unavailable'
+    }
+    $scExecutable = "$env:SystemRoot\System32\sc.exe"
+    if (-not [IO.Path]::IsPathRooted($scExecutable) -or
+        -not (Test-Path -LiteralPath $scExecutable -PathType Leaf)) {
+        throw 'Trusted SystemRoot sc.exe is unavailable'
+    }
+    return [IO.Path]::GetFullPath($scExecutable)
+}
+
 trap {
     $errRecord = @{
         code    = if ($_.FullyQualifiedErrorId) { $_.FullyQualifiedErrorId } else { 'E_PS_UNHANDLED' }
@@ -159,7 +174,8 @@ if (-not $method) {
         'Disabled'              { 'disabled' }
     }
     # NOTE: `start=` argument requires a SPACE after `=` for sc.exe.
-    $scOut = & sc.exe config $Service "start=" $scStart 2>&1
+    $scExecutable = Get-TrustedScExecutable
+    $scOut = & $scExecutable config $Service "start=" $scStart 2>&1
     $scExit = $LASTEXITCODE
     if ($scExit -ne 0) {
         $errRecord = @{

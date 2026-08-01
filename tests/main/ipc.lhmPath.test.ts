@@ -68,6 +68,7 @@ vi.mock('@main/scriptRunner.js', () => ({
 vi.mock('@main/constants.js', () => ({
   PCDOCTOR_ROOT: 'C:\\ProgramData\\PCDoctor',
   LATEST_JSON_PATH: 'C:\\ProgramData\\PCDoctor\\latest.json',
+  PWSH_FALLBACK: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
 }));
 vi.mock('@main/toolLauncher.js', () => ({
   listAllToolStatuses: vi.fn(() => []),
@@ -260,7 +261,7 @@ describe('resolveLhmCandidatePaths: WinGet glob (v2.5.2)', () => {
     const candidates = await _resolveLhmCandidatePathsForTests();
     const wingetDefault = wingetDefaultFor('C:\\Users\\testuser');
 
-    // wingetDefault (candidate 0) should appear exactly once — the glob
+    // wingetDefault (candidate 0) should appear exactly once, since the glob
     // dedupes against it explicitly.
     const wingetDefaultCount = candidates.filter((c) => c === wingetDefault).length;
     expect(wingetDefaultCount).toBe(1);
