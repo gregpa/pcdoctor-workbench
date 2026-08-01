@@ -36,7 +36,7 @@ log.transports.file.level = 'info';
 log.transports.console.level = 'warn';
 log.initialize();
 import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMessageText, sendTelegramMessage } from './telegramBridge.js';
-import { runAction } from './actionRunner.js';
+import { runTelegramApprovedAction } from './telegramApprovedAction.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
 import { startClaudeBridgeWatcher } from './claudeBridgeWatcher.js';
@@ -873,7 +873,7 @@ app.whenReady().then(() => {
       if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
       await answerCallbackQuery(q.id, `Running ${def.label}…`);
       try {
-        const result = await runAction({ name: actionName, triggered_by: 'telegram' });
+        const result = await runTelegramApprovedAction(actionName);
         insertAutopilotActivity({
           rule_id: ruleId || `manual:${actionName}`,
           tier: 3,
@@ -954,7 +954,7 @@ app.whenReady().then(() => {
       }
       await answerCallbackQuery(q.id, `Running ${def.label}…`);
       try {
-        const result = await runAction({ name: actionName, triggered_by: 'telegram' });
+        const result = await runTelegramApprovedAction(actionName);
         const msg = result.success
           ? `✓ <b>${def.label}</b> completed in ${result.duration_ms}ms`
           : `✗ <b>${def.label}</b> failed: ${result.error?.message ?? 'unknown'}`;
@@ -977,7 +977,7 @@ app.whenReady().then(() => {
       if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
       await answerCallbackQuery(q.id, `Running ${def.label}…`);
       try {
-        const result = await runAction({ name: actionName, triggered_by: 'telegram' });
+        const result = await runTelegramApprovedAction(actionName);
         const msg = result.success
           ? `✓ <b>${def.label}</b> completed in ${result.duration_ms}ms`
           : `✗ <b>${def.label}</b> failed: ${result.error?.message ?? 'unknown'}`;

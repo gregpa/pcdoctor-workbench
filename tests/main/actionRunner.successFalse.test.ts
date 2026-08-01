@@ -34,6 +34,7 @@ vi.mock('../../src/main/dataStore.js', () => ({
   finishActionLog: vi.fn(),
   insertToolResult: vi.fn(),
   updateActionLogRollbackId: vi.fn(),
+  getSetting: vi.fn(() => '0'),
 }));
 
 vi.mock('../../src/main/rollbackManager.js', () => ({
@@ -49,13 +50,15 @@ import { runPowerShellScript, runElevatedPowerShellScript } from '../../src/main
 import { finishActionLog } from '../../src/main/dataStore.js';
 import { notify } from '../../src/main/notifier.js';
 
+const MANUAL_RENDERER = { mode: 'manual', source: 'renderer' } as const;
+
 describe('runAction silent-success guard (B48-AS-1)', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns E_ACTION_REPORTED_FAILURE when script JSON has success=false', async () => {
     // Run-DISM is needs_admin, routes to elevated runner.
     (runElevatedPowerShellScript as any).mockResolvedValueOnce({ success: false, message: 'DISM /RestoreHealth failed: 0x800f081f' });
-    const r = await runAction({ name: 'run_dism' });
+    const r = await runAction({ name: 'run_dism' }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_ACTION_REPORTED_FAILURE');
     expect(r.error?.message).toContain('0x800f081f');
@@ -67,7 +70,7 @@ describe('runAction silent-success guard (B48-AS-1)', () => {
 
   it('writes status:error to the audit log when success=false', async () => {
     (runElevatedPowerShellScript as any).mockResolvedValueOnce({ success: false, message: 'failed' });
-    await runAction({ name: 'run_dism' });
+    await runAction({ name: 'run_dism' }, MANUAL_RENDERER);
     const calls = (finishActionLog as any).mock.calls;
     expect(calls.length).toBe(1);
     expect(calls[0][1].status).toBe('error');
@@ -76,7 +79,7 @@ describe('runAction silent-success guard (B48-AS-1)', () => {
 
   it('fires a warning notification on user-triggered failure', async () => {
     (runElevatedPowerShellScript as any).mockResolvedValueOnce({ success: false, message: 'failed' });
-    await runAction({ name: 'run_dism', triggered_by: 'user' });
+    await runAction({ name: 'run_dism', triggered_by: 'user' }, MANUAL_RENDERER);
     expect((notify as any).mock.calls.length).toBe(1);
     expect((notify as any).mock.calls[0][0]).toMatchObject({
       severity: 'warning',
@@ -86,7 +89,7 @@ describe('runAction silent-success guard (B48-AS-1)', () => {
 
   it('does NOT notify on scheduled-triggered failure (silent log only)', async () => {
     (runElevatedPowerShellScript as any).mockResolvedValueOnce({ success: false, message: 'failed' });
-    await runAction({ name: 'run_dism', triggered_by: 'scheduled' });
+    await runAction({ name: 'run_dism', triggered_by: 'scheduled' }, MANUAL_RENDERER);
     expect((notify as any).mock.calls.length).toBe(0);
   });
 
@@ -94,19 +97,19 @@ describe('runAction silent-success guard (B48-AS-1)', () => {
     // analyze_minidump: optional dump_path. No needs_admin → non-elevated runner.
     // No `success` key in the result at all → guard MUST NOT trip.
     (runPowerShellScript as any).mockResolvedValueOnce({ message: 'Analyzed 0 dumps', count: 0 });
-    const r = await runAction({ name: 'analyze_minidump' });
+    const r = await runAction({ name: 'analyze_minidump' }, MANUAL_RENDERER);
     expect(r.success).toBe(true);
   });
 
   it('treats success=true as success', async () => {
     (runPowerShellScript as any).mockResolvedValueOnce({ success: true, message: 'ok' });
-    const r = await runAction({ name: 'analyze_minidump' });
+    const r = await runAction({ name: 'analyze_minidump' }, MANUAL_RENDERER);
     expect(r.success).toBe(true);
   });
 
   it('uses the default error message when the script omits `message` on success=false', async () => {
     (runElevatedPowerShellScript as any).mockResolvedValueOnce({ success: false });
-    const r = await runAction({ name: 'run_dism' });
+    const r = await runAction({ name: 'run_dism' }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.message).toBe('Action reported success=false');
   });

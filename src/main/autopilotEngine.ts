@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { getStatus } from './pcdoctorBridge.js';
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
+import type { TrustedExecutionContext } from '@shared/automation.js';
 import type { ActionName, SystemStatus } from '@shared/types.js';
 import {
   upsertAutopilotRule,
@@ -332,7 +333,11 @@ export function evaluateRule(
  * Rate-limiting: a rule that already ran or alerted within the last `minGapMs`
  * is skipped (no new activity row written).
  */
-export async function dispatchDecision(d: AutopilotDecision, minGapMs = 6 * 60 * 60 * 1000): Promise<void> {
+export async function dispatchDecision(
+  d: AutopilotDecision,
+  context: TrustedExecutionContext,
+  minGapMs = 6 * 60 * 60 * 1000,
+): Promise<void> {
   const last = getLastAutopilotActivity(d.rule_id);
   if (last && (Date.now() - last.ts) < minGapMs) return;
 
@@ -353,7 +358,11 @@ export async function dispatchDecision(d: AutopilotDecision, minGapMs = 6 * 60 *
 
   try {
     const t0 = Date.now();
-    const r = await runAction({ name: d.action_name, triggered_by: 'scheduled' });
+    const triggeredBy = context.mode === 'manual' ? 'user' : 'scheduled';
+    const r = await runAction(
+      { name: d.action_name, triggered_by: triggeredBy },
+      context,
+    );
     const bytes = (r.result as any)?.bytes_freed;
     insertAutopilotActivity({
       rule_id: d.rule_id,
@@ -513,7 +522,12 @@ export function startAutopilotEngine(intervalMs = 60_000): void {
     try {
       const decisions = await evaluateAutopilot();
       for (const d of decisions) {
-        try { await dispatchDecision(d); } catch { /* swallow per-decision errors */ }
+        try {
+          await dispatchDecision(
+            d,
+            { mode: 'automatic', source: 'incident', policyId: d.rule_id },
+          );
+        } catch { /* swallow per-decision errors */ }
       }
     } catch {
       // never let evaluation crash the main process

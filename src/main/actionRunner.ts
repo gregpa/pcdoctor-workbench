@@ -1,9 +1,12 @@
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName, ActionResult } from '@shared/types.js';
+import { ACTION_AUTOMATION } from '@shared/automationCatalog.js';
+import type { AutomationDenialCode, TrustedExecutionContext } from '@shared/automation.js';
 import { runPowerShellScript, runElevatedPowerShellScript, isUacEnabled, PCDoctorScriptError } from './scriptRunner.js';
-import { startActionLog, finishActionLog, insertToolResult, updateActionLogRollbackId } from './dataStore.js';
+import { startActionLog, finishActionLog, getSetting, insertToolResult, updateActionLogRollbackId } from './dataStore.js';
 import { prepareRollback } from './rollbackManager.js';
 import { notify } from './notifier.js';
+import { evaluateAutomationPolicy } from './automationPolicy.js';
 
 export interface RunActionInput {
   name: ActionName;
@@ -12,8 +15,77 @@ export interface RunActionInput {
   dry_run?: boolean;
 }
 
-export async function runAction(input: RunActionInput): Promise<ActionResult> {
+/** Returns the stored global automation switch without allowing a settings read failure to enable it. */
+function isGlobalAutomationEnabled(): boolean {
+  try {
+    return getSetting('maintenance_global_enabled') === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Builds the fixed error result returned by policy and rollback safety denials. */
+function deniedAction(input: RunActionInput, code: AutomationDenialCode): ActionResult {
+  return {
+    action: input.name,
+    success: false,
+    duration_ms: 0,
+    error: { code, message: `Action denied by automation policy: ${code}` },
+  };
+}
+
+/**
+ * Executes one compiled action after validating main-process execution authority.
+ * Runtime-invalid context and automatic policy failures return ActionResult denials.
+ */
+export async function runAction(
+  input: RunActionInput,
+  context: TrustedExecutionContext,
+): Promise<ActionResult> {
   const def = ACTIONS[input.name];
+  const automation = ACTION_AUTOMATION[input.name];
+  // Context is supplied separately so renderer-owned request data can never grant execution authority.
+  const policyDecision = evaluateAutomationPolicy({
+    context,
+    globalEnabled: isGlobalAutomationEnabled(),
+    automation: automation?.automation,
+    rebootPolicy: automation?.rebootPolicy,
+    requiresRollback: automation?.requiresRollback,
+    resourceLocks: automation?.resourceLocks,
+    preflightId: automation?.preflightId,
+    postconditionId: automation?.postconditionId,
+    cooldownMs: automation?.cooldownMs,
+    maxAttempts: automation?.maxAttempts,
+    confirmLevel: def?.confirm_level,
+    rebootRequired: def?.reboot_required === true,
+    now: Date.now(),
+  });
+
+  if (!policyDecision.allowed) {
+    const denied = deniedAction(input, policyDecision.code);
+    if (def) {
+      try {
+        const denialLogId = startActionLog({
+          action_name: input.name,
+          action_label: def.label,
+          status: 'running',
+          triggered_by: input.triggered_by ?? 'user',
+          params: input.params,
+        });
+        finishActionLog(denialLogId, {
+          status: 'error',
+          duration_ms: 0,
+          error_message: denied.error?.message,
+        });
+      } catch (e) {
+        // Audit persistence is best effort so a logging failure cannot turn a denial into execution.
+        console.warn(`actionRunner: failed to log policy denial for ${input.name}:`, e);
+      }
+      console.warn(`actionRunner: policy denied ${input.name}: ${policyDecision.code}`);
+    }
+    return denied;
+  }
+
   if (!def) {
     return {
       action: input.name,
@@ -32,7 +104,9 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
   });
 
   let rollbackId: number | null = null;
-  if (def.rollback_tier === 'A' || def.rollback_tier === 'B') {
+  const automaticRollbackRequired = context.mode === 'automatic'
+    && automation.requiresRollback;
+  if (def.rollback_tier === 'A' || def.rollback_tier === 'B' || automaticRollbackRequired) {
     try {
       rollbackId = await prepareRollback(def, logId);
       if (rollbackId !== null) {
@@ -42,8 +116,29 @@ export async function runAction(input: RunActionInput): Promise<ActionResult> {
         updateActionLogRollbackId(logId, rollbackId);
       }
     } catch (e) {
-      // Proceeding without rollback - action may still succeed, but revert won't be available.
+      if (automaticRollbackRequired) {
+        // Automatic execution fails closed because an allowed policy cannot replace a missing recovery point.
+        const denied = deniedAction(input, 'E_ROLLBACK_UNAVAILABLE');
+        finishActionLog(logId, {
+          status: 'error',
+          duration_ms: 0,
+          error_message: denied.error?.message,
+        });
+        console.warn(`actionRunner: required rollback failed for ${input.name}:`, e);
+        return denied;
+      }
+      // Manual execution preserves the existing rollback warning behavior.
       console.warn(`actionRunner: prepareRollback failed for ${input.name}:`, e);
+    }
+    if (automaticRollbackRequired && rollbackId === null) {
+      const denied = deniedAction(input, 'E_ROLLBACK_UNAVAILABLE');
+      finishActionLog(logId, {
+        status: 'error',
+        duration_ms: 0,
+        error_message: denied.error?.message,
+      });
+      console.warn(`actionRunner: required rollback unavailable for ${input.name}`);
+      return denied;
     }
   }
 

@@ -389,7 +389,11 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('api:runAction', async (_evt, req: RunActionRequest): Promise<IpcResult<ActionResult>> => {
     try {
-      const result = await runAction({ name: req.name, params: req.params, dry_run: req.dry_run });
+      // The main process constructs authority; renderer payload fields are never execution context.
+      const result = await runAction(
+        { name: req.name, params: req.params, dry_run: req.dry_run },
+        { mode: 'manual', source: 'renderer' },
+      );
       return { ok: true, data: result };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message ?? 'Action failed' } };
@@ -708,11 +712,18 @@ export function registerIpcHandlers() {
             for (const ip of ((ti.detail as any).auto_block_candidates as string[])) {
               if (typeof ip !== 'string' || !ipv4Re.test(ip)) continue;
               try {
-                await runAction({
-                  name: 'block_ip',
-                  params: { ip, reason: 'Auto-block: RDP brute-force' },
-                  triggered_by: 'alert',
-                });
+                await runAction(
+                  {
+                    name: 'block_ip',
+                    params: { ip, reason: 'Auto-block: RDP brute-force' },
+                    triggered_by: 'alert',
+                  },
+                  {
+                    mode: 'automatic',
+                    source: 'incident',
+                    policyId: 'auto_block_rdp_bruteforce',
+                  },
+                );
               } catch {}
             }
           }
@@ -1149,8 +1160,12 @@ export function registerIpcHandlers() {
           });
           return { ok: true, data: { outcome: 'skipped', message: 'Rule conditions not currently met.' } };
         }
-        // minGapMs=0 so user-triggered runs bypass the 6h rate-limit.
-        await dispatchDecision(decision, 0);
+        // User-triggered Run now keeps manual renderer authority and bypasses the 6h rate-limit.
+        await dispatchDecision(
+          decision,
+          { mode: 'manual', source: 'renderer' },
+          0,
+        );
         return { ok: true, data: { outcome: 'dispatched', message: decision.reason } };
       }
       // Schedule rules: trigger the underlying action directly
@@ -1158,7 +1173,10 @@ export function registerIpcHandlers() {
         return { ok: false, error: { code: 'E_INVALID', message: 'Schedule rule has no action_name' } };
       }
       const t0 = Date.now();
-      const r = await runAction({ name: rule.action_name as any, triggered_by: 'user' });
+      const r = await runAction(
+        { name: rule.action_name as any, triggered_by: 'user' },
+        { mode: 'manual', source: 'renderer' },
+      );
       insertAutopilotActivity({
         rule_id: ruleId,
         tier: rule.tier as 1 | 2 | 3,

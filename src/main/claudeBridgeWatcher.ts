@@ -122,7 +122,10 @@ async function handleClaudeCommand(cmd: ClaudeCommand, win: BrowserWindow | null
     return;
   }
 
-  const result = await runAction({ name: cmd.action, params: cmd.params, triggered_by: 'alert' });
+  const result = await runAction(
+    { name: cmd.action, params: cmd.params, triggered_by: 'alert' },
+    { mode: 'manual', source: 'renderer' },
+  );
   appendFileSync(RESPONSES_FILE, JSON.stringify({
     id: cmd.id,
     status: result.success ? 'success' : 'error',

@@ -38,6 +38,7 @@ vi.mock('../../src/main/dataStore.js', () => ({
   finishActionLog: vi.fn(),
   insertToolResult: vi.fn(),
   updateActionLogRollbackId: vi.fn(),
+  getSetting: vi.fn(() => '0'),
 }));
 
 vi.mock('../../src/main/rollbackManager.js', () => ({
@@ -51,11 +52,13 @@ vi.mock('../../src/main/notifier.js', () => ({
 import { runAction } from '../../src/main/actionRunner.js';
 import { runPowerShellScript, runElevatedPowerShellScript } from '../../src/main/scriptRunner.js';
 
+const MANUAL_RENDERER = { mode: 'manual', source: 'renderer' } as const;
+
 describe('runAction param allow-list (v2.3.13)', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns E_ACTION_UNKNOWN when action name is not in ACTIONS', async () => {
-    const r = await runAction({ name: 'not_a_real_action' as any });
+    const r = await runAction({ name: 'not_a_real_action' as any }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_ACTION_UNKNOWN');
     // Script must never be invoked for unknown actions.
@@ -70,7 +73,7 @@ describe('runAction param allow-list (v2.3.13)', () => {
     const r = await runAction({
       name: 'update_hosts_stevenblack',
       params: { SourceUrl: 'http://attacker.example/evil-hosts' } as any,
-    });
+    }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_UNKNOWN_PARAM');
     // Neither PS runner should fire on validation failure.
@@ -80,14 +83,14 @@ describe('runAction param allow-list (v2.3.13)', () => {
 
   it('rejects a required missing param with E_MISSING_PARAM', async () => {
     // block_ip requires { ip: required }
-    const r = await runAction({ name: 'block_ip', params: {} });
+    const r = await runAction({ name: 'block_ip', params: {} }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_MISSING_PARAM');
     expect(runElevatedPowerShellScript).not.toHaveBeenCalled();
   });
 
   it('treats empty-string required param as missing', async () => {
-    const r = await runAction({ name: 'block_ip', params: { ip: '' } });
+    const r = await runAction({ name: 'block_ip', params: { ip: '' } }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_MISSING_PARAM');
   });
@@ -96,7 +99,7 @@ describe('runAction param allow-list (v2.3.13)', () => {
     // 'ip;rm' isn't in the schema, so it trips E_UNKNOWN_PARAM *first*
     // (the unknown-key check runs before the name-charset check for
     // already-known keys). Either way, validation must stop before spawn.
-    const r = await runAction({ name: 'block_ip', params: { 'ip;rm': '1.2.3.4' } as any });
+    const r = await runAction({ name: 'block_ip', params: { 'ip;rm': '1.2.3.4' } as any }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(['E_UNKNOWN_PARAM', 'E_INVALID_PARAM_NAME']).toContain(r.error?.code);
     expect(runElevatedPowerShellScript).not.toHaveBeenCalled();
@@ -104,7 +107,7 @@ describe('runAction param allow-list (v2.3.13)', () => {
 
   it('rejects non-numeric value when schema type is number with E_INVALID_PARAM', async () => {
     // run_hwinfo_log has duration: { type: number, required: false }
-    const r = await runAction({ name: 'run_hwinfo_log', params: { duration: 'abc' } as any });
+    const r = await runAction({ name: 'run_hwinfo_log', params: { duration: 'abc' } as any }, MANUAL_RENDERER);
     expect(r.success).toBe(false);
     expect(r.error?.code).toBe('E_INVALID_PARAM');
   });
@@ -112,7 +115,7 @@ describe('runAction param allow-list (v2.3.13)', () => {
   it('accepts a numeric value for a number-typed param (validation passes)', async () => {
     // v2.4.0: run_hwinfo_log flagged needs_admin (HWiNFO sensor access).
     // Validation still passes; the action just routes to the elevated runner.
-    const r = await runAction({ name: 'run_hwinfo_log', params: { duration: 60 } });
+    const r = await runAction({ name: 'run_hwinfo_log', params: { duration: 60 } }, MANUAL_RENDERER);
     expect(r.success).toBe(true);
     expect(runElevatedPowerShellScript).toHaveBeenCalledTimes(1);
   });
@@ -122,7 +125,7 @@ describe('runAction param allow-list (v2.3.13)', () => {
       name: 'block_ip',
       params: { ip: '203.0.113.5', reason: 'Auto-block: RDP brute-force' },
       triggered_by: 'alert',
-    });
+    }, MANUAL_RENDERER);
     expect(r.success).toBe(true);
     // block_ip is needs_admin: true -> elevated path.
     expect(runElevatedPowerShellScript).toHaveBeenCalledTimes(1);
@@ -138,12 +141,12 @@ describe('runAction param allow-list (v2.3.13)', () => {
   it('accepts optional params being omitted', async () => {
     // disable_startup_item has a required item_name; unblock_ip has required ip
     // We use block_ip with only the required 'ip' param; reason is optional.
-    const r = await runAction({ name: 'block_ip', params: { ip: '198.51.100.9' } });
+    const r = await runAction({ name: 'block_ip', params: { ip: '198.51.100.9' } }, MANUAL_RENDERER);
     expect(r.success).toBe(true);
   });
 
   it('no params at all for action with optional-only schema is OK (analyze_minidump, dump_path optional)', async () => {
-    const r = await runAction({ name: 'analyze_minidump' });
+    const r = await runAction({ name: 'analyze_minidump' }, MANUAL_RENDERER);
     expect(r.success).toBe(true);
   });
 });
