@@ -113,7 +113,12 @@ import {
   stopAutopilotEngine,
 } from '@main/autopilotEngine.js';
 import { getStatus } from '@main/pcdoctorBridge.js';
-import { getAutopilotRule, listAutopilotRules } from '@main/dataStore.js';
+import {
+  getAutopilotRule,
+  insertAutopilotActivity,
+  listAutopilotRules,
+} from '@main/dataStore.js';
+import { sendTelegramMessage } from '@main/telegramBridge.js';
 import { registerIpcHandlers } from '@main/ipc.js';
 
 type Handler = (...args: any[]) => any;
@@ -168,16 +173,16 @@ describe('trusted runAction caller contexts', () => {
   });
 
   // Production break caught: the background engine omits or downgrades automatic authority.
-  it('constructs automatic incident authority for a background Autopilot decision', async () => {
+  it('records auto_run and sends the configured Tier 2 Telegram message for a background decision', async () => {
     vi.useFakeTimers();
     _resetSeedFlagForTests();
     vi.mocked(listAutopilotRules).mockReturnValueOnce([{
-      id: 'remove_feature_update_leftovers_low_disk',
-      tier: 1,
+      id: 'clear_browser_caches_low_disk',
+      tier: 2,
       description: 'test low disk rule',
       trigger: 'threshold',
       cadence: null,
-      action_name: 'remove_feature_update_leftovers',
+      action_name: 'clear_browser_caches',
       alert_json: null,
       enabled: 1,
       suppressed_until: null,
@@ -186,18 +191,32 @@ describe('trusted runAction caller contexts', () => {
       gauges: [{ label: 'C: free', value: 10 }],
       findings: [],
     } as any);
+    vi.mocked(runAction).mockResolvedValueOnce({
+      action: 'clear_browser_caches',
+      success: true,
+      duration_ms: 1,
+      result: { message: 'cleared' },
+    });
 
     try {
       startAutopilotEngine();
       await vi.advanceTimersByTimeAsync(15_000);
 
       expect(runAction).toHaveBeenCalledWith(
-        { name: 'remove_feature_update_leftovers', triggered_by: 'scheduled' },
+        { name: 'clear_browser_caches', triggered_by: 'scheduled' },
         {
           mode: 'automatic',
           source: 'incident',
-          policyId: 'remove_feature_update_leftovers_low_disk',
+          policyId: 'clear_browser_caches_low_disk',
         },
+      );
+      expect(insertAutopilotActivity).toHaveBeenCalledWith(expect.objectContaining({
+        rule_id: 'clear_browser_caches_low_disk',
+        action_name: 'clear_browser_caches',
+        outcome: 'auto_run',
+      }));
+      expect(sendTelegramMessage).toHaveBeenCalledWith(
+        expect.stringContaining('<b>Autopilot</b> ran'),
       );
     } finally {
       stopAutopilotEngine();
@@ -206,14 +225,14 @@ describe('trusted runAction caller contexts', () => {
   });
 
   // Production break caught: renderer Run now is downgraded to disabled automatic execution.
-  it('constructs manual renderer authority for an approved Autopilot Run now decision', async () => {
+  it('records manual_run without an Autopilot Telegram message for IPC Run now', async () => {
     vi.mocked(getAutopilotRule).mockReturnValueOnce({
-      id: 'remove_feature_update_leftovers_low_disk',
-      tier: 1,
+      id: 'clear_browser_caches_low_disk',
+      tier: 2,
       description: 'test low disk rule',
       trigger: 'threshold',
       cadence: null,
-      action_name: 'remove_feature_update_leftovers',
+      action_name: 'clear_browser_caches',
       alert_json: null,
       enabled: 1,
       suppressed_until: null,
@@ -222,14 +241,26 @@ describe('trusted runAction caller contexts', () => {
       gauges: [{ label: 'C: free', value: 10 }],
       findings: [],
     } as any);
+    vi.mocked(runAction).mockResolvedValueOnce({
+      action: 'clear_browser_caches',
+      success: true,
+      duration_ms: 1,
+      result: { message: 'cleared' },
+    });
     registerIpcHandlers();
     const handler = getHandler('api:runAutopilotRuleNow');
 
-    await handler({}, 'remove_feature_update_leftovers_low_disk');
+    await handler({}, 'clear_browser_caches_low_disk');
 
     expect(runAction).toHaveBeenCalledWith(
-      { name: 'remove_feature_update_leftovers', triggered_by: 'user' },
+      { name: 'clear_browser_caches', triggered_by: 'user' },
       { mode: 'manual', source: 'renderer' },
     );
+    expect(insertAutopilotActivity).toHaveBeenCalledWith(expect.objectContaining({
+      rule_id: 'clear_browser_caches_low_disk',
+      action_name: 'clear_browser_caches',
+      outcome: 'manual_run',
+    }));
+    expect(sendTelegramMessage).not.toHaveBeenCalled();
   });
 });

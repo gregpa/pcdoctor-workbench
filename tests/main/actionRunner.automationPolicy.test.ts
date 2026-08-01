@@ -148,6 +148,34 @@ describe('runAction trusted automation boundary', () => {
     expectNoMutationDispatch();
   });
 
+  it('fails closed when the automatic maintenance setting is null', async () => {
+    getSetting.mockReturnValueOnce(null);
+
+    const result = await runAction({ name: 'flush_dns' }, AUTOMATIC_INCIDENT);
+
+    expect(result.error?.code).toBe('E_AUTOMATION_DISABLED');
+    expect(finishActionLog).toHaveBeenCalledWith(41, expect.objectContaining({
+      status: 'error',
+      error_message: expect.stringContaining('E_AUTOMATION_DISABLED'),
+    }));
+    expectNoMutationDispatch();
+  });
+
+  it('fails closed when reading the automatic maintenance setting throws', async () => {
+    getSetting.mockImplementationOnce(() => {
+      throw new Error('settings unavailable');
+    });
+
+    const result = await runAction({ name: 'flush_dns' }, AUTOMATIC_INCIDENT);
+
+    expect(result.error?.code).toBe('E_AUTOMATION_DISABLED');
+    expect(finishActionLog).toHaveBeenCalledWith(41, expect.objectContaining({
+      status: 'error',
+      error_message: expect.stringContaining('E_AUTOMATION_DISABLED'),
+    }));
+    expectNoMutationDispatch();
+  });
+
   // Production break caught: high-impact automatic actions reach either script runner.
   it.each([
     ['recycle-bin', 'empty_recycle_bins'],

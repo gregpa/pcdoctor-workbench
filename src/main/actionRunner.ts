@@ -307,12 +307,14 @@ export async function runAction(
     finishActionLog(logId, {
       status: 'error', duration_ms: duration, error_message: err.message,
     });
-    notify({
-      severity: 'warning',
-      title: `✗ ${def.label} failed`,
-      body: err.message ?? 'Action failed',
-      eventKey: 'action_failed',
-    }).catch(() => {});
+    if ((input.triggered_by ?? 'user') === 'user') {
+      notify({
+        severity: 'warning',
+        title: `✗ ${def.label} failed`,
+        body: err.message ?? 'Action failed',
+        eventKey: 'action_failed',
+      }).catch(() => {});
+    }
     return {
       action: input.name, success: false, duration_ms: duration,
       error: { code: err.code ?? 'E_ACTION_FAILED', message: err.message, details: err.details },

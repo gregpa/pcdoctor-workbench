@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS autopilot_activity (
   rule_id TEXT NOT NULL,
   tier INTEGER NOT NULL,
   action_name TEXT,
-  outcome TEXT NOT NULL,            -- 'auto_run' | 'alerted' | 'suppressed' | 'skipped' | 'error'
+  outcome TEXT NOT NULL,            -- 'auto_run' | 'manual_run' | 'alerted' | 'suppressed' | 'skipped' | 'error'
   bytes_freed INTEGER,
   duration_ms INTEGER,
   message TEXT,
@@ -912,7 +912,7 @@ export function insertAutopilotActivity(row: {
   rule_id: string;
   tier: 1 | 2 | 3;
   action_name?: string | null;
-  outcome: 'auto_run' | 'alerted' | 'suppressed' | 'skipped' | 'error';
+  outcome: 'auto_run' | 'manual_run' | 'alerted' | 'suppressed' | 'skipped' | 'error';
   bytes_freed?: number;
   duration_ms?: number;
   message?: string;

@@ -93,6 +93,46 @@ describe('runAction silent-success guard (B48-AS-1)', () => {
     expect((notify as any).mock.calls.length).toBe(0);
   });
 
+  it('does not notify when a scheduled standard runner rejects', async () => {
+    (runPowerShellScript as any).mockRejectedValueOnce(new Error('standard runner rejected'));
+
+    const r = await runAction(
+      { name: 'flush_dns', triggered_by: 'scheduled' },
+      MANUAL_RENDERER,
+    );
+
+    expect(r.success).toBe(false);
+    expect((notify as any).mock.calls.length).toBe(0);
+  });
+
+  it('does not notify when a scheduled elevated runner rejects', async () => {
+    (runElevatedPowerShellScript as any).mockRejectedValueOnce(new Error('elevated runner rejected'));
+
+    const r = await runAction(
+      { name: 'run_dism', triggered_by: 'scheduled' },
+      MANUAL_RENDERER,
+    );
+
+    expect(r.success).toBe(false);
+    expect((notify as any).mock.calls.length).toBe(0);
+  });
+
+  it('notifies when a user-triggered runner rejects', async () => {
+    (runPowerShellScript as any).mockRejectedValueOnce(new Error('manual runner rejected'));
+
+    const r = await runAction(
+      { name: 'flush_dns', triggered_by: 'user' },
+      MANUAL_RENDERER,
+    );
+
+    expect(r.success).toBe(false);
+    expect((notify as any).mock.calls.length).toBe(1);
+    expect((notify as any).mock.calls[0][0]).toMatchObject({
+      severity: 'warning',
+      eventKey: 'action_failed',
+    });
+  });
+
   it('falls through default-success ("success" key omitted) — preserves legacy behaviour', async () => {
     // analyze_minidump: optional dump_path. No needs_admin → non-elevated runner.
     // No `success` key in the result at all → guard MUST NOT trip.

@@ -359,6 +359,7 @@ export async function dispatchDecision(
   try {
     const t0 = Date.now();
     const triggeredBy = context.mode === 'manual' ? 'user' : 'scheduled';
+    const successOutcome = context.mode === 'manual' ? 'manual_run' : 'auto_run';
     const r = await runAction(
       { name: d.action_name, triggered_by: triggeredBy },
       context,
@@ -368,14 +369,14 @@ export async function dispatchDecision(
       rule_id: d.rule_id,
       tier: d.tier,
       action_name: d.action_name,
-      outcome: r.success ? 'auto_run' : 'error',
+      outcome: r.success ? successOutcome : 'error',
       bytes_freed: typeof bytes === 'number' ? bytes : undefined,
       duration_ms: Date.now() - t0,
       message: r.success ? ((r.result as any)?.message ?? 'ok') : (r.error?.message ?? 'error'),
       details: r.error ?? undefined,
     });
 
-    if (d.tier === 2 && r.success) {
+    if (context.mode === 'automatic' && d.tier === 2 && r.success) {
       const def = ACTIONS[d.action_name];
       const bytesTxt = typeof bytes === 'number' ? ` (${(bytes / 1024 / 1024).toFixed(1)} MB freed)` : '';
       void sendTelegramMessage(
