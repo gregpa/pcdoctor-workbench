@@ -28,6 +28,25 @@ const mockApi = {
   triggerInitialScan: vi.fn().mockResolvedValue({ ok: true, data: null }),
 };
 
+const missingToolsResponse = {
+  ok: true,
+  data: [
+    { id: 'librehardwaremonitor', installed: false, resolved_path: null },
+    { id: 'crystaldiskinfo', installed: false, resolved_path: null },
+    { id: 'occt', installed: false, resolved_path: null },
+    { id: 'hwinfo64', installed: false, resolved_path: null },
+  ],
+};
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
+
 Object.defineProperty(window, 'api', { value: mockApi, writable: true });
 
 // Mock fetch for the LHM port-8085 probe. Default: unreachable (most realistic
@@ -43,15 +62,7 @@ beforeEach(() => {
   localStorage.clear();
   mockFetch.mockRejectedValue(new Error('connection refused'));
   // Default tool statuses: nothing installed.
-  mockApi.listTools.mockResolvedValue({
-    ok: true,
-    data: [
-      { id: 'librehardwaremonitor', installed: false, resolved_path: null },
-      { id: 'crystaldiskinfo', installed: false, resolved_path: null },
-      { id: 'occt', installed: false, resolved_path: null },
-      { id: 'hwinfo64', installed: false, resolved_path: null },
-    ],
-  });
+  mockApi.listTools.mockResolvedValue(missingToolsResponse);
 });
 
 describe('<FirstRunToolsSplash> gating', () => {
@@ -104,18 +115,38 @@ describe('<FirstRunToolsSplash> tool grouping', () => {
   });
 
   it('lists LHM and CrystalDiskInfo as required tools', async () => {
-    render(<FirstRunToolsSplash />);
-    await screen.findByRole('dialog');
-    // Both required tools surface by name.
-    expect(screen.getByText('LibreHardwareMonitor')).toBeInTheDocument();
-    expect(screen.getByText('CrystalDiskInfo')).toBeInTheDocument();
+    const listTools = createDeferred<typeof missingToolsResponse>();
+    mockApi.listTools.mockReturnValue(listTools.promise);
+
+    try {
+      render(<FirstRunToolsSplash />);
+      await screen.findByRole('dialog');
+      expect(screen.getByText('Detecting installed tools…')).toBeInTheDocument();
+      const firstTool = screen.findByText('LibreHardwareMonitor');
+      await act(async () => listTools.resolve(missingToolsResponse));
+      // Both required tools surface by name.
+      expect(await firstTool).toBeInTheDocument();
+      expect(screen.getByText('CrystalDiskInfo')).toBeInTheDocument();
+    } finally {
+      await act(async () => listTools.resolve(missingToolsResponse));
+    }
   });
 
   it('lists OCCT and HWiNFO64 as recommended tools', async () => {
-    render(<FirstRunToolsSplash />);
-    await screen.findByRole('dialog');
-    expect(screen.getByText('OCCT')).toBeInTheDocument();
-    expect(screen.getByText('HWiNFO64')).toBeInTheDocument();
+    const listTools = createDeferred<typeof missingToolsResponse>();
+    mockApi.listTools.mockReturnValue(listTools.promise);
+
+    try {
+      render(<FirstRunToolsSplash />);
+      await screen.findByRole('dialog');
+      expect(screen.getByText('Detecting installed tools…')).toBeInTheDocument();
+      const firstTool = screen.findByText('OCCT');
+      await act(async () => listTools.resolve(missingToolsResponse));
+      expect(await firstTool).toBeInTheDocument();
+      expect(screen.getByText('HWiNFO64')).toBeInTheDocument();
+    } finally {
+      await act(async () => listTools.resolve(missingToolsResponse));
+    }
   });
 
   it('shows "0 of 2" required count when nothing is installed', async () => {
