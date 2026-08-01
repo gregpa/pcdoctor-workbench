@@ -215,7 +215,6 @@ function ToolsSplashOverlay({ onDone }: { onDone: () => void }) {
     );
     for (const row of targets) {
       // Sequential -- winget bulk-install is not parallel-safe.
-      // eslint-disable-next-line no-await-in-loop
       await onInstall(row.def.id);
     }
     setBulkInstalling(false);

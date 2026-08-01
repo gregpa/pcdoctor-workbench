@@ -124,7 +124,6 @@ vi.mock('node:fs/promises', async () => {
     unlink: vi.fn(async () => undefined),
     stat: vi.fn(async () => ({})),
     mkdir: vi.fn(async () => undefined),
-    unlink: vi.fn(async () => undefined),
   };
 });
 

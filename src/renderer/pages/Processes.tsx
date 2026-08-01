@@ -123,7 +123,6 @@ export function Processes() {
       if (r.ok) {
         showToast(`${proc.name} (pid ${proc.pid}): priority → ${target}`);
       } else {
-        // eslint-disable-next-line no-alert
         alert(`Set priority failed: ${r.error.code}: ${r.error.message}`);
       }
     } finally {
@@ -139,7 +138,6 @@ export function Processes() {
         setSuspendedPids((prev) => { const n = new Set(prev); n.delete(proc.pid); return n; });
         showToast(`${proc.name} (pid ${proc.pid}): resumed`);
       } else {
-        // eslint-disable-next-line no-alert
         alert(`Resume failed: ${r.error.code}: ${r.error.message}`);
       }
     } finally {
@@ -168,7 +166,6 @@ export function Processes() {
           showToast(`${proc.name} (pid ${proc.pid}): suspended`);
         }
       } else {
-        // eslint-disable-next-line no-alert
         alert(`${kind === 'kill' ? 'Kill' : 'Suspend'} failed: ${r.error.code}: ${r.error.message}`);
       }
     } finally {

@@ -1,6 +1,6 @@
 import { watch, existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { PCDOCTOR_ROOT } from './constants.js';
 import { runAction } from './actionRunner.js';
 import { ACTIONS } from '@shared/actions.js';
@@ -95,7 +95,6 @@ async function handleClaudeCommand(cmd: ClaudeCommand, win: BrowserWindow | null
   // as the 90s timer fires (previously the decision could be dropped).
   const approved = await new Promise<boolean>((resolve) => {
     const channel = `claude-approval-response-${cmd.id}`;
-    const { ipcMain } = require('electron');
     let settled = false;
     let timer: NodeJS.Timeout | null = null;
     const cleanup = () => {

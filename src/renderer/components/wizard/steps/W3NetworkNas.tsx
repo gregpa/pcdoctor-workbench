@@ -272,7 +272,6 @@ export function W3NetworkNas() {
       void saveConfig();
       markComplete(2);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveConfig]);
 
   // ── Loading state ──

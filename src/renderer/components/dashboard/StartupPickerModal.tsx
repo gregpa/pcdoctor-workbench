@@ -32,7 +32,7 @@ export interface StartupPickerModalProps {
 
 interface StartupConfigApi {
   getStartupConfig?: () => Promise<IpcResult<{ threshold: number; allowlist: string[] }>>;
-  setStartupConfig?: (payload: { threshold: number; allowlist: string[] }) => Promise<IpcResult<{}>>;
+  setStartupConfig?: (payload: { threshold: number; allowlist: string[] }) => Promise<IpcResult<Record<string, never>>>;
 }
 
 function fmtSize(n?: number): string {

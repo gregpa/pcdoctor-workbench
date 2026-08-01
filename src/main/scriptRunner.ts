@@ -306,7 +306,6 @@ export async function runElevatedPowerShellScript<T = unknown>(
 
   const safeScript = scriptPath.replace(/'/g, "''");
   const safeOut = outPath.replace(/'/g, "''");
-  const safeErr = errPath.replace(/'/g, "''");
   const safeExit = exitPath.replace(/'/g, "''");
 
   // v2.4.8: inline-token arg emission.

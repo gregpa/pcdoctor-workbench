@@ -134,13 +134,11 @@ export function Services() {
       } else {
         // Bail and surface the dry-run error inline.
         setPending(null);
-        // eslint-disable-next-line no-alert
         alert(`Cannot proceed: ${r.error.code}: ${r.error.message}`);
         return;
       }
     } catch (e) {
       setPending(null);
-      // eslint-disable-next-line no-alert
       alert(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
@@ -179,7 +177,6 @@ export function Services() {
           });
         }
       } else {
-        // eslint-disable-next-line no-alert
         alert(`Action failed: ${r.error.code}: ${r.error.message}`);
       }
     } finally {

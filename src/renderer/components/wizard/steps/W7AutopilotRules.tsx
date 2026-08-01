@@ -199,7 +199,6 @@ export function W7AutopilotRules() {
       }
       markComplete(5);  // v2.5.25: was 6 before W6 removal
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Toggle a single rule

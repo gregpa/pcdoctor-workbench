@@ -486,18 +486,15 @@ export function Dashboard() {
                     const verified = r.data.http_check === 'reachable';
                     const enabledSuffix = r.data.was_already_enabled ? ' (Was already enabled in config; restart confirmed it.)' : '';
                     const tickSuffix = ' The dashboard will pick up live temps on the next scan tick.';
-                    // eslint-disable-next-line no-alert
                     alert(
                       verified
                         ? `LHM Remote Web Server is now reachable on http://localhost:${r.data.port}/.${enabledSuffix}${tickSuffix}`
                         : `Config saved + LHM relaunched. The web server can take 1–3 minutes to register on port ${r.data.port} on slower systems.${enabledSuffix}${tickSuffix}`
                     );
                   } else {
-                    // eslint-disable-next-line no-alert
                     alert(`Auto-enable failed: ${r.error?.code}: ${r.error?.message ?? 'unknown'}`);
                   }
                 } catch (err) {
-                  // eslint-disable-next-line no-alert
                   alert(`Auto-enable failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
               }}
@@ -512,11 +509,9 @@ export function Dashboard() {
                 try {
                   const r = await window.api.openLhm();
                   if (!r.ok) {
-                    // eslint-disable-next-line no-alert
                     alert(`Could not open LHM: ${r.error?.message ?? 'unknown'}`);
                   }
                 } catch (err) {
-                  // eslint-disable-next-line no-alert
                   alert(`Could not open LHM: ${err instanceof Error ? err.message : String(err)}`);
                 }
               }}

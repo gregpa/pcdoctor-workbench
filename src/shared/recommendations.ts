@@ -32,11 +32,6 @@ function daysSince(unixSeconds: number | null | undefined, nowS: number): number
   return Math.floor((nowS - unixSeconds) / DAY_S);
 }
 
-function hoursSince(unixSeconds: number | null | undefined, nowS: number): number | null {
-  if (typeof unixSeconds !== 'number' || !Number.isFinite(unixSeconds)) return null;
-  return Math.floor((nowS - unixSeconds) / 3600);
-}
-
 export interface SystemExtras {
   /** True when .wslconfig already contains a memory= directive */
   wslconfig_has_memory_cap?: boolean;

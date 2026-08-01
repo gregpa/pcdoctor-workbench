@@ -79,7 +79,6 @@ export function W9ScheduledTasks() {
   // Mark complete on unmount
   useEffect(() => {
     return () => { markComplete(7); };  // v2.5.25: was 8 before W6 removal
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // -- Loading --

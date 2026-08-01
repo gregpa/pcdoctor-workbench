@@ -30,7 +30,6 @@ export function HeaderBar({ host, severity, label, subtitle, onScan, scanning }:
     poll();
     const id = setInterval(poll, 1000);
     return () => { alive = false; clearInterval(id); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function doZoom(delta: number) {

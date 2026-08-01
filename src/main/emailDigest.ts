@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { getSetting, listAutopilotActivity, queryMetricTrend } from './dataStore.js';
 
 interface DigestPayload {
@@ -15,7 +15,7 @@ function findGwsRunner(): string | null {
     path.join(os.homedir(), '.claude', 'scripts', 'gws-runner.js'),
   ];
   for (const c of candidates) {
-    try { if (require('node:fs').existsSync(c)) return c; } catch {}
+    try { if (existsSync(c)) return c; } catch {}
   }
   return null;
 }
@@ -58,15 +58,13 @@ export async function sendWeeklyDigestEmail(): Promise<{ ok: boolean; error?: st
   if (!recipient) return { ok: false, error: 'Email digest recipient not configured in Settings' };
 
   // Compose digest from latest weekly review + recent findings + forecast
-  const { readFileSync: rf, existsSync: ex, readdirSync: rd } = require('node:fs');
-  const path2 = require('node:path');
   const weeklyDir = 'C:\\ProgramData\\PCDoctor\\reports\\weekly';
   let latestReview: any = null;
-  if (ex(weeklyDir)) {
+  if (existsSync(weeklyDir)) {
     try {
-      const files = (rd(weeklyDir) as string[]).filter((f: string) => f.endsWith('.json')).sort().reverse();
+      const files = readdirSync(weeklyDir).filter((f) => f.endsWith('.json')).sort().reverse();
       if (files.length > 0) {
-        let raw = rf(path2.join(weeklyDir, files[0]), 'utf8') as string;
+        let raw = readFileSync(path.join(weeklyDir, files[0]), 'utf8');
         if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
         latestReview = JSON.parse(raw);
       }
@@ -124,7 +122,7 @@ ${latestReview ? `
   <ul>
     <li><strong>CPU load:</strong> ${sparkline(cpuPoints.map(p => p.value))} (${cpuPoints.length} pts)</li>
     <li><strong>RAM used:</strong> ${sparkline(ramPoints.map(p => p.value))} (${ramPoints.length} pts)</li>
-    <li><strong>C: free:</strong>  ${sparkline(diskPoints.filter(p => true).map(p => p.value))} (${diskPoints.length} pts)</li>
+    <li><strong>C: free:</strong>  ${sparkline(diskPoints.map(p => p.value))} (${diskPoints.length} pts)</li>
   </ul>
 </div>
 <p style="color:#8b949e;font-size:11px;margin-top:24px">Sent by PCDoctor Workbench · Configure or disable in Settings → Email Digest</p>

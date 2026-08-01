@@ -107,7 +107,6 @@ export function UndoCenter() {
         // the change without a full refetch.
         setRows((prev) => prev?.filter((row) => row.action_id !== actionId) ?? null);
       } else {
-        // eslint-disable-next-line no-alert
         alert(`Undo failed: ${r.error.code}: ${r.error.message}`);
       }
     } finally {

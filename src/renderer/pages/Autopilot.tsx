@@ -24,7 +24,6 @@ interface AutopilotActivity {
   message: string | null;
 }
 
-const TIER_LABEL: Record<number, string> = { 1: 'Tier 1 · silent auto', 2: 'Tier 2 · auto + notify', 3: 'Tier 3 · alert only' };
 const TIER_COLOR: Record<number, string> = {
   1: 'text-status-good',
   2: 'text-status-info',

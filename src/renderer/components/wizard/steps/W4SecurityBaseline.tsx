@@ -187,7 +187,6 @@ export function W4SecurityBaseline() {
       void window.api.setSetting('auto_block_rdp_bruteforce', autoBlockRdp ? '1' : '0');
       markComplete(3);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoBlockRdp]);
 
   // ── Loading ──

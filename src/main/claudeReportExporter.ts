@@ -6,7 +6,7 @@
  * better-sqlite3 binary the app uses (avoids the NODE_MODULE_VERSION mismatch
  * that external `node` scripts hit).
  */
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -279,7 +279,6 @@ export function buildClaudeReport(): ClaudeReport {
   try {
     const reportsDir = path.join(PCDOCTOR_ROOT, 'reports');
     if (existsSync(reportsDir)) {
-      const { readdirSync, statSync } = require('node:fs');
       const dirs = (readdirSync(reportsDir) as string[])
         .filter(n => /^\d{8}-\d{6}$/.test(n))
         .sort().reverse().slice(0, 10);

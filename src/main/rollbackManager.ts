@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -30,7 +30,6 @@ function hashPath(p: string): string | null {
       return createHash('sha256').update(readFileSync(p)).digest('hex');
     }
     if (st.isDirectory()) {
-      const { readdirSync } = require('node:fs');
       const entries: string[] = [];
       const walk = (dir: string, rel: string) => {
         const list = readdirSync(dir, { withFileTypes: true });
@@ -270,7 +269,6 @@ export function pruneExpired(): { removed: number } {
 
   // Also delete snapshot directories for rollbacks that no longer have DB rows
   if (existsSync(SNAPSHOTS_DIR)) {
-    const { readdirSync, statSync } = require('node:fs');
     for (const entry of readdirSync(SNAPSHOTS_DIR)) {
       const dirPath = path.join(SNAPSHOTS_DIR, entry);
       if (!statSync(dirPath).isDirectory()) continue;

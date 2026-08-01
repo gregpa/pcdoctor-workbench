@@ -10,7 +10,7 @@ const api = {
   getAppVersion: (): Promise<IpcResult<string>> => ipcRenderer.invoke('api:getAppVersion'),
   setZoom: (delta: number): Promise<IpcResult<number>> => ipcRenderer.invoke('api:setZoom', delta),
   getZoom: (): Promise<IpcResult<number>> => ipcRenderer.invoke('api:getZoom'),
-  writeClipboard: (text: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:writeClipboard', text),
+  writeClipboard: (text: string): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:writeClipboard', text),
   saveActionResult: (actionName: string, ts: number, body: string): Promise<IpcResult<{ path: string }>> => ipcRenderer.invoke('api:saveActionResult', actionName, ts, body),
   getToolUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getToolUpdates'),
   refreshToolUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:refreshToolUpdates'),
@@ -28,21 +28,21 @@ const api = {
   regenerateForecast: (): Promise<IpcResult<ForecastData>> => ipcRenderer.invoke('api:regenerateForecast'),
   getWeeklyReview: (reviewDate?: string): Promise<IpcResult<WeeklyReview | null>> => ipcRenderer.invoke('api:getWeeklyReview', reviewDate),
   listWeeklyReviews: (): Promise<IpcResult<string[]>> => ipcRenderer.invoke('api:listWeeklyReviews'),
-  setWeeklyReviewItemState: (reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setWeeklyReviewItemState', reviewDate, itemId, state, appliedActionId),
+  setWeeklyReviewItemState: (reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:setWeeklyReviewItemState', reviewDate, itemId, state, appliedActionId),
   archiveWeeklyReviewToObsidian: (reviewDate: string): Promise<IpcResult<{ archive_path: string }>> => ipcRenderer.invoke('api:archiveWeeklyReviewToObsidian', reviewDate),
   dismissWeeklyReviewFlag: (): Promise<IpcResult<void>> => ipcRenderer.invoke('api:dismissWeeklyReviewFlag'),
   getSecurityPosture: (): Promise<IpcResult<SecurityPosture>> => ipcRenderer.invoke('api:getSecurityPosture'),
   approvePersistence: (identifier: string, approve: boolean): Promise<IpcResult<void>> => ipcRenderer.invoke('api:approvePersistence', identifier, approve),
   listTools: (): Promise<IpcResult<ToolStatus[]>> => ipcRenderer.invoke('api:listTools'),
   launchTool: (toolId: string, modeId: string): Promise<IpcResult<{ pid?: number }>> => ipcRenderer.invoke('api:launchTool', toolId, modeId),
-  installTool: (toolId: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installTool', toolId),
+  installTool: (toolId: string): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:installTool', toolId),
   getWindowsUpdateDetail: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getWindowsUpdateDetail'),
   getDefenderScanStatus: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getDefenderScanStatus'),
   listAutopilotRules: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listAutopilotRules'),
   getAutopilotActivity: (daysBack?: number): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getAutopilotActivity', daysBack ?? 30),
-  suppressAutopilotRule: (ruleId: string, hours: number): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:suppressAutopilotRule', ruleId, hours),
+  suppressAutopilotRule: (ruleId: string, hours: number): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:suppressAutopilotRule', ruleId, hours),
   // v2.3.0 C2: autopilot rule editor
-  setAutopilotRuleEnabled: (ruleId: string, enabled: boolean): Promise<IpcResult<{}>> =>
+  setAutopilotRuleEnabled: (ruleId: string, enabled: boolean): Promise<IpcResult<Record<string, never>>> =>
     ipcRenderer.invoke('api:setAutopilotRuleEnabled', ruleId, enabled),
   runAutopilotRuleNow: (ruleId: string): Promise<IpcResult<{ outcome: string; message?: string }>> =>
     ipcRenderer.invoke('api:runAutopilotRuleNow', ruleId),
@@ -62,34 +62,34 @@ const api = {
   },
   sendClaudeApproval: (id: string, approved: boolean) => ipcRenderer.send(`claude-approval-response-${id}`, approved),
   getSettings: (): Promise<IpcResult<Record<string, string>>> => ipcRenderer.invoke('api:getSettings'),
-  setSetting: (key: string, value: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setSetting', key, value),
+  setSetting: (key: string, value: string): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:setSetting', key, value),
   revealTelegramToken: (): Promise<IpcResult<{ token: string }>> => ipcRenderer.invoke('api:revealTelegramToken'),
   testTelegram: (token: string, chatId: string): Promise<IpcResult<{ bot_username?: string }>> => ipcRenderer.invoke('api:testTelegram', token, chatId),
-  sendTestNotification: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendTestNotification'),
+  sendTestNotification: (): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:sendTestNotification'),
   sendTelegramTestFull: (): Promise<IpcResult<{ sent_at: number }>> => ipcRenderer.invoke('api:sendTelegramTestFull'),
   listScheduledTasks: (): Promise<IpcResult<ScheduledTaskInfo[]>> => ipcRenderer.invoke('api:listScheduledTasks'),
-  setScheduledTaskEnabled: (name: string, enabled: boolean): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:setScheduledTaskEnabled', name, enabled),
-  runScheduledTaskNow: (name: string): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:runScheduledTaskNow', name),
+  setScheduledTaskEnabled: (name: string, enabled: boolean): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:setScheduledTaskEnabled', name, enabled),
+  runScheduledTaskNow: (name: string): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:runScheduledTaskNow', name),
   exportDiagnosticBundle: (): Promise<IpcResult<{ path: string; size_kb: number }>> => ipcRenderer.invoke('api:exportDiagnosticBundle'),
   exportClaudeReport: (): Promise<IpcResult<{ markdown: string; line_count: number; byte_count: number; file_path: string; generated_at: number }>> => ipcRenderer.invoke('api:exportClaudeReport'),
   flushBufferedNotifications: (): Promise<IpcResult<{ sent: number }>> => ipcRenderer.invoke('api:flushBufferedNotifications'),
-  sendWeeklyDigestEmail: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:sendWeeklyDigestEmail'),
+  sendWeeklyDigestEmail: (): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:sendWeeklyDigestEmail'),
   getRecentAuthEvents: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:getRecentAuthEvents'),
   listBlockedIPs: (): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listBlockedIPs'),
   listToolResults: (toolId?: string): Promise<IpcResult<any[]>> => ipcRenderer.invoke('api:listToolResults', toolId),
   getUpdateStatus: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:getUpdateStatus'),
   checkForUpdates: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:checkForUpdates'),
   downloadUpdate: (): Promise<IpcResult<any>> => ipcRenderer.invoke('api:downloadUpdate'),
-  installUpdateNow: (): Promise<IpcResult<{}>> => ipcRenderer.invoke('api:installUpdateNow'),
+  installUpdateNow: (): Promise<IpcResult<Record<string, never>>> => ipcRenderer.invoke('api:installUpdateNow'),
   // v2.4.6: NAS config read/write for Settings page.
   getNasConfig: (): Promise<IpcResult<{ nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }>> =>
     ipcRenderer.invoke('api:getNasConfig'),
-  setNasConfig: (payload: { nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }): Promise<IpcResult<{}>> =>
+  setNasConfig: (payload: { nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }): Promise<IpcResult<Record<string, never>>> =>
     ipcRenderer.invoke('api:setNasConfig', payload),
   // v2.4.13: Startup config (threshold + allowlist) for StartupPickerModal.
   getStartupConfig: (): Promise<IpcResult<{ threshold: number; allowlist: string[] }>> =>
     ipcRenderer.invoke('api:getStartupConfig'),
-  setStartupConfig: (payload: { threshold: number; allowlist: string[] }): Promise<IpcResult<{}>> =>
+  setStartupConfig: (payload: { threshold: number; allowlist: string[] }): Promise<IpcResult<Record<string, never>>> =>
     ipcRenderer.invoke('api:setStartupConfig', payload),
   // v2.4.13 (v2.4.14 expanded): all-drive enumeration for Dashboard
   // NasRecycleBinPanel. kind='network'|'local'|'removable'. Local +

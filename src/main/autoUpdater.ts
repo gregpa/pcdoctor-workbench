@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Notification } from 'electron';
+import { BrowserWindow, dialog, Notification } from 'electron';
 import electronUpdater from 'electron-updater';
 
 const { autoUpdater } = electronUpdater;

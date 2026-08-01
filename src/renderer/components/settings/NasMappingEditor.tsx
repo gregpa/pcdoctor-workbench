@@ -45,7 +45,6 @@ const LIKELY_RESERVED = new Set(['A:', 'B:', 'C:']);
 function validateShare(share: string): string | null {
   if (!share || !share.trim()) return 'Share name required';
   if (/[\\/]/.test(share)) return 'Slashes not allowed';
-  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f]/.test(share)) return 'Control characters not allowed';
   if (share.length > 128) return 'Too long (max 128 chars)';
   return null;

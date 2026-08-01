@@ -185,7 +185,6 @@ export function W2SystemProfile() {
       void saveThresholds();
       markComplete(1);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveThresholds]);
 
   // ── Loading state ──

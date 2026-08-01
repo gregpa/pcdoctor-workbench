@@ -90,7 +90,6 @@ export function W8Integrations() {
       void saveSettings();
       markComplete(6);  // v2.5.25: was 7 before W6 removal
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveSettings]);
 
   // -- Fallback: system profile not available --

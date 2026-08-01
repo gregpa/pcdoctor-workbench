@@ -51,7 +51,6 @@ export function DefenderScanStatus() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!data || !data.available) return null;

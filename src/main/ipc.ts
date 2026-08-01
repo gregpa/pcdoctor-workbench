@@ -3,7 +3,7 @@ import { readFile, readdir, unlink, copyFile, mkdir, stat } from 'node:fs/promis
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { spawn, spawnSync, execFile } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import log from 'electron-log/main.js';
 
@@ -278,7 +278,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:writeClipboard', async (_evt, text: string): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:writeClipboard', async (_evt, text: string): Promise<IpcResult<Record<string, never>>> => {
     try {
       const { clipboard } = await import('electron');
       clipboard.writeText(typeof text === 'string' ? text : '');
@@ -525,7 +525,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:setWeeklyReviewItemState', async (_evt, reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:setWeeklyReviewItemState', async (_evt, reviewDate: string, itemId: string, state: string, appliedActionId?: number): Promise<IpcResult<Record<string, never>>> => {
     // v2.4.49 (B48-AUDIT-3): third reviewDate callsite. better-sqlite3 binds
     // parameters so SQL injection is not the threat, but the unvalidated
     // string lands in `weekly_review_states` as a TEXT primary key. Future
@@ -766,7 +766,7 @@ export function registerIpcHandlers() {
     return { ok: false, error: { code: 'E_TOOL_LAUNCH', message: r.error ?? 'Launch failed' } };
   });
 
-  ipcMain.handle('api:installTool', async (_evt, toolId: string): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:installTool', async (_evt, toolId: string): Promise<IpcResult<Record<string, never>>> => {
     const def = TOOLS[toolId];
     if (!def) {
       return { ok: false, error: { code: 'E_TOOL_UNKNOWN', message: `Unknown tool: ${toolId}` } };
@@ -919,7 +919,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:setSetting', async (_evt, key: string, value: string): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:setSetting', async (_evt, key: string, value: string): Promise<IpcResult<Record<string, never>>> => {
     // Allowlist: only permit keys the renderer is allowed to modify.
     const WRITABLE_KEYS = new Set<string>([
       'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
@@ -970,7 +970,7 @@ export function registerIpcHandlers() {
     return { ok: false, error: { code: 'E_TG_TEST', message: r.error ?? 'test failed' } };
   });
 
-  ipcMain.handle('api:sendTestNotification', async (): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:sendTestNotification', async (): Promise<IpcResult<Record<string, never>>> => {
     const r = await sendTelegramMessage('🧪 <b>Test notification from PCDoctor Workbench</b>\n\nThis is a manual test - ignore.');
     if (r.ok) return { ok: true, data: {} };
     return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
@@ -1040,7 +1040,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:setScheduledTaskEnabled', async (_evt, name: string, enabled: boolean): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:setScheduledTaskEnabled', async (_evt, name: string, enabled: boolean): Promise<IpcResult<Record<string, never>>> => {
     // v2.4.48 (B48-SEC-1): regex allowlist BEFORE the MANAGED_TASKS.has
     // check. The regex catches shell-metachar smuggling regardless of
     // whether MANAGED_TASKS is later weakened. A name like
@@ -1060,7 +1060,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:runScheduledTaskNow', async (_evt, name: string): Promise<IpcResult<Record<string, never>>> => {
     // v2.4.48 (B48-SEC-1): see api:setScheduledTaskEnabled comment.
     if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
@@ -1103,7 +1103,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:suppressAutopilotRule', async (_evt, ruleId: string, hours: number): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:suppressAutopilotRule', async (_evt, ruleId: string, hours: number): Promise<IpcResult<Record<string, never>>> => {
     try {
       const safeHours = Math.max(1, Math.min(24 * 30, hours)); // clamp 1h..30d
       suppressAutopilotRule(ruleId, Date.now() + safeHours * 60 * 60 * 1000);
@@ -1114,7 +1114,7 @@ export function registerIpcHandlers() {
   });
 
   // v2.3.0 C2: Autopilot rule editor IPC
-  ipcMain.handle('api:setAutopilotRuleEnabled', async (_evt, ruleId: string, enabled: boolean): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:setAutopilotRuleEnabled', async (_evt, ruleId: string, enabled: boolean): Promise<IpcResult<Record<string, never>>> => {
     try {
       setAutopilotRuleEnabled(ruleId, enabled);
       return { ok: true, data: {} };
@@ -1132,7 +1132,6 @@ export function registerIpcHandlers() {
         const history = {
           isSustainedAbove(category: string, metric: string, threshold: number, days: number): boolean {
             try {
-              const { queryMetricTrend } = require('./dataStore.js');
               const points = queryMetricTrend(category, metric, days);
               if (!Array.isArray(points) || points.length < 3) return false;
               const above = points.filter((p: any) => p.value > threshold).length;
@@ -1316,7 +1315,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:sendWeeklyDigestEmail', async (): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:sendWeeklyDigestEmail', async (): Promise<IpcResult<Record<string, never>>> => {
     const r = await sendWeeklyDigestEmail();
     if (r.ok) return { ok: true, data: {} };
     return { ok: false, error: { code: 'E_EMAIL_DIGEST', message: r.error ?? 'send failed' } };
@@ -1362,7 +1361,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:installUpdateNow', async (): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:installUpdateNow', async (): Promise<IpcResult<Record<string, never>>> => {
     try {
       installNow();
       return { ok: true, data: {} };
@@ -1385,7 +1384,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:setNasConfig', async (_evt, payload: { nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:setNasConfig', async (_evt, payload: { nas_server: string; nas_mappings: Array<{ drive: string; share: string }> }): Promise<IpcResult<Record<string, never>>> => {
     try {
       const { writeNasConfig } = await import('./nasConfig.js');
       writeNasConfig(payload.nas_server, payload.nas_mappings);
@@ -1408,7 +1407,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('api:setStartupConfig', async (_evt, payload: { threshold: number; allowlist: string[] }): Promise<IpcResult<{}>> => {
+  ipcMain.handle('api:setStartupConfig', async (_evt, payload: { threshold: number; allowlist: string[] }): Promise<IpcResult<Record<string, never>>> => {
     try {
       const { writeStartupConfig } = await import('./startupConfig.js');
       writeStartupConfig(payload.threshold, payload.allowlist);

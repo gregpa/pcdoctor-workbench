@@ -57,7 +57,6 @@ export function W5Notifications() {
       void saveSettings();
       markComplete(4);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveSettings]);
 
   // -- Test Connection handler --

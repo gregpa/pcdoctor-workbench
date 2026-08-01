@@ -2,7 +2,7 @@
  * v2.3.0 C2 — Autopilot rule editor persistence + run-now semantics.
  *
  * We test the dataStore helpers directly (setAutopilotRuleEnabled / getAutopilotRule)
- * using an in-memory better-sqlite3 path via the existing openDb layer.
+ * using a temporary file-backed better-sqlite3 database via the existing openDb layer.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdtempSync } from 'node:fs';

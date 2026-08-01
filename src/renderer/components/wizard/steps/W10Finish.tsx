@@ -43,7 +43,6 @@ export function W10Finish() {
     return () => {
       markComplete(8);  // v2.5.25: was 9 before W6 removal
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // -- Helpers --
