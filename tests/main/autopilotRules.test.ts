@@ -50,7 +50,7 @@ describe('autopilot rule editor — dataStore contract', () => {
  * Logical contract of api:runAutopilotRuleNow as described in ipc.ts:
  *   - threshold rule that evaluates to null → activity 'skipped'
  *   - threshold rule that evaluates to a decision → dispatches (minGapMs=0)
- *   - schedule rule → runs action directly, records auto_run/error activity
+ *   - schedule rule → runs action directly, records manual_run/error activity
  *
  * We test this at the level of input mapping to keep the test free of a full
  * IPC harness. The intent is to catch accidental regressions in which paths

@@ -1177,15 +1177,16 @@ export function registerIpcHandlers() {
         { name: rule.action_name as any, triggered_by: 'user' },
         { mode: 'manual', source: 'renderer' },
       );
+      const outcome = r.success ? 'manual_run' : 'error';
       insertAutopilotActivity({
         rule_id: ruleId,
         tier: rule.tier as 1 | 2 | 3,
         action_name: rule.action_name as any,
-        outcome: r.success ? 'auto_run' : 'error',
+        outcome,
         duration_ms: Date.now() - t0,
         message: r.success ? 'run-now from UI' : (r.error?.message ?? 'error'),
       });
-      return { ok: true, data: { outcome: r.success ? 'auto_run' : 'error', message: r.error?.message } };
+      return { ok: true, data: { outcome, message: r.error?.message } };
     } catch (e: any) {
       return { ok: false, error: { code: 'E_INTERNAL', message: e?.message } };
     }

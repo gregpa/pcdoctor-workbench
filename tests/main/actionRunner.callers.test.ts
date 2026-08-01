@@ -263,4 +263,74 @@ describe('trusted runAction caller contexts', () => {
     }));
     expect(sendTelegramMessage).not.toHaveBeenCalled();
   });
+
+  it('returns and records manual_run for schedule-rule IPC Run now', async () => {
+    vi.mocked(getAutopilotRule).mockReturnValueOnce({
+      id: 'clear_browser_caches_weekly',
+      tier: 1,
+      description: 'test schedule rule',
+      trigger: 'schedule',
+      cadence: 'weekly:sat:03:00',
+      action_name: 'clear_browser_caches',
+      alert_json: null,
+      enabled: 1,
+      suppressed_until: null,
+    } as any);
+    vi.mocked(runAction).mockResolvedValueOnce({
+      action: 'clear_browser_caches',
+      success: true,
+      duration_ms: 1,
+      result: { message: 'cleared' },
+    });
+    registerIpcHandlers();
+    const handler = getHandler('api:runAutopilotRuleNow');
+
+    const response = await handler({}, 'clear_browser_caches_weekly');
+
+    expect(runAction).toHaveBeenCalledWith(
+      { name: 'clear_browser_caches', triggered_by: 'user' },
+      { mode: 'manual', source: 'renderer' },
+    );
+    expect(insertAutopilotActivity).toHaveBeenCalledWith(expect.objectContaining({
+      rule_id: 'clear_browser_caches_weekly',
+      action_name: 'clear_browser_caches',
+      outcome: 'manual_run',
+    }));
+    expect(response).toEqual({
+      ok: true,
+      data: { outcome: 'manual_run', message: undefined },
+    });
+  });
+
+  it('keeps schedule-rule IPC Run now failures classified as error', async () => {
+    vi.mocked(getAutopilotRule).mockReturnValueOnce({
+      id: 'clear_browser_caches_weekly',
+      tier: 1,
+      description: 'test schedule rule',
+      trigger: 'schedule',
+      cadence: 'weekly:sat:03:00',
+      action_name: 'clear_browser_caches',
+      alert_json: null,
+      enabled: 1,
+      suppressed_until: null,
+    } as any);
+    vi.mocked(runAction).mockResolvedValueOnce({
+      action: 'clear_browser_caches',
+      success: false,
+      duration_ms: 1,
+      error: { code: 'E_ACTION_FAILED', message: 'failed' },
+    });
+    registerIpcHandlers();
+    const handler = getHandler('api:runAutopilotRuleNow');
+
+    const response = await handler({}, 'clear_browser_caches_weekly');
+
+    expect(insertAutopilotActivity).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'error',
+    }));
+    expect(response).toEqual({
+      ok: true,
+      data: { outcome: 'error', message: 'failed' },
+    });
+  });
 });

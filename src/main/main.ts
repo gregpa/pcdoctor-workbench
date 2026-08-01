@@ -36,7 +36,10 @@ log.transports.file.level = 'info';
 log.transports.console.level = 'warn';
 log.initialize();
 import { startTelegramPolling, stopTelegramPolling, answerCallbackQuery, editMessageText, sendTelegramMessage } from './telegramBridge.js';
-import { runTelegramApprovedAction } from './telegramApprovedAction.js';
+import {
+  runAndRecordTelegramApprovedAction,
+  runTelegramApprovedAction,
+} from './telegramApprovedAction.js';
 import { ACTIONS } from '@shared/actions.js';
 import type { ActionName } from '@shared/types.js';
 import { startClaudeBridgeWatcher } from './claudeBridgeWatcher.js';
@@ -873,15 +876,7 @@ app.whenReady().then(() => {
       if (!def) { await answerCallbackQuery(q.id, 'Unknown action'); return; }
       await answerCallbackQuery(q.id, `Running ${def.label}…`);
       try {
-        const result = await runTelegramApprovedAction(actionName);
-        insertAutopilotActivity({
-          rule_id: ruleId || `manual:${actionName}`,
-          tier: 3,
-          action_name: actionName,
-          outcome: result.success ? 'auto_run' : 'error',
-          duration_ms: result.duration_ms,
-          message: result.success ? 'ran from Telegram button' : (result.error?.message ?? 'error'),
-        });
+        const result = await runAndRecordTelegramApprovedAction(actionName, ruleId);
         const bytes = (result.result as any)?.bytes_freed;
         const bytesTxt = typeof bytes === 'number' ? ` (${(bytes / 1024 / 1024).toFixed(1)} MB freed)` : '';
         const msg = result.success
