@@ -12,6 +12,7 @@ out/
 Thumbs.db
 coverage/
 *.tsbuildinfo
+.worktrees/
 
 # Conversational context docs — not part of the product
 SESSION_SUMMARY.md

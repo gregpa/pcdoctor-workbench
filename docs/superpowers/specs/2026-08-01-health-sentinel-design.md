@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01
 
-**Status:** Baseline approved by Greg on 2026-08-01; demand-start privileged-broker delta awaits confirmation
+**Status:** Approved by Greg on 2026-08-01, including the demand-start privileged-broker refinement
 
 **Scope:** Trustworthy continuous health monitoring plus centrally gated, evidence-driven scheduled maintenance
 
