@@ -7,27 +7,80 @@
  */
 
 import type {
-  AutomationEvidence,
   AutomationPolicyInput,
-  AutomationPolicyState,
   PolicyDecision,
   TrustedExecutionContext,
 } from '../shared/automation.js';
+
+const CONTEXT_KEYS = ['mode', 'source', 'intentId', 'policyId'] as const;
+const GATE_KEYS = [
+  'maintenanceWindowOpen',
+  'loadAllowed',
+  'idleSatisfied',
+  'locksAvailable',
+  'cooldownElapsed',
+  'attemptsRemaining',
+  'preflightPassed',
+  'rollbackReady',
+] as const;
+
+type PlainRecord = Record<string, unknown>;
+
+interface RuntimePolicyState extends PlainRecord {
+  enabled: unknown;
+  snoozedUntil: number | null;
+}
+
+interface RuntimeEvidence extends PlainRecord {
+  state: 'fresh' | 'stale';
+}
+
+/** Confirms a boundary value is a plain, non-array record. */
+function isPlainRecord(value: unknown): value is PlainRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** Confirms every own key is allowlisted and no symbol or hidden key bypasses the check. */
+function hasOnlyOwnKeys(record: PlainRecord, allowedKeys: readonly string[]): boolean {
+  return Reflect.ownKeys(record).every((key) => (
+    typeof key === 'string' && allowedKeys.includes(key)
+  ));
+}
+
+/** Confirms a record contains exactly the required own keys. */
+function hasExactOwnKeys(record: PlainRecord, requiredKeys: readonly string[]): boolean {
+  const ownKeys = Reflect.ownKeys(record);
+  return ownKeys.length === requiredKeys.length
+    && ownKeys.every((key) => typeof key === 'string' && requiredKeys.includes(key));
+}
+
+/** Confirms an optional context identifier is absent or a non-empty string. */
+function hasValidOptionalId(context: PlainRecord, key: 'intentId' | 'policyId'): boolean {
+  if (!Object.prototype.hasOwnProperty.call(context, key)) return true;
+  return typeof context[key] === 'string' && context[key].length > 0;
+}
 
 /** Confirms a compiled proof identifier is either intentionally absent or non-empty. */
 function isNullableId(value: string | null | undefined): boolean {
   return value === null || (typeof value === 'string' && value.length > 0);
 }
 
-/** Confirms the context contains only a known execution mode and source. */
-function isTrustedContext(context: TrustedExecutionContext | undefined): context is TrustedExecutionContext {
-  if (!context || (context.mode !== 'manual' && context.mode !== 'automatic')) return false;
+/** Confirms context shape, identifiers, and mode-to-source trust relationship. */
+function isTrustedContext(context: unknown): context is TrustedExecutionContext {
+  if (!isPlainRecord(context) || !hasOnlyOwnKeys(context, CONTEXT_KEYS)) return false;
+  if (!hasValidOptionalId(context, 'intentId') || !hasValidOptionalId(context, 'policyId')) return false;
 
-  return context.source === 'renderer'
-    || context.source === 'telegram-approved'
-    || context.source === 'incident'
-    || context.source === 'schedule'
-    || context.source === 'maintenance';
+  const validManualContext = context.mode === 'manual'
+    && (context.source === 'renderer' || context.source === 'telegram-approved');
+  const validAutomaticContext = context.mode === 'automatic'
+    && (context.source === 'incident'
+      || context.source === 'schedule'
+      || context.source === 'maintenance');
+
+  return validManualContext || validAutomaticContext;
 }
 
 /** Confirms all compiled action metadata is present and structurally valid. */
@@ -56,17 +109,23 @@ function hasCompleteActionMetadata(input: AutomationPolicyInput): boolean {
     && typeof input.rebootRequired === 'boolean';
 }
 
-/** Confirms persisted policy state is complete enough for ordered evaluation. */
-function isPolicyState(policy: AutomationPolicyState | undefined): policy is AutomationPolicyState {
-  return policy !== undefined
-    && typeof policy.enabled === 'boolean'
+/** Confirms policy timing can be evaluated without accepting malformed containers. */
+function isPolicyState(policy: unknown): policy is RuntimePolicyState {
+  return isPlainRecord(policy)
     && (policy.snoozedUntil === null
       || (typeof policy.snoozedUntil === 'number' && Number.isFinite(policy.snoozedUntil)));
 }
 
-/** Confirms evidence has a known freshness state. */
-function isEvidence(evidence: AutomationEvidence | undefined): evidence is AutomationEvidence {
-  return evidence?.state === 'fresh' || evidence?.state === 'stale';
+/** Confirms evidence is the exact trusted freshness payload. */
+function isEvidence(evidence: unknown): evidence is RuntimeEvidence {
+  return isPlainRecord(evidence)
+    && hasExactOwnKeys(evidence, ['state'])
+    && (evidence.state === 'fresh' || evidence.state === 'stale');
+}
+
+/** Confirms the gate bundle is a plain record with every documented gate and no extras. */
+function hasExactGateShape(gates: unknown): gates is PlainRecord {
+  return isPlainRecord(gates) && hasExactOwnKeys(gates, GATE_KEYS);
 }
 
 /**
@@ -74,7 +133,7 @@ function isEvidence(evidence: AutomationEvidence | undefined): evidence is Autom
  * Expected missing or failed policy inputs return denial codes and never throw.
  */
 export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDecision {
-  if (!isTrustedContext(input.context)) {
+  if (!isPlainRecord(input) || !isTrustedContext(input.context)) {
     return { allowed: false, code: 'E_CONTEXT_REQUIRED' };
   }
 
@@ -83,7 +142,7 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: true, code: 'ALLOW' };
   }
 
-  if (!input.globalEnabled) {
+  if (input.globalEnabled !== true) {
     return { allowed: false, code: 'E_AUTOMATION_DISABLED' };
   }
 
@@ -103,11 +162,13 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_DESTRUCTIVE_FORBIDDEN' };
   }
 
-  if (!isPolicyState(input.policy)) {
+  if (!isPolicyState(input.policy)
+    || typeof input.now !== 'number'
+    || !Number.isFinite(input.now)) {
     return { allowed: false, code: 'E_POLICY_REQUIRED' };
   }
 
-  if (!input.policy.enabled) {
+  if (input.policy.enabled !== true) {
     return { allowed: false, code: 'E_POLICY_DISABLED' };
   }
 
@@ -123,27 +184,28 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_EVIDENCE_STALE' };
   }
 
-  if (input.gates?.maintenanceWindowOpen !== true) {
+  const gates = input.gates;
+  if (!hasExactGateShape(gates) || gates.maintenanceWindowOpen !== true) {
     return { allowed: false, code: 'E_WINDOW_CLOSED' };
   }
 
-  if (input.gates.loadAllowed !== true) {
+  if (gates.loadAllowed !== true) {
     return { allowed: false, code: 'E_LOAD_BLOCKED' };
   }
 
-  if (input.gates.idleSatisfied !== true) {
+  if (gates.idleSatisfied !== true) {
     return { allowed: false, code: 'E_IDLE_REQUIRED' };
   }
 
-  if ((input.resourceLocks?.length ?? 0) > 0 && input.gates.locksAvailable !== true) {
+  if ((input.resourceLocks?.length ?? 0) > 0 && gates.locksAvailable !== true) {
     return { allowed: false, code: 'E_RESOURCE_LOCKED' };
   }
 
-  if (input.gates.cooldownElapsed !== true) {
+  if (gates.cooldownElapsed !== true) {
     return { allowed: false, code: 'E_COOLDOWN_ACTIVE' };
   }
 
-  if (input.gates.attemptsRemaining !== true) {
+  if (gates.attemptsRemaining !== true) {
     return { allowed: false, code: 'E_ATTEMPT_LIMIT' };
   }
 
@@ -151,7 +213,7 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_PREFLIGHT_REQUIRED' };
   }
 
-  if (input.gates.preflightPassed !== true) {
+  if (gates.preflightPassed !== true) {
     return { allowed: false, code: 'E_PREFLIGHT_FAILED' };
   }
 
@@ -159,7 +221,7 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_POSTCONDITION_REQUIRED' };
   }
 
-  if (input.requiresRollback && input.gates.rollbackReady !== true) {
+  if (input.requiresRollback && gates.rollbackReady !== true) {
     return { allowed: false, code: 'E_ROLLBACK_UNAVAILABLE' };
   }
 

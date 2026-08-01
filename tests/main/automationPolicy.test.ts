@@ -61,12 +61,34 @@ function expectDenied(input: AutomationPolicyInput, code: PolicyDecision['code']
   expect(evaluateAutomationPolicy(input)).toEqual({ allowed: false, code });
 }
 
+function asRuntimeInput(value: unknown): AutomationPolicyInput {
+  return value as AutomationPolicyInput;
+}
+
 describe('evaluateAutomationPolicy', () => {
   // Production break caught: an untrusted caller reaches policy evaluation without execution context.
   it('denies missing execution context without throwing', () => {
     expect(() => evaluateAutomationPolicy(base({ context: undefined }))).not.toThrow();
     expectDenied(base({ context: undefined }), 'E_CONTEXT_REQUIRED');
   });
+
+  // Production break caught: a malformed root value throws before default-deny context handling.
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['array', []],
+    ['string', 'automatic-request'],
+    ['number', 1],
+    ['boolean', true],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s root input without throwing',
+    (_caseName, value) => {
+      const input = asRuntimeInput(value);
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_CONTEXT_REQUIRED');
+    },
+  );
 
   // Production break caught: a malformed execution source is treated as trusted context.
   it('denies unknown execution context without throwing', () => {
@@ -76,10 +98,169 @@ describe('evaluateAutomationPolicy', () => {
     expectDenied(base({ context }), 'E_CONTEXT_REQUIRED');
   });
 
+  // Production break caught: non-plain context containers can impersonate a trusted manual caller.
+  it.each([
+    ['null', null],
+    ['array', Object.assign([], { mode: 'manual', source: 'renderer' })],
+    ['class instance', new (class {
+      mode = 'manual';
+      source = 'renderer';
+    })()],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s execution context without throwing',
+    (_caseName, value) => {
+      const input = base({ context: value as AutomationPolicyInput['context'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: a valid source is trusted under the wrong execution mode.
+  it.each([
+    ['manual', 'incident'],
+    ['manual', 'schedule'],
+    ['manual', 'maintenance'],
+    ['automatic', 'renderer'],
+    ['automatic', 'telegram-approved'],
+  ] satisfies ReadonlyArray<[string, string]>) (
+    'denies the invalid %s and %s context relationship',
+    (mode, source) => {
+      const context = { mode, source } as AutomationPolicyInput['context'];
+      expectDenied(base({ context }), 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: optional context identifiers accept missing proof or non-string data.
+  it.each([
+    ['empty intentId', { intentId: '' }],
+    ['null intentId', { intentId: null }],
+    ['numeric intentId', { intentId: 1 }],
+    ['array intentId', { intentId: [] }],
+    ['empty policyId', { policyId: '' }],
+    ['null policyId', { policyId: null }],
+    ['numeric policyId', { policyId: 1 }],
+    ['object policyId', { policyId: {} }],
+  ] satisfies ReadonlyArray<[string, Record<string, unknown>]>) (
+    'denies malformed context identifier: %s',
+    (_caseName, identifier) => {
+      const context = {
+        mode: 'manual',
+        source: 'renderer',
+        ...identifier,
+      } as unknown as AutomationPolicyInput['context'];
+
+      expectDenied(base({ context }), 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: unexpected context data survives the trust boundary.
+  it('denies a context with an unexpected own key', () => {
+    const context = {
+      mode: 'manual',
+      source: 'renderer',
+      approved: true,
+    } as unknown as AutomationPolicyInput['context'];
+
+    expectDenied(base({ context }), 'E_CONTEXT_REQUIRED');
+  });
+
+  // Production break caught: symbol and hidden own keys bypass enumerable-only shape checks.
+  it.each([
+    ['symbol context key', base({
+      context: {
+        mode: 'manual',
+        source: 'renderer',
+        [Symbol('approved')]: true,
+      } as AutomationPolicyInput['context'],
+    }), 'E_CONTEXT_REQUIRED'],
+    ['hidden evidence key', base({
+      evidence: Object.defineProperty(
+        { state: 'fresh' },
+        'callerApproved',
+        { value: true },
+      ) as AutomationPolicyInput['evidence'],
+    }), 'E_EVIDENCE_REQUIRED'],
+    ['symbol gate key', base({
+      gates: {
+        ...base().gates!,
+        [Symbol('approved')]: true,
+      } as AutomationPolicyInput['gates'],
+    }), 'E_WINDOW_CLOSED'],
+  ] satisfies ReadonlyArray<[string, AutomationPolicyInput, PolicyDecision['code']]>) (
+    'denies an unexpected %s',
+    (_caseName, input, expectedCode) => {
+      expectDenied(input, expectedCode);
+    },
+  );
+
+  // Production break caught: an extra runtime enum string is accepted as a trusted context value.
+  it.each([
+    ['mode', { mode: 'adaptive', source: 'schedule' }],
+    ['source', { mode: 'automatic', source: 'scheduler' }],
+  ] satisfies ReadonlyArray<[string, Record<string, unknown>]>) (
+    'denies an unexpected context %s enum value',
+    (_field, value) => {
+      expectDenied(base({
+        context: value as unknown as AutomationPolicyInput['context'],
+      }), 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: well-formed optional identifiers block existing manual renderer UX.
+  it('allows a manual renderer context with well-formed optional identifiers', () => {
+    const decision = evaluateAutomationPolicy(base({
+      context: {
+        mode: 'manual',
+        source: 'renderer',
+        intentId: 'intent-manual-report',
+        policyId: 'policy-manual-report',
+      },
+      globalEnabled: false,
+    }));
+
+    expect(decision).toEqual({ allowed: true, code: 'ALLOW' });
+  });
+
+  // Production break caught: a documented mode and source relationship is rejected.
+  it.each([
+    ['manual', 'renderer'],
+    ['manual', 'telegram-approved'],
+    ['automatic', 'incident'],
+    ['automatic', 'schedule'],
+    ['automatic', 'maintenance'],
+  ] satisfies ReadonlyArray<[string, string]>) (
+    'allows the documented %s and %s context relationship',
+    (mode, source) => {
+      const context = { mode, source } as AutomationPolicyInput['context'];
+      const input = mode === 'manual'
+        ? base({ context, globalEnabled: false })
+        : base({ context });
+
+      expect(evaluateAutomationPolicy(input)).toEqual({ allowed: true, code: 'ALLOW' });
+    },
+  );
+
   // Production break caught: the automatic kill switch is bypassed.
   it('denies automatic execution when the global switch is disabled', () => {
     expectDenied(base({ globalEnabled: false }), 'E_AUTOMATION_DISABLED');
   });
+
+  // Production break caught: a truthy non-boolean value bypasses the automatic kill switch.
+  it.each([
+    ['zero string', '0'],
+    ['false string', 'false'],
+    ['number', 1],
+    ['object', {}],
+    ['array', []],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a forged truthy global switch: %s',
+    (_caseName, globalEnabled) => {
+      expectDenied(base({
+        globalEnabled: globalEnabled as boolean,
+      }), 'E_AUTOMATION_DISABLED');
+    },
+  );
 
   // Production break caught: a caller can omit one part of the compiled action metadata.
   it.each([
@@ -139,10 +320,92 @@ describe('evaluateAutomationPolicy', () => {
     expectDenied(base({ policy: undefined }), 'E_POLICY_REQUIRED');
   });
 
+  // Production break caught: a malformed policy container throws or passes as persisted state.
+  it.each([
+    ['null', null],
+    ['array', []],
+    ['string', 'enabled'],
+    ['number', 1],
+    ['boolean', true],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s policy value without throwing',
+    (_caseName, policy) => {
+      const input = base({ policy: policy as AutomationPolicyInput['policy'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_POLICY_REQUIRED');
+    },
+  );
+
   // Production break caught: a disabled policy still dispatches its action.
   it('denies disabled policy state', () => {
     expectDenied(base({ policy: { enabled: false, snoozedUntil: null } }), 'E_POLICY_DISABLED');
   });
+
+  // Production break caught: a truthy non-boolean policy flag enables automatic execution.
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['true string', 'true'],
+    ['false string', 'false'],
+    ['number', 1],
+    ['object', {}],
+    ['array', []],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a forged policy enabled value: %s',
+    (_caseName, enabled) => {
+      const policy = { enabled, snoozedUntil: null } as unknown as AutomationPolicyInput['policy'];
+      expectDenied(base({ policy }), 'E_POLICY_DISABLED');
+    },
+  );
+
+  // Production break caught: malformed policy timing is compared as if it were trusted.
+  it.each([
+    ['missing', undefined],
+    ['string', String(NOW + 1)],
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+    ['object', {}],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies malformed snoozedUntil timing: %s',
+    (_caseName, snoozedUntil) => {
+      const policy = { enabled: true, snoozedUntil } as unknown as AutomationPolicyInput['policy'];
+      expectDenied(base({ policy }), 'E_POLICY_REQUIRED');
+    },
+  );
+
+  // Production break caught: a missing evaluation clock bypasses policy timing checks.
+  it('denies missing now for active-snooze and otherwise-passable inputs', () => {
+    const withoutNow = { ...base() } as Partial<AutomationPolicyInput>;
+    Reflect.deleteProperty(withoutNow, 'now');
+    const activeSnooze = {
+      ...withoutNow,
+      policy: { enabled: true, snoozedUntil: NOW + 1 },
+    } as AutomationPolicyInput;
+
+    expectDenied(withoutNow as AutomationPolicyInput, 'E_POLICY_REQUIRED');
+    expectDenied(activeSnooze, 'E_POLICY_REQUIRED');
+  });
+
+  // Production break caught: malformed evaluation clocks make snooze comparisons fail open.
+  it.each([
+    ['string', String(NOW)],
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies malformed now for active-snooze and otherwise-passable inputs: %s',
+    (_caseName, now) => {
+      const invalidNow = now as number;
+
+      expectDenied(base({ now: invalidNow }), 'E_POLICY_REQUIRED');
+      expectDenied(base({
+        now: invalidNow,
+        policy: { enabled: true, snoozedUntil: NOW + 1 },
+      }), 'E_POLICY_REQUIRED');
+    },
+  );
 
   // Production break caught: a future snooze expiration is ignored.
   it('denies a policy snoozed beyond the evaluation time', () => {
@@ -158,6 +421,71 @@ describe('evaluateAutomationPolicy', () => {
   it('denies stale evidence', () => {
     expectDenied(base({ evidence: { state: 'stale' } }), 'E_EVIDENCE_STALE');
   });
+
+  // Production break caught: malformed or augmented evidence is accepted as fresh proof.
+  it.each([
+    ['null', null],
+    ['array', Object.assign([], { state: 'fresh' })],
+    ['string', 'fresh'],
+    ['missing state', {}],
+    ['unknown state', { state: 'current' }],
+    ['extra key', { state: 'fresh', source: 'caller' }],
+    ['class instance', new (class {
+      state = 'fresh';
+    })()],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies malformed evidence without throwing: %s',
+    (_caseName, evidence) => {
+      const input = base({ evidence: evidence as AutomationPolicyInput['evidence'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_EVIDENCE_REQUIRED');
+    },
+  );
+
+  // Production break caught: malformed gate containers bypass exact gate evidence requirements.
+  it.each([
+    ['null', null],
+    ['array', []],
+    ['string', 'all-clear'],
+    ['empty object', {}],
+    ['missing key', (() => {
+      const missingLoad = { ...base().gates! } as Partial<NonNullable<AutomationPolicyInput['gates']>>;
+      Reflect.deleteProperty(missingLoad, 'loadAllowed');
+      return missingLoad;
+    })()],
+    ['extra key', { ...base().gates!, callerApproved: true }],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a malformed %s gate bundle at the first documented gate',
+    (_caseName, gates) => {
+      const input = base({ gates: gates as AutomationPolicyInput['gates'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_WINDOW_CLOSED');
+    },
+  );
+
+  // Production break caught: truthy non-boolean gate values count as passing proof.
+  it.each([
+    ['maintenanceWindowOpen', 'E_WINDOW_CLOSED', false],
+    ['loadAllowed', 'E_LOAD_BLOCKED', false],
+    ['idleSatisfied', 'E_IDLE_REQUIRED', false],
+    ['locksAvailable', 'E_RESOURCE_LOCKED', false],
+    ['cooldownElapsed', 'E_COOLDOWN_ACTIVE', false],
+    ['attemptsRemaining', 'E_ATTEMPT_LIMIT', false],
+    ['preflightPassed', 'E_PREFLIGHT_FAILED', false],
+    ['rollbackReady', 'E_ROLLBACK_UNAVAILABLE', true],
+  ] satisfies ReadonlyArray<[keyof NonNullable<AutomationPolicyInput['gates']>, PolicyDecision['code'], boolean]>) (
+    'denies a forged truthy %s gate value',
+    (gateName, expectedCode, requiresRollback) => {
+      const gates = {
+        ...base().gates!,
+        [gateName]: 1,
+      } as unknown as AutomationPolicyInput['gates'];
+
+      expectDenied(base({ gates, requiresRollback }), expectedCode);
+    },
+  );
 
   // Production break caught: an action begins outside its maintenance window.
   it('denies a closed maintenance window', () => {
