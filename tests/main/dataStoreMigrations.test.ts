@@ -122,6 +122,27 @@ describe('dataStore migration framework (S20)', () => {
     expect(db.pragma('user_version', { simple: true })).toBe(3);
   });
 
+  it('rejects duplicate migration versions before applying any migration', () => {
+    let applyCount = 0;
+    const migrations: Migration[] = [
+      {
+        version: 1,
+        name: 'first_version_one',
+        up: (d) => { applyCount++; d.exec(`CREATE TABLE first_version_one (id INT)`); },
+      },
+      {
+        version: 1,
+        name: 'second_version_one',
+        up: () => { applyCount++; },
+      },
+    ];
+
+    expect(() => runMigrations(db, migrations)).toThrow('Duplicate migration version');
+    expect(applyCount).toBe(0);
+    expect(db.pragma('user_version', { simple: true })).toBe(0);
+    expect(db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='first_version_one'`).get()).toBeUndefined();
+  });
+
   it('applies only migrations newer than current user_version', () => {
     // Simulate a DB that was already at user_version = 2.
     db.pragma('user_version = 2');
