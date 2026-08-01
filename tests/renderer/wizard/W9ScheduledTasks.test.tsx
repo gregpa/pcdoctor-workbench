@@ -64,11 +64,11 @@ describe('<W9ScheduledTasks>', () => {
     });
   });
 
-  it('shows Register button after loading', async () => {
+  it('shows Apply Task Manifest button after loading', async () => {
     mockApi.listScheduledTasks.mockResolvedValue({ ok: true, data: [] });
     renderW9();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Register All Tasks/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Apply Task Manifest/ })).toBeInTheDocument();
     });
   });
 
@@ -86,10 +86,10 @@ describe('<W9ScheduledTasks>', () => {
     renderW9();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Register All Tasks/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Apply Task Manifest/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Register All Tasks/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Apply Task Manifest/ }));
 
     await waitFor(() => {
       expect(mockApi.runAction).toHaveBeenCalledWith({ name: 'register_scheduled_tasks' });
@@ -111,10 +111,10 @@ describe('<W9ScheduledTasks>', () => {
     renderW9();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Register All Tasks/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Apply Task Manifest/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Register All Tasks/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Apply Task Manifest/ }));
 
     await waitFor(() => {
       expect(screen.getByText('UAC prompt was declined')).toBeInTheDocument();
@@ -150,14 +150,14 @@ describe('<W9ScheduledTasks>', () => {
     renderW9();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Register All Tasks/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Apply Task Manifest/ })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Register All Tasks/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Apply Task Manifest/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Registering/ })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Registering/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Applying/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Applying/ })).toBeDisabled();
     });
   });
 });

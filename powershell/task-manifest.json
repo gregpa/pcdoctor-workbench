@@ -1,0 +1,656 @@
+{
+  "schema_version": 1,
+  "source_sha256": "e60bfdab3b1acb992751b420760d05c6b7262dd607ebb8230f7c49cdbbd443a4",
+  "tasks": [
+    {
+      "arguments": [
+        "-Mode",
+        "Report"
+      ],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "daily-quick-report",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-Daily-Quick",
+      "schedule": {
+        "at": "08:07",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Invoke-PCDoctor.ps1",
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "defender-definitions-daily",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Defender-Definitions",
+      "schedule": {
+        "at": "06:41",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Update-DefenderDefs.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "light"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "defender-quick-scan-daily",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Defender-Quick-Scan",
+      "schedule": {
+        "at": "02:31",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-DefenderQuickScan.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "forecast-without-consumer",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Forecast",
+      "schedule": {
+        "at": "07:00",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Get-Forecast.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "light"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-adwcleaner",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-AdwCleanerScan",
+      "schedule": {
+        "at": "04:00",
+        "day": 1,
+        "kind": "monthly-day"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-AdwCleanerScan.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-browser-cache",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-ClearBrowserCaches",
+      "schedule": {
+        "at": "03:00",
+        "day": "SAT",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Clear-BrowserCaches.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-defender-definitions",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-UpdateDefenderDefs",
+      "schedule": {
+        "at": "06:00",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Update-DefenderDefs.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "light"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-defender-quick-scan",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-DefenderQuickScan",
+      "schedule": {
+        "at": "02:00",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-DefenderQuickScan.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-hosts-rewrite",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-UpdateHostsStevenBlack",
+      "schedule": {
+        "at": "04:00",
+        "day": "SUN",
+        "kind": "monthly-weekday",
+        "week": "first"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Update-HostsFromStevenBlack.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-hwinfo",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-HwinfoLog",
+      "schedule": {
+        "at": "23:00",
+        "day": "SAT",
+        "kind": "monthly-weekday",
+        "week": "first"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-HwinfoLog.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-malwarebytes",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-MalwarebytesCli",
+      "schedule": {
+        "at": "03:00",
+        "day": "MON",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-MalwarebytesCli.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-nas-size-refresh",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-RefreshNasRecycleSizes",
+      "schedule": {
+        "at": "03:00",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Refresh-NasRecycleSizes.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-recycle-bins",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-EmptyRecycleBins",
+      "schedule": {
+        "at": "03:00",
+        "day": "SUN",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Empty-RecycleBins.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-safety-scanner",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-SafetyScanner",
+      "schedule": {
+        "at": "04:00",
+        "day": "SAT",
+        "kind": "monthly-weekday",
+        "week": "third"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-SafetyScanner.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "read-only",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-smart",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-SmartCheck",
+      "schedule": {
+        "at": "01:00",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-SmartCheck.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "legacy-autopilot-winsxs-resetbase",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Autopilot-ShrinkComponentStore",
+      "schedule": {
+        "at": "04:00",
+        "day": "SAT",
+        "kind": "monthly-weekday",
+        "week": "second"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Shrink-ComponentStore.ps1",
+      "state": "remove",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "maintenance-broker",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Maintenance-Broker",
+      "schedule": {
+        "kind": "demand"
+      },
+      "script": "C:\\Program Files\\PCDoctor Workbench\\privileged\\Maintenance-Broker.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [
+        "-Mode",
+        "DeepScan"
+      ],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "monthly-deep-scan",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Monthly-Deep",
+      "schedule": {
+        "at": "03:43",
+        "day": "SUN",
+        "kind": "monthly-weekday",
+        "week": "first"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Invoke-PCDoctor.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "nas-size-refresh",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-NAS-Size-Refresh",
+      "schedule": {
+        "at": "03:23",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Refresh-NasRecycleSizes.ps1",
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "system",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "retention-daily",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Prune-Rollbacks",
+      "schedule": {
+        "at": "03:53",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Prune-Rollbacks.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "light"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "read-only",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "security-posture-daily",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-Security-Daily",
+      "schedule": {
+        "at": "06:17",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\security\\Get-SecurityPosture.ps1",
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "read-only",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "security-posture-weekly",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-Security-Weekly",
+      "schedule": {
+        "at": "23:29",
+        "day": "SAT",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\security\\Get-SecurityPosture.ps1",
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "read-only",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "smart-readonly-daily",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-SMART-Daily",
+      "schedule": {
+        "at": "01:13",
+        "kind": "daily"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\actions\\Run-SmartCheck.ps1",
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "tool-updates-weekly",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-Weekly-Tool-Updates",
+      "schedule": {
+        "at": "04:37",
+        "day": "SUN",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Check-ToolUpdates.ps1",
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "medium"
+    },
+    {
+      "arguments": [
+        "-Mode",
+        "Auto"
+      ],
+      "context": "system",
+      "effect": "system-mutation",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "weekly-maintenance",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Weekly",
+      "schedule": {
+        "at": "02:47",
+        "day": "SUN",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Invoke-PCDoctor.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [],
+      "context": "interactive-user",
+      "effect": "pcdoctor-data",
+      "executable": "powershell.exe",
+      "hidden": true,
+      "id": "weekly-review",
+      "migration": {
+        "legacy_names": [],
+        "strategy": "unregister"
+      },
+      "name": "PCDoctor-Weekly-Review",
+      "schedule": {
+        "at": "22:19",
+        "day": "SUN",
+        "kind": "weekly"
+      },
+      "script": "C:\\ProgramData\\PCDoctor\\Invoke-WeeklyReview.ps1",
+      "state": "deferred",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "heavy"
+    },
+    {
+      "arguments": [
+        "--hidden"
+      ],
+      "context": "interactive-user",
+      "effect": "read-only",
+      "executable": "PCDoctor Workbench.exe",
+      "hidden": true,
+      "id": "workbench-autostart",
+      "migration": {
+        "legacy_names": [
+          "PCDoctor-Autostart"
+        ],
+        "strategy": "register"
+      },
+      "name": "PCDoctor-Workbench-Autostart",
+      "schedule": {
+        "kind": "logon"
+      },
+      "script": null,
+      "state": "active",
+      "uninstall": {
+        "remove": true
+      },
+      "workload": "light"
+    }
+  ]
+}

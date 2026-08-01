@@ -10,7 +10,7 @@ if (!process.env.UV_THREADPOOL_SIZE) {
 
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
-import { access, constants as fsConstants, stat } from 'node:fs/promises';
+import { access, constants as fsConstants, readFile } from 'node:fs/promises';
 import log from 'electron-log/main';
 import { createTray, updateTraySeverity } from './tray.js';
 import { registerIpcHandlers } from './ipc.js';
@@ -311,7 +311,19 @@ app.whenReady().then(() => {
 
       const { runPowerShellScript, runElevatedPowerShellScript } = await import('./scriptRunner.js');
       const { getSetting, setSetting } = await import('./dataStore.js');
-      const TASK_MIGRATION_VERSION = '2.4.51';
+      const TASK_MIGRATION_SCHEMA = 'phase0-task-manifest-v1';
+      let expectedSourceSha256: string | undefined;
+      try {
+        const bundledManifest = JSON.parse(await readFile(
+          path.join(bundledPsDir, 'task-manifest.json'),
+          'utf8',
+        )) as { source_sha256?: unknown };
+        if (typeof bundledManifest.source_sha256 === 'string'
+          && /^[0-9a-f]{64}$/.test(bundledManifest.source_sha256)) {
+          expectedSourceSha256 = bundledManifest.source_sha256;
+        }
+      } catch { /* fail closed: unavailable hash cannot verify or advance the marker */ }
+      const TASK_MIGRATION_VERSION = `${TASK_MIGRATION_SCHEMA}:${expectedSourceSha256}`;
       const lastMigration = getSetting('last_task_migration_version');
       const isUpgrade = lastMigration !== TASK_MIGRATION_VERSION;
       log.info(`[migration] lastMigration=${JSON.stringify(lastMigration)} target=${TASK_MIGRATION_VERSION} isUpgrade=${isUpgrade}`);
@@ -330,10 +342,10 @@ app.whenReady().then(() => {
       // result (success or UAC decline) and don't re-prompt.
       // No-op on steady-state launches (no version bump). No-op when the
       // autopilot scripts themselves aren't stale.
-      const { shouldFireElevatedAutopilotSync } = await import('./taskMigrationVerify.js');
+      const { shouldFireElevatedTaskManifestSync } = await import('./taskMigrationVerify.js');
       if (
         !bundleElevatedSyncAttempted
-        && shouldFireElevatedAutopilotSync({ isUpgrade, bundleNeedsElevatedCopy, bundleMismatches })
+        && shouldFireElevatedTaskManifestSync({ isUpgrade, bundleNeedsElevatedCopy, bundleMismatches })
       ) {
         try {
           await runElevatedPowerShellScript<any>('Sync-ScriptsFromBundle.ps1', [
@@ -343,6 +355,9 @@ app.whenReady().then(() => {
       }
 
       const args = ['-JsonOutput'];
+      if (app.isPackaged) {
+        args.push('-InstallDir', 'C:\\Program Files\\PCDoctor Workbench');
+      }
       if (isUpgrade) {
         args.push('-ForceRecreate');
       }
@@ -421,25 +436,11 @@ app.whenReady().then(() => {
         // (or was declined) and the deployed copy is still v2.4.45-stale, the
         // sizes will mismatch and verification fails -- exactly catches the
         // B46-1 silent-success-against-stale-script mode.
-        const { verifyAutopilotMigration } = await import('./taskMigrationVerify.js');
-        let sizes: { deployedSize?: number; bundledSize?: number } | undefined;
-        try {
-          const bundledRegister = path.join(bundledPsDir, 'Register-All-Tasks.ps1');
-          // Sync-ScriptsFromBundle.ps1 copies bundled files into
-          // C:\ProgramData\PCDoctor\ at their relative path; for top-level
-          // scripts that means root, NOT a 'powershell' subdir.
-          const deployedRegister = path.join('C:\\ProgramData\\PCDoctor', 'Register-All-Tasks.ps1');
-          const [bundledStat, deployedStat] = await Promise.all([
-            stat(bundledRegister).catch(() => null),
-            stat(deployedRegister).catch(() => null),
-          ]);
-          if (bundledStat && deployedStat) {
-            sizes = { bundledSize: bundledStat.size, deployedSize: deployedStat.size };
-          }
-        } catch { /* non-fatal: skip the size check on stat failure */ }
+        const { verifyTaskManifestMigration } = await import('./taskMigrationVerify.js');
 
-        const verified = verifyAutopilotMigration(result, sizes);
-        log.info(`[migration] verifyAutopilotMigration returned ${verified} (sizes=${JSON.stringify(sizes)})`);
+        const verified = expectedSourceSha256 !== undefined
+          && verifyTaskManifestMigration(result, expectedSourceSha256);
+        log.info(`[migration] verifyTaskManifestMigration returned ${verified} (source_sha256=${JSON.stringify(expectedSourceSha256)})`);
         if (verified) {
           try {
             setSetting('last_task_migration_version', TASK_MIGRATION_VERSION);

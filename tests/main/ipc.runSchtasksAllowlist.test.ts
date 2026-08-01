@@ -13,7 +13,12 @@
 // this test pure: no Electron app, no IPC mocks, no PS spawn.
 
 import { describe, it, expect } from 'vitest';
-import { SCHEDULED_TASK_NAME_RE } from '../../src/main/scheduledTaskNames.js';
+import {
+  ACTIVE_TASK_NAMES,
+  isManagedScheduledTaskName,
+  SCHEDULED_TASK_NAME_RE,
+} from '../../src/main/scheduledTaskNames.js';
+import { taskManifest } from '../../src/shared/taskManifest.js';
 
 describe('SCHEDULED_TASK_NAME_RE allowlist (B48-SEC-1)', () => {
   it('accepts a canonical autopilot task name', () => {
@@ -55,5 +60,25 @@ describe('SCHEDULED_TASK_NAME_RE allowlist (B48-SEC-1)', () => {
 
   it('accepts a name at exactly the 64-char limit', () => {
     expect(SCHEDULED_TASK_NAME_RE.test('PCDoctor-' + 'a'.repeat(64))).toBe(true);
+  });
+});
+
+describe('manifest-backed renderer task control', () => {
+  it('allows every active manifest task', () => {
+    expect(ACTIVE_TASK_NAMES).toEqual(
+      taskManifest.tasks.filter(task => task.state === 'active').map(task => task.name),
+    );
+    for (const name of ACTIVE_TASK_NAMES) expect(isManagedScheduledTaskName(name)).toBe(true);
+  });
+
+  it('rejects every deferred and removal identity, including old direct-mutation aliases', () => {
+    for (const task of taskManifest.tasks.filter(task => task.state !== 'active')) {
+      expect(isManagedScheduledTaskName(task.name)).toBe(false);
+    }
+  });
+
+  it('retains the syntax gate before manifest membership', () => {
+    expect(isManagedScheduledTaskName('PCDoctor-Foo;calc')).toBe(false);
+    expect(isManagedScheduledTaskName('PCDoctor-Uncatalogued')).toBe(false);
   });
 });

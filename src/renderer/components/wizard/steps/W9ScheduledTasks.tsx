@@ -3,7 +3,7 @@
  * after v2.5.25 W6 removal; was index 8 prior).
  *
  * Checks which Windows Task Scheduler entries are already registered,
- * displays a count, and offers a one-click "Register All Tasks" button
+ * displays a count, and offers a one-click "Apply Task Manifest" button
  * that invokes Register-All-Tasks.ps1 via UAC elevation.
  *
  * On unmount: markComplete(7).
@@ -91,7 +91,11 @@ export function W9ScheduledTasks() {
     );
   }
 
-  const taskCount = tasks.length;
+  const taskCount = tasks.filter(task => (
+    (task.manifest_state === undefined || task.manifest_state === 'active')
+    && task.status !== 'Missing'
+    && task.status !== 'Not registered'
+  )).length;
 
   return (
     <div className="flex flex-col gap-5 py-2">
@@ -99,15 +103,15 @@ export function W9ScheduledTasks() {
       <div>
         <h2 className="text-lg font-bold text-text-primary">Scheduled Tasks</h2>
         <p className="text-sm text-text-secondary mt-0.5">
-          Register automated maintenance tasks with Windows Task Scheduler.
+          Register the approved diagnostic task set with Windows Task Scheduler.
         </p>
       </div>
 
       {/* Info card */}
       <div className="rounded-lg border border-surface-600 bg-surface-700/50 px-4 py-3">
         <p className="text-sm text-text-secondary">
-          These tasks keep your PC maintained automatically. They run PowerShell
-          scripts on schedule to perform diagnostics, cleanup, and monitoring.
+          Phase 0 schedules diagnostics and PCDoctor-owned report/cache refreshes only.
+          Mutating maintenance remains deferred or removed.
         </p>
       </div>
 
@@ -131,10 +135,10 @@ export function W9ScheduledTasks() {
 
       {/* Register button */}
       <div className="rounded-lg border border-surface-600 bg-surface-700/50 px-4 py-3">
-        <h3 className="text-sm font-semibold text-text-primary">Register All Tasks</h3>
+        <h3 className="text-sm font-semibold text-text-primary">Apply Task Manifest</h3>
         <p className="text-xs text-text-secondary mt-1">
-          This will register all PCDoctor scheduled tasks. Requires administrator
-          elevation (UAC prompt).
+          This registers active diagnostics and removes deferred or legacy task identities.
+          It requires administrator elevation (UAC prompt).
         </p>
 
         {registerSuccess ? (
@@ -146,7 +150,7 @@ export function W9ScheduledTasks() {
               disabled={registerBusy}
               className="px-4 py-1.5 rounded-md bg-status-info text-white text-sm font-semibold hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {registerBusy ? 'Registering…' : 'Register All Tasks'}
+              {registerBusy ? 'Applying…' : 'Apply Task Manifest'}
             </button>
             <span className="text-xs text-text-secondary">or skip by clicking Next</span>
           </div>

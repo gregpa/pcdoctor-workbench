@@ -61,7 +61,7 @@ param(
     [switch]$Quiet
 )
 
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Stop'
 
 # v2.5.15: explicitly import the security module that exports Get-Acl. The
 # installer invokes this script via `powershell.exe -NoProfile -File`
@@ -74,7 +74,12 @@ $ErrorActionPreference = 'Continue'
 # `-EA SilentlyContinue` keeps it non-fatal if even the explicit import
 # is blocked -- the subsequent Get-Acl calls already use -EA SilentlyContinue
 # so they degrade gracefully if the module truly is unavailable.
-Import-Module Microsoft.PowerShell.Security -EA SilentlyContinue
+$securityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'
+Import-Module -Name $securityModule -Force -ErrorAction Stop
+$icaclsPath = Join-Path ([Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::System
+)) 'icacls.exe'
+if (-not [IO.File]::Exists($icaclsPath)) { throw "Trusted icacls executable is missing: $icaclsPath" }
 
 $sidUsers  = 'S-1-5-32-545'     # BUILTIN\Users
 $sidAdmins = 'S-1-5-32-544'     # BUILTIN\Administrators
@@ -148,7 +153,7 @@ if ($zeroAceFiles.Count -eq 0) {
 # ========== [2] + [3] + [4] Root ACL ==========
 Write-VerifyLog "[check 2-4] Root DACL composition"
 $rootAcl = Get-Acl $Path
-$rootIcacls = (icacls $Path 2>&1 | Out-String)
+$rootIcacls = (& $icaclsPath $Path 2>&1 | Out-String)
 
 # [2] tier-A read ACE: Users:(OI)(CI)(RX)
 $hasTierARead = $rootIcacls -match 'Users:\(OI\)\(CI\)\(RX\)'
@@ -195,7 +200,7 @@ foreach ($sd in @('actions', 'security')) {
         Write-VerifyLog "  [WARN] $sd/ does not exist (skipping)"
         continue
     }
-    $sdIcacls = (icacls $sdPath 2>&1 | Out-String)
+    $sdIcacls = (& $icaclsPath $sdPath 2>&1 | Out-String)
     $expected = $sdIcacls -match 'Users:\(OI\)\(CI\)\(RX\)'
     $hasWrite = $sdIcacls -match 'Users:\(OI\)\(CI\)(\(M\)|\(F\)|\(W\))'
     if ($expected -and -not $hasWrite) {
@@ -217,7 +222,7 @@ foreach ($sd in $dataSubdirs) {
         Write-VerifyLog "  [WARN] $sd/ does not exist (skipping)"
         continue
     }
-    $sdIcacls = (icacls $sdPath 2>&1 | Out-String)
+    $sdIcacls = (& $icaclsPath $sdPath 2>&1 | Out-String)
     $hasModify = $sdIcacls -match 'Users:\(OI\)\(CI\)\(M\)' -or $sdIcacls -match 'Users:\(OI\)\(CI\)\(F\)'
     if ($hasModify) {
         Write-VerifyLog "  [OK] $sd/ tier-B Users:(OI)(CI)(M)"
@@ -230,19 +235,24 @@ foreach ($sd in $dataSubdirs) {
 }
 
 # ========== [7] workbench.db files ==========
-Write-VerifyLog "[check 7] workbench.db Users:M"
-$dbFile = Join-Path $Path 'workbench.db'
-if (Test-Path $dbFile) {
-    $dbIcacls = (icacls $dbFile 2>&1 | Out-String)
-    if ($dbIcacls -match 'Users:\(M\)' -or $dbIcacls -match 'Users:\(F\)') {
-        Write-VerifyLog "  [OK] workbench.db Users:M grant present"
-        $checks.Add("workbench-db-grant: OK") | Out-Null
-    } else {
-        # Not fatal on fresh install (SQLite creates file on first run), but log it
-        Write-VerifyLog "  [WARN] workbench.db exists but lacks explicit Users:M grant (SQLite may still work via root SQLite grant)"
+Write-VerifyLog "[check 7] workbench.db files Users:M"
+foreach ($dbName in @('workbench.db', 'workbench.db-wal', 'workbench.db-shm')) {
+    $dbFile = Join-Path $Path $dbName
+    if (-not (Test-Path -LiteralPath $dbFile)) {
+        $msg = "$dbName missing after installer pre-creation"
+        Write-VerifyLog "  [FAIL] $msg"
+        $failures.Add($msg) | Out-Null
+        continue
     }
-} else {
-    Write-VerifyLog "  [INFO] workbench.db not yet created (SQLite will create at first run)"
+    $dbIcacls = (& $icaclsPath $dbFile 2>&1 | Out-String)
+    if ($dbIcacls -match 'Users:\(M\)' -or $dbIcacls -match 'Users:\(F\)') {
+        Write-VerifyLog "  [OK] $dbName Users:M grant present"
+        $checks.Add("$dbName-grant: OK") | Out-Null
+    } else {
+        $msg = "$dbName lacks explicit Users:M grant"
+        Write-VerifyLog "  [FAIL] $msg"
+        $failures.Add($msg) | Out-Null
+    }
 }
 
 # ========== Result ==========

@@ -149,4 +149,17 @@ describe('scriptRunner script-path resolution', () => {
     const fileIdx = spawnArgs.indexOf('-File');
     expect(spawnArgs[fileIdx + 1]).toBe(programDataPath);
   });
+
+  it('never resolves a manifest control-plane script from ProgramData', async () => {
+    const programDataPath = path.join(PCDOCTOR_ROOT, 'Register-All-Tasks.ps1');
+    const bundlePath = path.join(FAKE_RESOURCES_PATH, 'powershell', 'Register-All-Tasks.ps1');
+    existsMap.set(programDataPath, true);
+    existsMap.set(bundlePath, true);
+    (spawn as any).mockReturnValue(fakeChild('{"success":true}'));
+
+    await runPowerShellScript('Register-All-Tasks.ps1', []);
+
+    const spawnArgs = (spawn as any).mock.calls[0][1] as string[];
+    expect(spawnArgs[spawnArgs.indexOf('-File') + 1]).toBe(bundlePath);
+  });
 });

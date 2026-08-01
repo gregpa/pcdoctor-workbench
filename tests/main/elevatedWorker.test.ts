@@ -35,8 +35,8 @@ const {
   let nextHandle = 100;
   const codeTrustProof = {
     secure: true,
-    base_path: 'C:\\ProgramData\\PCDoctor',
-    worker_script: 'C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1',
+    base_path: 'C:\\Program Files\\PCDoctor Workbench\\privileged',
+    worker_script: 'C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1',
     protected_boundary: true,
     ancestor_delete_safe: true,
     ancestor_untrusted_rights: 0,
@@ -240,8 +240,8 @@ function mutateQueueAclProof(
 function codeTrustProof(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     secure: true,
-    base_path: 'C:\\ProgramData\\PCDoctor',
-    worker_script: 'C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1',
+    base_path: 'C:\\Program Files\\PCDoctor Workbench\\privileged',
+    worker_script: 'C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1',
     protected_boundary: true,
     ancestor_delete_safe: true,
     ancestor_untrusted_rights: 0,
@@ -1001,14 +1001,14 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     // spawnWorker checks the worker script exists before invoking spawn;
     // pretend the canonical path resolves so we exercise the heartbeat-
     // wait branch rather than the missing-script branch.
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
     await ensureWorkerRunning();
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
   it('shares one launch attempt across concurrent readiness checks', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
 
     const first = ensureWorkerRunning();
@@ -1020,7 +1020,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('passes a 32-byte capability only in the dedicated launcher child environment', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     const parentValue = process.env[_testing.CAPABILITY_ENV];
     setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
 
@@ -1048,7 +1048,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('uses strict minimal environments for proof helpers and the UAC launcher', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     const hostileKeys = [
       'COR_ENABLE_PROFILING',
       'COR_PROFILER',
@@ -1122,7 +1122,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('fails closed before spawn when queue-root trust verification throws', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     execFileSyncMock.mockImplementationOnce(() => {
       throw new Error('simulated ACL setup failure');
     });
@@ -1135,7 +1135,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('fails closed before spawn when effective queue-root trust verification denies', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     execFileSyncMock.mockReturnValueOnce(queueAclProof('root', {
       secure: false,
       protected: false,
@@ -1313,7 +1313,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     expect(resolveScriptPathMock).not.toHaveBeenCalled();
   });
 
-  it('uses only fixed ProgramData coordinates after a successful trust proof', async () => {
+  it('uses only the fixed Program Files payload and ProgramData queue after a successful trust proof', async () => {
     const bundleRoot = 'C:\\Users\\someone\\App Data\\PCDoctor\\resources\\powershell';
     resolveScriptPathMock.mockImplementation((relative: string) => (
       `${bundleRoot}\\${relative.replace(/\//g, '\\')}`
@@ -1323,14 +1323,14 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     await ensureWorkerRunning();
 
     const launchCommand = String(spawnMock.mock.calls[0][1]?.at(-1));
-    expect(launchCommand).toContain('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1');
-    expect(launchCommand).toContain('C:\\ProgramData\\PCDoctor');
+    expect(launchCommand).toContain('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1');
+    expect(launchCommand).toContain('C:\\Program Files\\PCDoctor Workbench\\privileged');
     expect(launchCommand).not.toContain(bundleRoot);
     expect(resolveScriptPathMock).not.toHaveBeenCalled();
   });
 
   it('fails immediately and safely when the launcher emits an error', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     vi.useFakeTimers();
     try {
       const pending = ensureWorkerRunning().catch((caught) => caught);
@@ -1349,7 +1349,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('fails closed on a premature nonzero launcher exit', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     vi.useFakeTimers();
     try {
       const pending = ensureWorkerRunning().catch((caught) => caught);
@@ -1368,7 +1368,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('treats an authenticated heartbeat, not a zero launcher exit, as readiness', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     vi.useFakeTimers();
     try {
       const pending = ensureWorkerRunning();
@@ -1385,7 +1385,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('keeps the same session after one transient invalid heartbeat read', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     vi.useFakeTimers();
     try {
       const initialStart = ensureWorkerRunning();
@@ -1410,7 +1410,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   });
 
   it('throws E_WORKER_NO_HEARTBEAT when heartbeat never appears within timeout', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     // We need to override the spawn timeout for this test or it would take
     // 60s. Use vi.useFakeTimers to fast-forward through the 250ms-poll loop.
     vi.useFakeTimers();
@@ -1428,7 +1428,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
   // verified against Electron production. Pin detached:false so the bug
   // can't reappear during a future "let's clean up the spawn opts" pass.
   it('spawn opts have detached:false (v2.5.33 regression)', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
     await ensureWorkerRunning();
     expect(spawnMock).toHaveBeenCalledTimes(1);
@@ -1671,7 +1671,7 @@ describe('elevatedWorker > dispatchCommand', () => {
   });
 
   it('snapshots params before UAC but signs only after the worker heartbeat', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     const params = { service: 'Spooler' };
     let heartbeatSeenAt = 0;
     let writtenPayload: Record<string, any> | null = null;
@@ -1701,7 +1701,7 @@ describe('elevatedWorker > dispatchCommand', () => {
   });
 
   it('keeps a retired session capability valid until its in-flight dispatch finishes', async () => {
-    fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
+    fakeFs.set('C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1', '<script>');
     vi.useFakeTimers();
     try {
       const initialStart = ensureWorkerRunning();
@@ -1792,8 +1792,8 @@ describe('elevatedWorker > action allowlist', () => {
 describe('elevatedWorker > buildLaunchCmd', () => {
   const opts = {
     pwsh: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-    workerScript: 'C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1',
-    basePath: 'C:\\ProgramData\\PCDoctor',
+    workerScript: 'C:\\Program Files\\PCDoctor Workbench\\privileged\\worker\\Elevated-Worker.ps1',
+    basePath: 'C:\\Program Files\\PCDoctor Workbench\\privileged',
     queueRoot: 'C:\\ProgramData\\PCDoctorWorkerQueue',
     sessionId: '00112233445566778899aabbccddeeff',
     queueUserSid: 'S-1-5-21-1000',

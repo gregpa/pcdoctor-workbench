@@ -1,8 +1,30 @@
+!macro PCDoctorApplyAcl TARGET TIER MODE
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Apply-TieredAcl.ps1" -Path "${TARGET}" -Tier ${TIER} -Mode ${MODE}' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor could not apply the ${TIER} ACL to ${TARGET} (exit $0). Installation is stopping fail-closed."
+    Abort
+!macroend
+
 !macro customInstall
+  ; The generated NSIS installer still accepts a command-line /D override even
+  ; when the directory page is disabled. Refuse anything except the fixed,
+  ; administrator-protected Program Files control plane before any mutation.
+  StrCmp $INSTDIR "C:\Program Files\PCDoctor Workbench" pcdoctor_install_dir_trusted
+    MessageBox MB_ICONSTOP "PCDoctor must be installed in C:\Program Files\PCDoctor Workbench. Installation is stopping fail-closed."
+    Abort
+  pcdoctor_install_dir_trusted:
+
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Initialize-ProgramDataRoot.ps1"' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor could not establish a safe ProgramData root (exit $0). Installation is stopping fail-closed."
+    Abort
+
   ; v2.3.0: seed C:\ProgramData\PCDoctor\ with the bundled powershell/ tree so
   ; the app works on a fresh install.
-  CreateDirectory "$APPDATA\..\..\..\ProgramData\PCDoctor"
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -Path \"$INSTDIR\resources\powershell\*\" -Destination \"C:\ProgramData\PCDoctor\" -Recurse -Force -ErrorAction Stop"'
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -Path \"$INSTDIR\resources\powershell\*\" -Destination \"C:\ProgramData\PCDoctor\" -Recurse -Force -ErrorAction Stop"' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor could not seed its ProgramData files (exit $0). Installation is stopping fail-closed."
+    Abort
 
   ; =============================================================
   ; v2.4.9 ACL SEQUENCE — shared with scripts/test-installer-acl.ps1
@@ -29,21 +51,16 @@
   ;     baseline): Users:M (writable — app writes scan reports here).
   ; =============================================================
 
-  ; Step 1: Defender exclusion so real-time scan doesn't race icacls.
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Add-MpPreference -ExclusionPath C:\ProgramData\PCDoctor -ErrorAction SilentlyContinue"'
-  ; 2s for any in-flight scan to release file locks.
-  Sleep 2000
+  ; Do not add a temporary Defender exclusion. ACL operations fail closed if
+  ; endpoint protection holds a file; installer policy must remain untouched.
 
-  ; Step 2: admin ownership of every file. On upgrade installs this is
-  ; critical — files from prior broken installs may have empty DACLs that
-  ; block even admin from modifying ACLs without explicit takeown.
-  ExecWait 'takeown.exe /f "C:\ProgramData\PCDoctor" /r /d y'
+  ; The initializer already takes ownership of each exact non-reparse node
+  ; and temporarily protects the complete tree. Do not reintroduce a
+  ; recursive takeown/icacls-reset window here.
 
-  ; Step 3: reset tree to default inherited ACLs. Clears any corruption
-  ; from prior installs. Transient intermediate state.
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor" /reset /T /C /Q'
-
-  ; Step 4: tier-A on root container + root-level files (root mode).
+  ; Tier-A on root container + root-level files (root mode) is applied only
+  ; after all subtrees are configured below. That keeps root child creation
+  ; disabled while recursive ACL operations run.
   ; Apply-TieredAcl's -Mode root handles the dir + immediate files ONLY and
   ; also adds the SQLite sibling-creation grant (Users:(WD,AD,DC)) on the
   ; root dir object so SQLite can create workbench.db-wal / workbench.db-shm
@@ -55,11 +72,9 @@
   ; harness saw it bind but this ExecWait form did not, so the SQLite grant
   ; never made it onto the real install. String params are unambiguous
   ; across every caller form (direct `&`, -File subprocess, NSIS ExecWait).
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor" -Tier A -Mode root'
-
-  ; Step 5: tier-A on script subdirs (recursive — all files inside get Users:RX).
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\actions" -Tier A'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\security" -Tier A'
+  ; Tier-A on script subdirs (recursive — all files inside get Users:RX).
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\actions" A recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\security" A recurse
 
   ; Step 6a: ensure data subdirectories exist.
   ; v2.4.10: added `settings` — nasConfig.ts writes `settings\nas.json` at
@@ -75,14 +90,14 @@
   CreateDirectory "C:\ProgramData\PCDoctor\settings"
 
   ; Step 6b: tier-B on each data subdir (recursive — all files inside get Users:M).
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\logs" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\reports" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\snapshots" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\exports" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\claude-bridge" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\history" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\baseline" -Tier B'
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Apply-TieredAcl.ps1" -Path "C:\ProgramData\PCDoctor\settings" -Tier B'
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\logs" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\reports" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\snapshots" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\exports" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\claude-bridge" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\history" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\baseline" B recurse
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor\settings" B recurse
 
   ; Step 6c (v2.5.7 B1 fix): pre-create workbench.db-wal / workbench.db-shm
   ; as zero-byte files IF they do not exist, so Step 7's additive grants
@@ -99,29 +114,17 @@
   ; warning 6000 ("unknown variable/constant") which is fatal under strict.
   ; The wal/shm paths have no spaces, so unquoted Test-Path / New-Item args
   ; are safe and avoid all NSIS-escape gymnastics.
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db-wal)) { New-Item -Path C:\ProgramData\PCDoctor\workbench.db-wal -ItemType File -Force -ErrorAction Stop | Out-Null }; if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db-shm)) { New-Item -Path C:\ProgramData\PCDoctor\workbench.db-shm -ItemType File -Force -ErrorAction Stop | Out-Null }"'
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path C:\ProgramData\PCDoctor\workbench.db) { if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db -PathType Leaf)) { throw $"workbench.db is not a file$" } } else { New-Item -Path C:\ProgramData\PCDoctor\workbench.db -ItemType File -Force -ErrorAction Stop | Out-Null }; if (Test-Path C:\ProgramData\PCDoctor\workbench.db-wal) { if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db-wal -PathType Leaf)) { throw $"workbench.db-wal is not a file$" } } else { New-Item -Path C:\ProgramData\PCDoctor\workbench.db-wal -ItemType File -Force -ErrorAction Stop | Out-Null }; if (Test-Path C:\ProgramData\PCDoctor\workbench.db-shm) { if (-not (Test-Path C:\ProgramData\PCDoctor\workbench.db-shm -PathType Leaf)) { throw $"workbench.db-shm is not a file$" } } else { New-Item -Path C:\ProgramData\PCDoctor\workbench.db-shm -ItemType File -Force -ErrorAction Stop | Out-Null }"' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor could not prepare its SQLite journal files (exit $0). Installation is stopping fail-closed."
+    Abort
 
-  ; Step 7: workbench.db needs Users:M despite living at root (tier-A).
-  ; Additive /grant on these specific files; does not propagate. /C
-  ; continues on errors. Step 6c above guarantees wal/shm exist so /grant
-  ; lands instead of silently no-opping.
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db" /grant "*S-1-5-32-545:(M)" /C /Q'
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-wal" /grant "*S-1-5-32-545:(M)" /C /Q'
-  ExecWait 'icacls.exe "C:\ProgramData\PCDoctor\workbench.db-shm" /grant "*S-1-5-32-545:(M)" /C /Q'
+  ; Root is last. Apply-TieredAcl gives the three pre-created SQLite files
+  ; direct Users:M while the root is still protected, then restores only the
+  ; non-inheriting sibling-creation grant (Users:WD,AD,DC) on the root object.
+  !insertmacro PCDoctorApplyAcl "C:\ProgramData\PCDoctor" A root
 
-  ; Step 8: remove Defender exclusion now ACL work is done.
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-MpPreference -ExclusionPath C:\ProgramData\PCDoctor -ErrorAction SilentlyContinue"'
-
-  ; Step 9: safety net - Repair-ScriptAcls.ps1 -Elevated scans for any
-  ; remaining zero-ACE files. With Apply-TieredAcl's dir/file separation
-  ; this should be a no-op, but it costs nothing to keep as a final check.
-  ; v2.4.10: guard with IfFileExists. NSIS ExecWait ignores exit codes, so
-  ; if the script ever fails to ship in the bundle we'd silently skip the
-  ; safety net rather than seeing a clear error. Test-Path equivalent.
-  IfFileExists "C:\ProgramData\PCDoctor\Repair-ScriptAcls.ps1" 0 +2
-    ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Repair-ScriptAcls.ps1" -Elevated'
-
-  ; Step 10 (v2.4.12 E-19 fix): post-install ACL verification.
+  ; Post-install ACL verification.
   ; Reads the INSTALLED DACL state on C:\ProgramData\PCDoctor and confirms
   ; it matches the expected tier configuration. Writes a timestamped log
   ; to C:\ProgramData\PCDoctor\logs\install-verify-*.log.
@@ -129,35 +132,57 @@
   ; Why this exists as a separate script from the pre-ship harness:
   ; the harness runs in a SANDBOX. v2.4.11 passed the harness but the
   ; real install silently dropped the SQLite grant. This script catches
-  ; drift on the REAL install state. NSIS ExecWait ignores the exit
-  ; code, but a failing install leaves a log file at a known location
-  ; that tells the user exactly what went wrong.
-  IfFileExists "C:\ProgramData\PCDoctor\Verify-InstalledAcl.ps1" 0 +2
-    ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Verify-InstalledAcl.ps1" -Quiet'
+  ; drift on the REAL install state and fails the install if it differs.
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Verify-InstalledAcl.ps1" -Quiet' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor's installed ACL verification failed (exit $0). Installation is stopping fail-closed."
+    Abort
 
   ; =============================================================
-  ; Scheduled task for autostart (unchanged from v2.4.6)
+  ; Phase 0 protected worker boundary
   ; =============================================================
-  FileOpen $0 "$TEMP\PCDoctor-Autostart.xml" w
-  FileWrite $0 `<?xml version="1.0" encoding="UTF-16"?>$\r$\n`
-  FileWrite $0 `<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">$\r$\n`
-  FileWrite $0 `<Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>$\r$\n`
-  FileWrite $0 `<Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>$\r$\n`
-  FileWrite $0 `<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><Hidden>false</Hidden><RunOnlyIfIdle>false</RunOnlyIfIdle><DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession><UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine><WakeToRun>false</WakeToRun><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>7</Priority></Settings>$\r$\n`
-  FileWrite $0 `<Actions Context="Author"><Exec><Command>$INSTDIR\PCDoctor Workbench.exe</Command><Arguments>--hidden</Arguments></Exec></Actions>$\r$\n`
-  FileWrite $0 `</Task>$\r$\n`
-  FileClose $0
-  ExecWait 'schtasks.exe /Create /TN "PCDoctor-Workbench-Autostart" /XML "$TEMP\PCDoctor-Autostart.xml" /F'
-  Delete "$TEMP\PCDoctor-Autostart.xml"
+  ; Install-WorkerBoundary.ps1 creates and protects these directories before
+  ; copying code into them. Owners/ACEs are SID-based and inheritance is
+  ; disabled: Administrators (*S-1-5-32-544) and SYSTEM (*S-1-5-18) get Full
+  ; Control; Users (*S-1-5-32-545) get (RX) only. The queue root at
+  ; C:\ProgramData\PCDoctorWorkerQueue grants no ordinary-user write rights.
+  ; Exact privileged payload: Elevated-Worker.ps1, Set-ServiceStartup.ps1,
+  ; Stop-Service.ps1, Start-Service.ps1, Restart-Service.ps1, Kill-Process.ps1,
+  ; Set-ProcessPriority.ps1, Set-ProcessAffinity.ps1, Suspend-Process.ps1,
+  ; Resume-Process.ps1. Cleanup-StaleWorkerSessions.ps1 removes only old,
+  ; exact 32-hex session leaves while running elevated.
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Install-WorkerBoundary.ps1" -Mode Install -SourceRoot "$INSTDIR\resources\powershell"' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor could not provision its protected worker boundary (exit $0). Installation is stopping fail-closed."
+    Abort
 
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\PCDoctor\Register-All-Tasks.ps1" -ForceRecreate'
+  ; One generated manifest owns registration, migration, and removal. No task
+  ; identity or command is constructed here in NSIS.
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Register-All-Tasks.ps1" -ForceRecreate -InstallDir "$INSTDIR"' $0
+  IntCmp $0 0 +3
+    MessageBox MB_ICONSTOP "PCDoctor could not apply its Scheduled Task manifest (exit $0). Installation is stopping fail-closed."
+    Abort
 !macroend
 
 !macro customUnInstall
-  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Workbench-Autostart" /F'
-  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Weekly-Review" /F'
-  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Forecast" /F'
-  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Security-Daily" /F'
-  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Security-Weekly" /F'
-  ExecWait 'schtasks.exe /Delete /TN "PCDoctor-Prune-Rollbacks" /F'
+  StrCmp $INSTDIR "C:\Program Files\PCDoctor Workbench" pcdoctor_uninstall_dir_trusted
+    MessageBox MB_ICONSTOP "PCDoctor's uninstall control plane is not in its trusted Program Files location. Uninstall is stopping fail-closed."
+    Abort
+  pcdoctor_uninstall_dir_trusted:
+
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Unregister-All-Tasks.ps1" -IncludeLegacy' $0
+  IntCmp $0 0 pcdoctor_uninstall_tasks_ok
+    MessageBox MB_ICONSTOP "PCDoctor could not remove its Scheduled Tasks (exit $0). Uninstall is stopping fail-closed."
+    Abort
+  pcdoctor_uninstall_tasks_ok:
+
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\powershell\Install-WorkerBoundary.ps1" -Mode Uninstall' $0
+  IntCmp $0 0 pcdoctor_uninstall_boundary_ok
+    MessageBox MB_ICONSTOP "PCDoctor could not remove its protected worker boundary (exit $0). Uninstall is stopping fail-closed."
+    Abort
+  pcdoctor_uninstall_boundary_ok:
+  ; Install-WorkerBoundary performs exact-path, non-reparse recursive removal
+  ; for C:\Program Files\PCDoctor Workbench\privileged and
+  ; C:\ProgramData\PCDoctorWorkerQueue. Do not add an NSIS RMDir fallback:
+  ; the helper must fail closed instead of following a replaced junction.
 !macroend

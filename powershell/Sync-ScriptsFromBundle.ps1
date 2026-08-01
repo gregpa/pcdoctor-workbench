@@ -65,6 +65,7 @@ if (-not (Test-Path $SourceDir)) {
 # copy reconstructs the same relative path under DestDir.
 $bundledSidecars = @(
     'event-allowlist.json'
+    'task-manifest.json'
 )
 
 # Walk the bundle and compare each tracked file to its deployed counterpart.

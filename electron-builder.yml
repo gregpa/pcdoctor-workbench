@@ -79,9 +79,11 @@ win:
 
 nsis:
   oneClick: false
-  perMachine: false
+  # Privileged provisioning consumes files from $INSTDIR. Keep that source in
+  # the administrator-protected, per-machine Program Files location.
+  perMachine: true
   allowElevation: true
-  allowToChangeInstallationDirectory: true
+  allowToChangeInstallationDirectory: false
   installerIcon: resources/icons/icon.ico
   uninstallerIcon: resources/icons/icon.ico
   include: scripts/installer.nsh

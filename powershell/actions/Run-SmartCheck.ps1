@@ -31,17 +31,16 @@ if ($DryRun) {
     exit 0
 }
 
-# Admin check
+# Some SMART providers return partial data to a standard user. Phase 0 runs this
+# read-only task in the interactive user's context and records that limitation.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    $err = @{ code = 'E_NOT_ADMIN'; message = 'Run-SmartCheck requires administrator privileges.' } | ConvertTo-Json -Compress
-    Write-Host "PCDOCTOR_ERROR:$err"
-    exit 1
-}
 
 $drives           = @()
 $warningLines     = [System.Collections.Generic.List[string]]::new()
 $skipped          = @()
+if (-not $isAdmin) {
+    [void]$warningLines.Add('Standard-user SMART collection is best-effort; privileged-only provider fields may be unavailable.')
+}
 
 # v2.4.19 (rewritten v2.4.21): smartctl third-tier fallback for drives
 # where the primary Windows APIs (Get-StorageReliabilityCounter +

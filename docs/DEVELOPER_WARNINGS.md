@@ -37,8 +37,10 @@ and applies the correct flags to each:
   on leaves anyway).
 
 Both `installer.nsh` and `scripts/test-installer-acl.ps1` call
-`Apply-TieredAcl.ps1`. If you change the ACL logic, change it there — not by
-patching inline icacls calls in either caller.
+`Apply-TieredAcl.ps1`. The installer first runs the fixed-path
+`Initialize-ProgramDataRoot.ps1`, which rejects reparse points and temporarily
+protects every existing node before copy or recursion. If you change the tier
+logic, change it in `Apply-TieredAcl.ps1`, not in an inline recursive `icacls`.
 
 ## 2. NEVER ship an installer rebuild without running the pre-ship gate
 
@@ -65,7 +67,8 @@ rebuild meanwhile.
 1. Creates a sandbox at `%TEMP%/pcdoctor-acl-sandbox-<random>/`
 2. Populates it with the same tree layout as `C:\ProgramData\PCDoctor\`
 3. Corrupts ~15% of files to zero-ACE DACLs (simulates upgrade-install state)
-4. Runs the exact installer ACL sequence via `Apply-TieredAcl.ps1`
+4. Runs the post-initializer tier sequence via `Apply-TieredAcl.ps1` (script
+   and data subtrees first, root/SQLite creation grant last)
 5. Verifies every file has a non-empty DACL
 6. Exits 1 if any file fails, 0 if all healthy
 
@@ -192,10 +195,17 @@ Two layers of defense:
   binds unambiguously across every invocation form; there's no "switch
   present vs absent" state to lose in tokenization.
 
-- **Harness mirrors installer form** - `scripts/test-installer-acl.ps1` now
+- **Harness mirrors installer invocation form** - `scripts/test-installer-acl.ps1` now
   invokes `Apply-TieredAcl.ps1` via `powershell.exe -File` subprocess (the
-  same form `ExecWait` uses in installer.nsh). What we test is byte-for-byte
-  what we ship.
+  same form `ExecWait` uses in installer.nsh). The production-only fixed-root
+  initializer is covered separately by source and installed-smoke gates.
+
+- **SQLite ACLs live inside the root-last pass** - root mode gives
+  `workbench.db`, `workbench.db-wal`, and `workbench.db-shm` direct Users:M
+  before applying the root directory ACL and its non-inheriting
+  Users:(WD,AD,DC) grant. Do not add a later root file pass or move the SQLite
+  grants outside this checked operation; either ordering can silently restore
+  Users:RX on the database files or reopen a pathname race after root exposure.
 
 Plus a post-install verification script (`Verify-InstalledAcl.ps1`) run by
 the installer against the REAL install state, writing a log to
@@ -212,20 +222,17 @@ bugs; verify catches install-time drift.
   harness and the installer in the same commit, and re-run the harness
   before rebuilding.
 
-## 7. Defender races icacls — exclusion + sleep, don't optimise away
+## 7. NEVER mutate Defender exclusions to make installer ACL work pass
 
-Windows Defender's real-time scan holds files open briefly during scan. If
-`icacls` hits a file that Defender has locked, the grant silently fails while
-`/inheritance:r` still succeeds (see warning #1).
+The old installer temporarily added `C:\ProgramData\PCDoctor` to Defender
+exclusions, suppressed add/remove errors, and removed the path unconditionally.
+An interrupted install could leave the exclusion behind; a reinstall could
+also remove a pre-existing user-selected exclusion.
 
-The installer adds a Defender exclusion (`Add-MpPreference -ExclusionPath`)
-and sleeps 2 seconds before running any icacls. **Do not remove the sleep or
-the exclusion.** Exclusion-add is not instantaneous — in-flight scans don't
-abort. The 2-second window is what lets Defender release existing handles
-before we touch ACLs.
-
-If you find yourself wanting to speed up the installer, find a different
-second to cut. Keep the Defender pause.
+The installer must leave Defender policy untouched. Every ACL helper now
+returns a checked exit code and NSIS aborts fail-closed if endpoint protection
+or another process prevents an ACL update. Do not restore the exclusion/sleep
+workaround; make the operation retryable and observable instead.
 
 ## 8. Event 41 Kernel-Power is not a BSOD
 

@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { listActionLog, type ActionLogRow } from './dataStore.js';
 import { PCDOCTOR_ROOT, LATEST_JSON_PATH } from './constants.js';
 import { resolveScriptPath } from './scriptRunner.js';
+import { taskManifest } from '../shared/taskManifest.js';
 
 export interface ClaudeReport {
   markdown: string;
@@ -22,25 +23,7 @@ export interface ClaudeReport {
   generated_at: number;
 }
 
-// v2.3.0 B3 fix #3: include the 11 Autopilot tasks so the Claude export
-// reflects all tasks Workbench manages.
-const MANAGED_TASKS = [
-  'PCDoctor-Workbench-Autostart', 'PCDoctor-Daily-Quick', 'PCDoctor-Weekly',
-  'PCDoctor-Weekly-Review', 'PCDoctor-Forecast', 'PCDoctor-Security-Daily',
-  'PCDoctor-Security-Weekly', 'PCDoctor-Prune-Rollbacks', 'PCDoctor-Monthly-Deep',
-  // Autopilot (v2.2.0) — registered by Register-All-Tasks.ps1
-  'PCDoctor-Autopilot-SmartCheck',
-  'PCDoctor-Autopilot-DefenderQuickScan',
-  'PCDoctor-Autopilot-UpdateDefenderDefs',
-  'PCDoctor-Autopilot-EmptyRecycleBins',
-  'PCDoctor-Autopilot-ClearBrowserCaches',
-  'PCDoctor-Autopilot-MalwarebytesCli',
-  'PCDoctor-Autopilot-AdwCleanerScan',
-  'PCDoctor-Autopilot-SafetyScanner',
-  'PCDoctor-Autopilot-HwinfoLog',
-  'PCDoctor-Autopilot-UpdateHostsStevenBlack',
-  'PCDoctor-Autopilot-ShrinkComponentStore',
-];
+const managedTaskNames = taskManifest.tasks.map(task => task.name);
 
 function truncate(s: string, max: number): string {
   if (!s) return '';
@@ -95,7 +78,7 @@ function collectScheduledTasks(): Array<{ name: string; state: string; lastRun: 
       '-File', scriptPath, '-JsonOutput',
     ], { encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     if (r.status !== 0 || !r.stdout) {
-      for (const name of MANAGED_TASKS) {
+      for (const name of managedTaskNames) {
         out.push({ name, state: 'QUERY FAILED', lastRun: '-', lastResult: '-', nextRun: '-' });
       }
       return out;
@@ -104,7 +87,7 @@ function collectScheduledTasks(): Array<{ name: string; state: string; lastRun: 
     const parsed = JSON.parse(r.stdout.trim()) as { success: boolean; tasks?: TaskRow[] };
     const byName = new Map<string, TaskRow>();
     for (const t of parsed.tasks ?? []) byName.set(t.name, t);
-    for (const name of MANAGED_TASKS) {
+    for (const name of managedTaskNames) {
       const t = byName.get(name);
       if (!t || t.status === 'Not registered') {
         out.push({ name, state: 'NOT REGISTERED', lastRun: '-', lastResult: '-', nextRun: '-' });
@@ -119,7 +102,7 @@ function collectScheduledTasks(): Array<{ name: string; state: string; lastRun: 
       }
     }
   } catch (e: any) {
-    for (const name of MANAGED_TASKS) {
+    for (const name of managedTaskNames) {
       out.push({ name, state: `ERROR: ${e?.message?.slice(0, 80) ?? 'unknown'}`, lastRun: '-', lastResult: '-', nextRun: '-' });
     }
   }

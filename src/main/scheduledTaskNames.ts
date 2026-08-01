@@ -1,8 +1,4 @@
-// v2.4.48 (B48-SEC-1): allowlist regex for renderer-controlled scheduled-
-// task names. Extracted from ipc.ts so the tests can import the constant
-// without pulling the entire IPC handler module (which transitively pulls
-// electron-updater, better-sqlite3, etc., none of which are loadable from
-// a vitest node environment).
+import { ACTIVE_TASKS } from '../shared/taskManifest.js';
 
 /**
  * Two-layer defence at the IPC entrypoint:
@@ -20,3 +16,11 @@
  *     below the practical Windows-task-name limit.
  */
 export const SCHEDULED_TASK_NAME_RE = /^PCDoctor-[A-Za-z0-9_-]{1,64}$/;
+
+/** Only active manifest tasks may be controlled by renderer-supplied IPC. */
+export const ACTIVE_TASK_NAMES = Object.freeze(ACTIVE_TASKS.map(task => task.name));
+const ACTIVE_TASK_NAME_SET = new Set(ACTIVE_TASK_NAMES);
+
+export function isManagedScheduledTaskName(name: string): boolean {
+  return SCHEDULED_TASK_NAME_RE.test(name) && ACTIVE_TASK_NAME_SET.has(name);
+}

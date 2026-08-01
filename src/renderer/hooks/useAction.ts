@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { api } from '@renderer/lib/ipc.js';
 import type { ActionName, ActionResult, IpcError } from '@shared/types.js';
+import { DAILY_QUICK_TASK_NAME } from '@shared/taskManifest.js';
 
 export interface UseActionOptions {
   /** When true (default), triggers a background scan and polls for a fresh status after a successful action. */
@@ -51,7 +52,7 @@ export function useAction(options: UseActionOptions = {}) {
     if (actionSucceeded && autoRefresh && !req.dry_run) {
       setRefreshing(true);
       try {
-        const scanResult = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
+        const scanResult = await api.runScheduledTaskNow(DAILY_QUICK_TASK_NAME);
         if (scanResult.ok) {
           let beforeTs = 0;
           try {

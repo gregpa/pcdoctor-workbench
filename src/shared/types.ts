@@ -634,6 +634,8 @@ export interface ScheduledTaskInfo {
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
+  manifest_state?: 'active' | 'deferred' | 'remove' | 'legacy';
+  expected_present?: boolean;
 }
 
 // --- System profile (first-run wizard W2) ---

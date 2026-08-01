@@ -15,7 +15,7 @@ import { TextDecoder } from 'node:util';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import log from 'electron-log/main.js';
-import { PCDOCTOR_ROOT, PWSH_FALLBACK } from './constants.js';
+import { PWSH_FALLBACK } from './constants.js';
 import {
   WORKER_ACTIONS,
   WORKER_ACTION_CONTRACTS,
@@ -52,7 +52,7 @@ const RESULT_POLL_INTERVAL_MS = 100;
 const HEARTBEAT_POLL_INTERVAL_MS = 250;
 const READ_CHUNK_BYTES = 64 * 1024;
 const STRICT_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-const WORKER_BASE_PATH = PCDOCTOR_ROOT;
+const WORKER_BASE_PATH = 'C:\\Program Files\\PCDoctor Workbench\\privileged';
 const WORKER_QUEUE_ROOT = 'C:\\ProgramData\\PCDoctorWorkerQueue';
 const WORKER_QUEUE_ROOT_OWNER_SID = 'S-1-5-32-544';
 const WORKER_SCRIPT_PATH = path.win32.join(WORKER_BASE_PATH, 'worker', 'Elevated-Worker.ps1');
@@ -735,7 +735,7 @@ function verifyTrustedWorkerCode(): void {
     || proof.no_reparse !== true
     || proof.no_untrusted_write !== true
     || proof.checked_files !== WORKER_ACTION_PATHS.length + 1) {
-    fail('E_CODE_TRUST', 'ProgramData worker code path is not a trusted immutable boundary');
+    fail('E_CODE_TRUST', 'Program Files worker code path is not a trusted immutable boundary');
   }
 }
 

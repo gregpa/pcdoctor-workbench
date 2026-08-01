@@ -33,7 +33,8 @@ const pExecFile = promisify(execFile);
 // without pulling the entire IPC handler module (which transitively
 // loads electron-updater + better-sqlite3 -- not loadable from vitest
 // node env).
-import { SCHEDULED_TASK_NAME_RE } from './scheduledTaskNames.js';
+import { isManagedScheduledTaskName, SCHEDULED_TASK_NAME_RE } from './scheduledTaskNames.js';
+import { buildScheduledTaskInventory } from './scheduledTaskInventory.js';
 // v2.4.49 (B48-AUDIT-1/2): renderer-supplied reviewDate validator. Extracted
 // to a leaf module so tests can import the constant without booting IPC.
 import { REVIEW_DATE_RE } from './reviewDateRe.js';
@@ -1004,28 +1005,6 @@ export function registerIpcHandlers() {
     return { ok: false, error: { code: 'E_TG_SEND', message: r.error ?? 'send failed' } };
   });
 
-  // v2.3.0 B3 fix #3: include the 11 Autopilot tasks so the Settings page's
-  // scheduled-tasks table shows them and Run-Now works on each.
-  const MANAGED_TASKS = new Set([
-    'PCDoctor-Workbench-Autostart', 'PCDoctor-Daily-Quick', 'PCDoctor-Weekly',
-    'PCDoctor-Weekly-Review', 'PCDoctor-Forecast', 'PCDoctor-Security-Daily',
-    'PCDoctor-Security-Weekly', 'PCDoctor-Prune-Rollbacks', 'PCDoctor-Monthly-Deep',
-    'PCDoctor-Autopilot-SmartCheck',
-    'PCDoctor-Autopilot-DefenderQuickScan',
-    'PCDoctor-Autopilot-UpdateDefenderDefs',
-    'PCDoctor-Autopilot-EmptyRecycleBins',
-    'PCDoctor-Autopilot-ClearBrowserCaches',
-    'PCDoctor-Autopilot-MalwarebytesCli',
-    'PCDoctor-Autopilot-AdwCleanerScan',
-    'PCDoctor-Autopilot-SafetyScanner',
-    'PCDoctor-Autopilot-HwinfoLog',
-    'PCDoctor-Autopilot-UpdateHostsStevenBlack',
-    'PCDoctor-Autopilot-ShrinkComponentStore',
-    // v2.4.51 (B49-NAS-2): Settings page Run-Now / Enable / Disable on the
-    // new daily NAS @Recycle refresh task.
-    'PCDoctor-Autopilot-RefreshNasRecycleSizes',
-  ]);
-
   ipcMain.handle('api:listScheduledTasks', async (): Promise<IpcResult<ScheduledTaskInfo[]>> => {
     // Delegate to Get-ScheduledTasksStatus.ps1 (COM-based enumeration via
     // Schedule.Service). The hang note here applies ONLY to schtasks /Query
@@ -1045,7 +1024,7 @@ export function registerIpcHandlers() {
         last_run: (t.last_run && !t.last_run.startsWith('11/30/1999')) ? t.last_run : null,
         last_result: t.last_result ?? null,
       }));
-      return { ok: true, data };
+      return { ok: true, data: buildScheduledTaskInventory(data) };
     } catch (e: any) {
       return { ok: false, error: { code: e?.code ?? 'E_INTERNAL', message: e?.message ?? 'Failed to query tasks' } };
     }
@@ -1060,7 +1039,7 @@ export function registerIpcHandlers() {
     if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
     }
-    if (!MANAGED_TASKS.has(name)) {
+    if (!isManagedScheduledTaskName(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
     }
     try {
@@ -1076,7 +1055,7 @@ export function registerIpcHandlers() {
     if (typeof name !== 'string' || !SCHEDULED_TASK_NAME_RE.test(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' has an invalid name` } };
     }
-    if (!MANAGED_TASKS.has(name)) {
+    if (!isManagedScheduledTaskName(name)) {
       return { ok: false, error: { code: 'E_FORBIDDEN', message: `Task '${name}' is not managed by PCDoctor` } };
     }
     try {

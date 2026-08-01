@@ -83,7 +83,7 @@ param(
     [ValidateSet('root','recurse')][string]$Mode = 'recurse'
 )
 
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path $Path)) {
     Write-Error "Path does not exist: $Path"
@@ -95,6 +95,14 @@ $usersPerm = if ($Tier -eq 'A') { 'RX' } else { 'M' }
 $sidSystem = '*S-1-5-18'
 $sidAdmins = '*S-1-5-32-544'
 $sidUsers  = '*S-1-5-32-545'
+$icaclsPath = Join-Path ([Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::System
+)) 'icacls.exe'
+
+if (-not [IO.File]::Exists($icaclsPath)) {
+    Write-Error "Trusted icacls executable is missing: $icaclsPath"
+    exit 1
+}
 
 # Module-scope flag tracking whether ANY icacls call in this invocation
 # returned a non-zero exit code. Consumed by the final `exit` at the
@@ -143,25 +151,113 @@ function Invoke-IcaclsChecked {
         [Parameter(Mandatory=$true)][string]$Description,
         [Parameter(Mandatory=$true)][string[]]$IcaclsArgs
     )
-    $out = & icacls @IcaclsArgs 2>&1
+    $out = & $icaclsPath @IcaclsArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
         $script:anyFailed = $true
-        Write-Warning "icacls failed ($Description): $out"
+        throw "icacls failed ($Description): $out"
     }
 }
 
-# Step 1: apply to the root directory itself with (OI)(CI) flags so new
-# children inherit. Use /grant:r to replace any existing grants deterministically.
-# /inheritance:r to strip inherited ACEs (security: don't inherit Users:M
-# from ProgramData on script dirs).
-Invoke-IcaclsChecked -Description "root dir $Path" -IcaclsArgs @(
-    $Path,
-    '/inheritance:r',
-    '/grant:r', "$($sidSystem):(OI)(CI)F",
-    '/grant:r', "$($sidAdmins):(OI)(CI)F",
-    '/grant:r', "$($sidUsers):(OI)(CI)$usersPerm",
-    '/C', '/Q'
-)
+function Get-IdentitySidValue {
+    param([Parameter(Mandatory = $true)]$IdentityReference)
+
+    try {
+        $identity = if ($IdentityReference -is [Security.Principal.IdentityReference]) {
+            $IdentityReference
+        } else {
+            New-Object Security.Principal.NTAccount([string]$IdentityReference)
+        }
+        return $identity.Translate([Security.Principal.SecurityIdentifier]).Value
+    } catch {
+        return [string]$IdentityReference
+    }
+}
+
+function Assert-SafeTraversalDirectory {
+    param([Parameter(Mandatory = $true)][string]$DirectoryPath)
+
+    $item = Get-Item -LiteralPath $DirectoryPath -Force
+    if (-not $item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "E_ACL_REPARSE: $DirectoryPath"
+    }
+
+    $acl = [IO.Directory]::GetAccessControl($DirectoryPath)
+    $ownerSid = Get-IdentitySidValue -IdentityReference $acl.Owner
+    if ($ownerSid -cne 'S-1-5-32-544' -or -not $acl.AreAccessRulesProtected) {
+        throw "E_ACL_TRAVERSAL_UNTRUSTED: owner/DACL $DirectoryPath"
+    }
+
+    $seenFullControl = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $forbiddenUsersRights = [int64](2 -bor 4 -bor 16 -bor 64 -bor 256 -bor 65536 -bor 262144 -bor 524288)
+    foreach ($ace in $acl.Access) {
+        $sid = Get-IdentitySidValue -IdentityReference $ace.IdentityReference
+        if ($ace.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $sid -notin @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-32-545')) {
+            throw "E_ACL_TRAVERSAL_UNTRUSTED: unexpected ACE $sid on $DirectoryPath"
+        }
+
+        $rights = [int64]$ace.FileSystemRights.value__
+        if ($sid -eq 'S-1-5-32-545' -and ($rights -band $forbiddenUsersRights) -ne 0) {
+            throw "E_ACL_TRAVERSAL_UNTRUSTED: writable Users ACE on $DirectoryPath"
+        }
+        if ($sid -in @('S-1-5-32-544', 'S-1-5-18') -and
+            ($rights -band [int64][Security.AccessControl.FileSystemRights]::FullControl) -eq
+            [int64][Security.AccessControl.FileSystemRights]::FullControl) {
+            [void]$seenFullControl.Add($sid)
+        }
+    }
+
+    if (-not $seenFullControl.Contains('S-1-5-32-544') -or
+        -not $seenFullControl.Contains('S-1-5-18')) {
+        throw "E_ACL_TRAVERSAL_UNTRUSTED: missing privileged ACE on $DirectoryPath"
+    }
+}
+
+function Assert-OrdinaryFile {
+    param([Parameter(Mandatory = $true)][string]$FilePath)
+
+    $item = Get-Item -LiteralPath $FilePath -Force
+    if ($item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "E_ACL_REPARSE: $FilePath"
+    }
+}
+
+function Set-PCDoctorFileAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][ValidateSet('RX','M')][string]$UsersPermission
+    )
+
+    Assert-OrdinaryFile -FilePath $FilePath
+    Invoke-IcaclsChecked -Description "file $FilePath" -IcaclsArgs @(
+        $FilePath,
+        '/inheritance:r',
+        '/grant:r', "${sidSystem}:F",
+        '/grant:r', "${sidAdmins}:F",
+        '/grant:r', "${sidUsers}:${UsersPermission}",
+        '/C', '/Q'
+    )
+}
+
+function Set-PCDoctorDirectoryAcl {
+    param([Parameter(Mandatory = $true)][string]$DirectoryPath)
+
+    $item = Get-Item -LiteralPath $DirectoryPath -Force
+    if (-not $item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "E_ACL_REPARSE: $DirectoryPath"
+    }
+    Invoke-IcaclsChecked -Description "directory $DirectoryPath" -IcaclsArgs @(
+        $DirectoryPath,
+        '/inheritance:r',
+        '/grant:r', "${sidSystem}:(OI)(CI)F",
+        '/grant:r', "${sidAdmins}:(OI)(CI)F",
+        '/grant:r', "${sidUsers}:(OI)(CI)${usersPerm}",
+        '/C', '/Q'
+    )
+}
 
 # v2.4.11: on tier-A root ONLY, add dir-level WD+AD+DC grant for Users.
 #
@@ -183,63 +279,69 @@ Invoke-IcaclsChecked -Description "root dir $Path" -IcaclsArgs @(
 # Applied only on tier-A and only on Mode=root calls -
 # script subdirs (actions/, security/) don't host a database and data
 # subdirs (tier-B) already have Users:M which includes WD+AD+DC.
-if ($Tier -eq 'A' -and $Mode -eq 'root') {
-    Invoke-IcaclsChecked -Description "root dir SQLite sibling-creation grant" -IcaclsArgs @(
-        $Path,
-        '/grant', "$($sidUsers):(WD,AD,DC)",
-        '/C', '/Q'
-    )
-}
+$normalizedRoot = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+$directories = New-Object 'System.Collections.Generic.List[string]'
+$files = New-Object 'System.Collections.Generic.List[string]'
+$pending = New-Object 'System.Collections.Generic.Stack[string]'
+$pending.Push($normalizedRoot)
 
-if ($Mode -eq 'root') {
-    # Root mode: lock the immediate FILES in this directory too,
-    # but don't descend into subdirectories. This is used for the root
-    # container - root-level .ps1 files and event-allowlist.json need
-    # tier-A, but subdirectories (actions/, security/, data dirs) get
-    # their own Apply-TieredAcl invocation with their own tier.
-    Get-ChildItem -Path $Path -File -Force -EA SilentlyContinue | ForEach-Object {
-        Invoke-IcaclsChecked -Description "root-level file $($_.Name)" -IcaclsArgs @(
-            $_.FullName,
-            '/inheritance:r',
-            '/grant:r', "$($sidSystem):F",
-            '/grant:r', "$($sidAdmins):F",
-            '/grant:r', "$($sidUsers):$usersPerm",
-            '/C', '/Q'
-        )
+# Inventory the complete recurse target before granting Tier-B Users:M to
+# any directory. Once a directory becomes user-writable, no later traversal
+# occurs beneath it. Root mode intentionally inspects but does not descend
+# into child directories because those receive their own tier invocations.
+while ($pending.Count -gt 0) {
+    $current = $pending.Pop()
+    Assert-SafeTraversalDirectory -DirectoryPath $current
+    $directories.Add($current)
+
+    foreach ($item in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "E_ACL_REPARSE: $($item.FullName)"
+        }
+        if ($item.PSIsContainer) {
+            if ($Mode -eq 'recurse') { $pending.Push($item.FullName) }
+        } else {
+            $files.Add($item.FullName)
+        }
     }
-    exit ([int]$script:anyFailed)
 }
 
-# Step 2: apply to every subdirectory with (OI)(CI) flags (propagates to
-# THEIR children). Each subdir gets its inheritance disabled explicitly so
-# it doesn't drift from parent's policy.
-Get-ChildItem -Path $Path -Recurse -Directory -Force -EA SilentlyContinue | ForEach-Object {
-    Invoke-IcaclsChecked -Description "subdir $($_.FullName)" -IcaclsArgs @(
-        $_.FullName,
-        '/inheritance:r',
-        '/grant:r', "$($sidSystem):(OI)(CI)F",
-        '/grant:r', "$($sidAdmins):(OI)(CI)F",
-        '/grant:r', "$($sidUsers):(OI)(CI)$usersPerm",
-        '/C', '/Q'
-    )
+# Leaf files cannot redirect traversal. Apply them before exposing any
+# Tier-B directory to ordinary-user modification.
+foreach ($filePath in $files) {
+    $fileUsersPermission = $usersPerm
+    if ($Tier -eq 'A' -and $Mode -eq 'root' -and
+        [IO.Path]::GetFileName($filePath) -in @('workbench.db', 'workbench.db-wal', 'workbench.db-shm')) {
+        # These three files are pre-created while the root is protected. Give
+        # them direct Users:M before the root receives its non-inheriting
+        # sibling-creation grant. No pathname mutation occurs after exposure.
+        $fileUsersPermission = 'M'
+    }
+    Set-PCDoctorFileAcl -FilePath $filePath -UsersPermission $fileUsersPermission
 }
 
-# Step 3: apply to every file WITHOUT (OI)(CI) flags. Inheritance flags
-# are meaningless on files (they have no children) and `icacls /grant:r`
-# REJECTS them for files, which is the bug that broke v2.4.6/7/8.
-Get-ChildItem -Path $Path -Recurse -File -Force -EA SilentlyContinue | ForEach-Object {
-    Invoke-IcaclsChecked -Description "file $($_.FullName)" -IcaclsArgs @(
-        $_.FullName,
-        '/inheritance:r',
-        '/grant:r', "$($sidSystem):F",
-        '/grant:r', "$($sidAdmins):F",
-        '/grant:r', "$($sidUsers):$usersPerm",
+# Secure descendants deepest-first. The root remains administrator-controlled
+# until every operation beneath it has completed.
+$directoriesBottomUp = @($directories | Sort-Object {
+    ($_ -split '[\\/]').Count
+} -Descending)
+foreach ($directoryPath in $directoriesBottomUp) {
+    if ($directoryPath.Equals($normalizedRoot, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    Set-PCDoctorDirectoryAcl -DirectoryPath $directoryPath
+}
+
+# The root is deliberately last: after this point Tier B may permit Users:M.
+Set-PCDoctorDirectoryAcl -DirectoryPath $normalizedRoot
+
+if ($Tier -eq 'A' -and $Mode -eq 'root') {
+    Invoke-IcaclsChecked -Description "SQLite root grant $normalizedRoot" -IcaclsArgs @(
+        $normalizedRoot,
+        '/grant', "${sidUsers}:(WD,AD,DC)",
         '/C', '/Q'
     )
 }
 
 # v2.4.10: propagate failure to caller. Previously always exit 0 which
-# masked silent icacls errors. Harness / installer safety-net pick up
-# the exit code; Repair-ScriptAcls.ps1 is the final net if anything
-# slipped through.
+# masked silent icacls errors. The first failure now terminates immediately;
+# this final status preserves the explicit subprocess contract.
 exit ([int]$script:anyFailed)

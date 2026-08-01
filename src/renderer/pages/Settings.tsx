@@ -570,18 +570,22 @@ export function Settings() {
                     {t.last_run && ` · Last: ${t.last_run}`}
                   </div>
                 </div>
-                <button
-                  onClick={() => runTaskNow(t.name)}
-                  title="Trigger this scheduled task immediately, bypassing its normal schedule. Useful for testing or pulling fresh data on demand."
-                  className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40"
-                >Run now</button>
-                <button
-                  onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')}
-                  title={t.status === 'Disabled' ? 'Re-enable this scheduled task. It will fire again on its configured schedule.' : 'Disable this scheduled task. It stays registered but won\'t fire until you re-enable it.'}
-                  className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40"
-                >
-                  {t.status === 'Disabled' ? 'Enable' : 'Disable'}
-                </button>
+                {t.manifest_state === 'active' && (
+                  <>
+                    <button
+                      onClick={() => runTaskNow(t.name)}
+                      title="Trigger this active diagnostic task immediately."
+                      className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40"
+                    >Run now</button>
+                    <button
+                      onClick={() => toggleTaskEnabled(t.name, t.status === 'Disabled')}
+                      title={t.status === 'Disabled' ? 'Re-enable this active diagnostic task.' : 'Disable this active diagnostic task.'}
+                      className="px-2 py-1 rounded-md text-[10px] pcd-button hover:border-status-info/40"
+                    >
+                      {t.status === 'Disabled' ? 'Enable' : 'Disable'}
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>

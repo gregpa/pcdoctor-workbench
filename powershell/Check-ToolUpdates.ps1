@@ -9,7 +9,11 @@
     just reports. Also safe to run as user: winget upgrade works without
     admin for detection (upgrade itself may need admin).
 #>
-param([switch]$DryRun, [switch]$JsonOutput)
+param(
+    [switch]$DryRun,
+    [switch]$JsonOutput,
+    [string]$TrustedWingetPath = ''
+)
 $ErrorActionPreference = 'Continue'
 trap { $e = @{code='E_PS_UNHANDLED';message=$_.Exception.Message} | ConvertTo-Json -Compress; Write-Host "PCDOCTOR_ERROR:$e"; exit 1 }
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -20,8 +24,18 @@ $cacheDir = 'C:\ProgramData\PCDoctor\tools'
 if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
 $cachePath = Join-Path $cacheDir 'updates.json'
 
-# winget may not be available (older Win10). Fail gracefully.
-$winget = (Get-Command winget -ErrorAction SilentlyContinue).Source
+# A caller already inside the elevated upgrade boundary passes the exact
+# Microsoft-signed WindowsApps executable it validated. Ordinary read-only
+# checks may still discover winget from the current user's command path.
+$winget = if ([string]::IsNullOrWhiteSpace($TrustedWingetPath)) {
+    (Get-Command winget -ErrorAction SilentlyContinue).Source
+} else {
+    $trustedCandidate = [IO.Path]::GetFullPath($TrustedWingetPath)
+    if (-not [IO.File]::Exists($trustedCandidate)) {
+        throw "E_TRUSTED_WINGET_MISSING: $trustedCandidate"
+    }
+    $trustedCandidate
+}
 if (-not $winget) {
     @{ success=$true; duration_ms=$sw.ElapsedMilliseconds; winget_available=$false;
        upgrades=@(); count=0; checked_at=(Get-Date).ToString('s');
@@ -34,7 +48,7 @@ if (-not $winget) {
 
 # Run winget upgrade. --include-unknown surfaces apps whose current version
 # couldn't be detected; --accept-source-agreements skips the first-run prompt.
-$out = & winget upgrade --include-unknown --accept-source-agreements 2>&1 | Out-String
+$out = & $winget upgrade --include-unknown --accept-source-agreements 2>&1 | Out-String
 $exit = $LASTEXITCODE
 
 # Parse the tabular output. Column positions are locale-sensitive; we

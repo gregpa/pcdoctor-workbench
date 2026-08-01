@@ -114,7 +114,7 @@ Write-Host "[phase 1b] Corrupted $corruptCount files."
 
 # ========== Phase 2: run the installer ACL sequence ==========
 Write-Host ""
-Write-Host "[phase 2] Running installer ACL sequence (via Apply-TieredAcl.ps1)..."
+Write-Host "[phase 2] Running post-initializer ACL tier sequence (via Apply-TieredAcl.ps1)..."
 
 # v2.4.12 (E-19 fix): invoke Apply-TieredAcl via `powershell.exe -File`
 # subprocess to MATCH the installer's NSIS ExecWait form exactly. The prior
@@ -141,32 +141,23 @@ function Invoke-ApplyTieredAcl {
     & powershell.exe @psArgs
 }
 
-Write-Host "  [step 1] takeown /r /d y"
-& takeown /f $Sandbox /r /d y 2>&1 | Out-Null
-
-Write-Host "  [step 2] /reset /T (clear corruption)"
-& icacls $Sandbox /reset /T /C /Q 2>&1 | Out-Null
-
-Write-Host "  [step 3] tier-A on root (Mode root - dir + immediate files + SQLite grant)"
-Invoke-ApplyTieredAcl -Path $Sandbox -Tier A -Mode root
-
-Write-Host "  [step 4] tier-A on script subdirs (recurse)"
+Write-Host "  [step 1] tier-A on script subdirs (recurse)"
 foreach ($sd in $scriptSubdirs) {
     Invoke-ApplyTieredAcl -Path (Join-Path $Sandbox $sd) -Tier A -Mode recurse
 }
 
-Write-Host "  [step 5] tier-B on data subdirs (recurse)"
+Write-Host "  [step 2] tier-B on data subdirs (recurse)"
 foreach ($sd in $dataSubdirs) {
     Invoke-ApplyTieredAcl -Path (Join-Path $Sandbox $sd) -Tier B -Mode recurse
 }
 
-Write-Host "  [step 6] workbench.db + wal + shm Users:M"
-# v2.5.7 (B1): mirror installer.nsh Step 7 -- grant on all three files, not
-# just the main db. The harness previously skipped wal/shm because it never
-# created them; now it does (Phase 1) and grants here.
-& icacls "$Sandbox\workbench.db"     /grant "*S-1-5-32-545:(M)" /C /Q 2>&1 | Out-Null
-& icacls "$Sandbox\workbench.db-wal" /grant "*S-1-5-32-545:(M)" /C /Q 2>&1 | Out-Null
-& icacls "$Sandbox\workbench.db-shm" /grant "*S-1-5-32-545:(M)" /C /Q 2>&1 | Out-Null
+Write-Host "  [step 3] tier-A on root last (Mode root + SQLite grant)"
+Invoke-ApplyTieredAcl -Path $Sandbox -Tier A -Mode root
+
+Write-Host "  [step 4] SQLite Users:M applied inside the root-last pass"
+# Apply-TieredAcl root mode owns both the three direct SQLite file grants and
+# the non-inheriting root sibling-creation grant. Keeping them in one checked
+# subprocess prevents the harness and installer from drifting in order.
 
 # ========== Phase 3: verify every file has non-empty DACL ==========
 Write-Host ""

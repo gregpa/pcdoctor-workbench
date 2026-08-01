@@ -13,6 +13,7 @@ import { ActionButton } from '@renderer/components/dashboard/ActionButton.js';
 import { AlertCard } from '@renderer/components/dashboard/AlertCard.js';
 import { AlertDetailModal } from '@renderer/components/dashboard/AlertDetailModal.js';
 import type { Finding, Trend } from '@shared/types.js';
+import { DAILY_QUICK_TASK_NAME } from '@shared/taskManifest.js';
 import { TrendLine } from '@renderer/components/dashboard/TrendLine.js';
 import { TrendLineModal } from '@renderer/components/dashboard/TrendLineModal.js';
 import { TrendBar } from '@renderer/components/dashboard/TrendBar.js';
@@ -221,7 +222,7 @@ export function Dashboard() {
     setScanning(true);
     const beforeTs = status?.generated_at ?? 0;
     try {
-      const r = await api.runScheduledTaskNow('PCDoctor-Daily-Quick');
+      const r = await api.runScheduledTaskNow(DAILY_QUICK_TASK_NAME);
       if (!r.ok) {
         setToast(`Scan failed to start: ${r.error?.message ?? 'unknown'}`);
         setTimeout(() => setToast(null), 5000);

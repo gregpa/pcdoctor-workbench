@@ -10,6 +10,30 @@ import {
   DEFAULT_SCRIPT_TIMEOUT_MS,
 } from './constants.js';
 
+const TRUSTED_PACKAGED_POWERSHELL_ROOT = 'C:\\Program Files\\PCDoctor Workbench\\resources\\powershell';
+const BUNDLED_CONTROL_PLANE_SCRIPTS = new Set([
+  'initialize-programdataroot.ps1',
+  'install-workerboundary.ps1',
+  'register-all-tasks.ps1',
+  'unregister-all-tasks.ps1',
+]);
+
+function getBundledPowerShellRoot(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'powershell')
+    : path.join(app.getAppPath(), 'powershell');
+}
+
+function resolveWithinRoot(root: string, relativeScriptPath: string): string {
+  const normalizedRoot = path.resolve(root);
+  const resolved = path.resolve(normalizedRoot, relativeScriptPath.replace(/\//g, '\\'));
+  const requiredPrefix = `${normalizedRoot}${path.sep}`.toLowerCase();
+  if (!resolved.toLowerCase().startsWith(requiredPrefix)) {
+    throw new Error(`Script path escapes its fixed root: ${relativeScriptPath}`);
+  }
+  return resolved;
+}
+
 // v2.5.22: ProgramData → bundle fallback. Pre-2.5.22 every script path was
 // hardcoded to C:\ProgramData\PCDoctor\<rel>. On a fresh install where the
 // NSIS customInstall Copy-Item didn't fully populate ProgramData (Defender,
@@ -31,13 +55,14 @@ import {
 // missing scripts (e.g. typo'd relative path in a caller).
 export function resolveScriptPath(relativeScriptPath: string): string {
   const rel = relativeScriptPath.replace(/\//g, '\\');
+  if (BUNDLED_CONTROL_PLANE_SCRIPTS.has(rel.toLowerCase())) {
+    return resolveWithinRoot(getBundledPowerShellRoot(), rel);
+  }
   const programDataPath = path.join(PCDOCTOR_ROOT, rel);
   if (existsSync(programDataPath)) return programDataPath;
 
   try {
-    const bundledRoot = app.isPackaged
-      ? path.join(process.resourcesPath, 'powershell')
-      : path.join(app.getAppPath(), 'powershell');
+    const bundledRoot = getBundledPowerShellRoot();
     const bundledPath = path.join(bundledRoot, rel);
     if (existsSync(bundledPath)) return bundledPath;
   } catch {
@@ -99,6 +124,28 @@ export class PCDoctorScriptError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+/** Resolve elevated code only from the fixed packaged Program Files bundle. */
+export function resolveElevatedScriptPath(relativeScriptPath: string): string {
+  const bundledRoot = getBundledPowerShellRoot();
+  if (app.isPackaged
+    && path.resolve(bundledRoot).toLowerCase() !== path.resolve(TRUSTED_PACKAGED_POWERSHELL_ROOT).toLowerCase()) {
+    throw new PCDoctorScriptError(
+      'E_ELEVATED_SOURCE_UNTRUSTED',
+      `Elevated scripts require the fixed Program Files bundle: ${TRUSTED_PACKAGED_POWERSHELL_ROOT}`,
+      { bundledRoot },
+    );
+  }
+  const scriptPath = resolveWithinRoot(bundledRoot, relativeScriptPath);
+  if (!existsSync(scriptPath)) {
+    throw new PCDoctorScriptError(
+      'E_SCRIPT_NOT_FOUND',
+      `Bundled elevated script is missing: ${relativeScriptPath}`,
+      { scriptPath },
+    );
+  }
+  return scriptPath;
 }
 
 export interface RunOptions {
@@ -282,7 +329,7 @@ export async function runElevatedPowerShellScript<T = unknown>(
   args: string[] = [],
   opts: RunOptions = {},
 ): Promise<T> {
-  const scriptPath = resolveScriptPath(relativeScriptPath);
+  const scriptPath = resolveElevatedScriptPath(relativeScriptPath);
   const pwsh = existsSync(resolvePwshPath()) ? resolvePwshPath() : PWSH_FALLBACK;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
 

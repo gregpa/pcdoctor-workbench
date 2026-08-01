@@ -61,17 +61,21 @@ function Log([string]$m) {
 
 # Ensure Application log event source exists for this run (requires admin first time).
 $evtSource = 'PCDoctor'
-try {
-    if (-not [System.Diagnostics.EventLog]::SourceExists($evtSource)) {
-        New-EventLog -LogName Application -Source $evtSource -ErrorAction Stop
-        Log "Created Application log event source: $evtSource"
+$eventLogWritesEnabled = $Mode -ne 'Report'
+if ($eventLogWritesEnabled) {
+    try {
+        if (-not [System.Diagnostics.EventLog]::SourceExists($evtSource)) {
+            New-EventLog -LogName Application -Source $evtSource -ErrorAction Stop
+            Log "Created Application log event source: $evtSource"
+        }
+    } catch {
+        Log "Could not create event source (need admin first run): $_"
     }
-} catch {
-    Log "Could not create event source (need admin first run): $_"
 }
 
 function Write-PCDEvent {
     param([int]$EventId, [ValidateSet('Information','Warning','Error')]$Level = 'Information', [string]$Message)
+    if (-not $eventLogWritesEnabled) { return }
     try {
         Write-EventLog -LogName Application -Source $evtSource -EntryType $Level -EventId $EventId -Message $Message -ErrorAction Stop
     } catch {
