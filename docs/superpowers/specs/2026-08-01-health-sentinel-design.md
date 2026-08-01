@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01
 
-**Status:** Revised concept approved; written specification awaiting final review
+**Status:** Baseline approved by Greg on 2026-08-01; demand-start privileged-broker delta awaits confirmation
 
 **Scope:** Trustworthy continuous health monitoring plus centrally gated, evidence-driven scheduled maintenance
 
@@ -29,10 +29,11 @@ A separate Maintenance Orchestrator will consume durable, confirmed incidents an
 11. Existing useful diagnostic and security workflows are preserved through a single task manifest, while unsafe or orphaned schedules are explicitly migrated.
 12. User-context background tasks do not flash visible console windows.
 13. Lint, typecheck, unit/integration tests, PowerShell-contract tests, packaging, native ABI checks, and installed smoke tests pass before release packaging is accepted.
+14. Unattended privileged maintenance uses one demand-start, admin-protected, manifest-defined broker with mutual process validation; it never trusts a user-writable queue or remains running between intents.
 
 ## Non-goals
 
-- No Windows service, additional Scheduled Task, kernel driver, always-elevated helper, or hidden background executable.
+- No Windows service, kernel driver, persistent elevated helper, or general-purpose hidden background executable. One demand-start SYSTEM broker task may replace the existing direct SYSTEM mutation tasks; it has no calendar trigger and runs only a fixed protected broker from an admin-writable location.
 - No remediation directly from Sentinel rules or notifications; only the Maintenance Orchestrator may request an action.
 - No general-purpose self-healing, arbitrary script execution, policy expressions, or AI-selected mutations.
 - No replacement of the existing daily, weekly, monthly, Defender, or deep-scan workflows.
@@ -56,6 +57,7 @@ The runtime is divided into these modules:
 - `src/main/healthSentinelRules.ts`: pure functions that convert ordered samples and prior incident state into deterministic transitions.
 - `src/main/maintenanceOrchestrator.ts`: policy-intent lifecycle, resource locks, preflight, dry run, action dispatch, postcondition verification, cooldowns, and circuit breakers.
 - `src/main/automationPolicy.ts`: pure default-deny policy evaluation for action classification, incident evidence, authorization, machine state, and reboot prohibition.
+- `src/main/maintenanceBroker.ts` plus an admin-protected broker payload: one short-lived named-pipe exchange for privileged automatic actions that cannot execute in the standard-user tray process.
 - `src/main/dataStore.ts`: transactional sample, normalized metric, incident, report, retention, and query operations.
 - `src/shared/taskManifest.ts` plus a generated PowerShell representation: the single source for task identity, cadence, workload weight, execution context, visibility, and uninstall behavior.
 - Existing notification code: delivers deduplicated open and escalation notices, respecting configured quiet hours and optional Telegram delivery.
@@ -64,7 +66,7 @@ The runtime is divided into these modules:
 
 Closing PCDoctor Workbench stops collection. The next startup records the resulting interval as a coverage gap; it does not fabricate samples. Sentinel will not create another persistence mechanism merely to conceal that gap.
 
-Adaptive maintenance pauses when Workbench is closed. Calendar-based read-only diagnostics may remain in Windows Task Scheduler for resilience. Scheduled mutations are migrated away from direct script invocation: they create a fixed-ID maintenance intent or are owned by the tray-resident Orchestrator. No Scheduled Task accepts an arbitrary script path.
+Adaptive maintenance pauses when Workbench is closed. Calendar-based read-only diagnostics may remain in Windows Task Scheduler for resilience. Scheduled mutations are migrated away from direct script invocation: they create a fixed-ID maintenance intent or are owned by the tray-resident Orchestrator. The sole privileged broker task is demand-start only and executes its fixed admin-protected payload. No Scheduled Task accepts an arbitrary script path or mutation arguments.
 
 ### Scheduler behavior
 
@@ -194,13 +196,21 @@ The execution flow is:
 2. The central policy evaluator resolves the compiled action metadata and defaults to deny.
 3. It evaluates enabled/snoozed state, evidence quality, maintenance window, machine idle/load state, cooldown, attempt budget, resource locks, reboot prohibition, and action-specific preflight.
 4. The action's dry run must return a valid bounded plan matching the allowlisted action.
-5. The existing action runner dispatches it, and the elevated worker independently revalidates the signed/capability-bound request when elevation is required.
+5. The existing action runner dispatches standard-user work. Manual elevated work uses the authenticated UAC worker. Automatic privileged work uses the demand-start protected broker, which independently revalidates the fixed action, protected grant, process identities, gates, and reboot prohibition.
 6. The Orchestrator verifies the exact postcondition from a fresh observation, records the evidence, and resolves or annotates the incident.
 7. Failure invokes at most one proven rollback. An unverified rollback, failed postcondition, repeated failure, or unexpected result opens the policy circuit breaker and requires manual review.
 
 Every catalog action declares `automation`, `requiresRollback`, `resourceLocks`, `rebootPolicy`, preflight ID, postcondition ID, timeout, cooldown, and attempt limit. `automation: never` is the default. The evaluator and action runner reject old callers that omit this metadata. The elevated boundary enforces action ID and immutable arguments rather than trusting a user-writable script or queue payload.
 
 No Windows Scheduled Task may directly invoke a mutating maintenance script. The single task manifest either runs a read-only diagnostic or submits a known intent ID through the authenticated application boundary. Database policy state controls both scheduled and incident-triggered paths, so disabling or snoozing a policy has immediate effect everywhere.
+
+### Privileged automatic execution
+
+The tray application normally runs without elevation, so it cannot safely perform unattended service/ACL/event-log work through the ten-minute UAC worker. Privileged automatic actions therefore use one manifest-defined task, `PCDoctor-Maintenance-Broker`, registered as SYSTEM with no calendar trigger and `MultipleInstances=IgnoreNew`. It replaces the prior collection of direct SYSTEM mutation tasks and exits after one bounded intent.
+
+The broker payload and its fixed policy manifest are installed beneath an admin-protected Program Files location. Standard users have read/execute but no write access. The Workbench and broker communicate over a short-lived named pipe restricted to the current user and SYSTEM. Each side obtains and validates the peer process PID, token/integrity, image identity, installed path, expected publisher/hash, nonce, intent/policy/action IDs, and issue/expiry time before exchanging one immutable command. No user-writable command directory authorizes execution.
+
+Privileged policy enablement requires a one-time elevated update to an admin-protected grant containing only known policy IDs and `rebootPolicy: never`. The ordinary database setting may disable or snooze execution but cannot grant broker authority. The broker independently reruns the action-specific preflight immediately before mutation and accepts no script path, executable path, command text, or caller-defined arguments.
 
 Task workload weights and resource locks stagger expensive jobs. Defender scans, DISM read-only health checks, PCDoctor deep scans, reporting, and maintenance never begin concurrently merely because calendar triggers align. Load, active-user, audio, backup, and other action-specific gates defer rather than force execution.
 
@@ -357,6 +367,8 @@ Database and report files remain local under existing PCDoctor-controlled data l
 
 The elevated worker is hardened before automatic mutation is enabled. Requests use per-session, short-lived capability material; authenticated envelopes bind action ID, immutable arguments, nonce, issue/expiry time, and requesting process/session. Queue ACLs restrict writers, replay is rejected, and the elevated boundary independently loads the compiled action policy. User-writable queue contents alone never authorize execution.
 
+The UAC worker remains limited to explicitly approved manual sessions. The demand-start broker is the only privileged automatic boundary. Its payload, task XML, installed ACL, hash/publisher identity, protected policy grant, mutual named-pipe validation, expiry/replay handling, and fixed action map all receive package and installed-smoke tests.
+
 Bundled or downloaded tools require pinned hashes and expected publisher/signature verification before use. Release artifacts disclose signing state; an unsigned development build cannot silently become an automatic maintenance release.
 
 ## Implementation phases
@@ -371,7 +383,7 @@ Implement the one-shot collector, Sentinel runtime, pure rules, incident/report 
 
 ### Phase 2: safe maintenance foundation
 
-Implement intents, runs, locks, preflight/dry-run/postcondition/rollback handling, cooldowns, circuit breakers, notifications, and safe automatic policies for PCDoctor-owned retention, schedule staggering, reports, Defender definitions, and read-only checks.
+Implement intents, runs, locks, preflight/dry-run/postcondition/rollback handling, cooldowns, circuit breakers, notifications, the demand-start protected broker, and safe automatic policies for PCDoctor-owned retention, schedule staggering, reports, Defender definitions, and read-only checks.
 
 ### Phase 3: machine-specific conditional policies
 
