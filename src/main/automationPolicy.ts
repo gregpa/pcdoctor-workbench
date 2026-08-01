@@ -6,13 +6,34 @@
  * Key decisions: Checks are ordered from trust boundaries to action proofs and return the first denial.
  */
 
+import { types as nodeTypes } from 'node:util';
 import type {
   AutomationPolicyInput,
   PolicyDecision,
   TrustedExecutionContext,
 } from '../shared/automation.js';
 
+const INPUT_KEYS = [
+  'context',
+  'globalEnabled',
+  'automation',
+  'rebootPolicy',
+  'requiresRollback',
+  'resourceLocks',
+  'preflightId',
+  'postconditionId',
+  'cooldownMs',
+  'maxAttempts',
+  'confirmLevel',
+  'rebootRequired',
+  'policy',
+  'evidence',
+  'gates',
+  'now',
+] as const;
 const CONTEXT_KEYS = ['mode', 'source', 'intentId', 'policyId'] as const;
+const POLICY_KEYS = ['enabled', 'snoozedUntil'] as const;
+const EVIDENCE_KEYS = ['state'] as const;
 const GATE_KEYS = [
   'maintenanceWindowOpen',
   'loadAllowed',
@@ -26,65 +47,133 @@ const GATE_KEYS = [
 
 type PlainRecord = Record<string, unknown>;
 
-interface RuntimePolicyState extends PlainRecord {
+interface RuntimePolicyState {
   enabled: unknown;
   snoozedUntil: number | null;
 }
 
-interface RuntimeEvidence extends PlainRecord {
+interface RuntimeEvidence {
   state: 'fresh' | 'stale';
 }
 
-/** Confirms a boundary value is a plain, non-array record. */
-function isPlainRecord(value: unknown): value is PlainRecord {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+/**
+ * Copies allowlisted own data properties into an immutable null-prototype record.
+ * Reflection and proxy failures return null without executing boundary accessors.
+ */
+function snapshotPlainDataRecord(
+  value: unknown,
+  allowedKeys: readonly string[],
+  requiredKeys: readonly string[] = [],
+): Readonly<PlainRecord> | null {
+  try {
+    if (typeof value !== 'object'
+      || value === null
+      || nodeTypes.isProxy(value)
+      || Array.isArray(value)) {
+      return null;
+    }
 
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
 
-/** Confirms every own key is allowlisted and no symbol or hidden key bypasses the check. */
-function hasOnlyOwnKeys(record: PlainRecord, allowedKeys: readonly string[]): boolean {
-  return Reflect.ownKeys(record).every((key) => (
-    typeof key === 'string' && allowedKeys.includes(key)
-  ));
-}
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const ownKeys = Reflect.ownKeys(descriptors);
+    if (ownKeys.some((key) => typeof key !== 'string' || !allowedKeys.includes(key))) return null;
+    if (requiredKeys.some((key) => !Object.prototype.hasOwnProperty.call(descriptors, key))) return null;
 
-/** Confirms a record contains exactly the required own keys. */
-function hasExactOwnKeys(record: PlainRecord, requiredKeys: readonly string[]): boolean {
-  const ownKeys = Reflect.ownKeys(record);
-  return ownKeys.length === requiredKeys.length
-    && ownKeys.every((key) => typeof key === 'string' && requiredKeys.includes(key));
+    const snapshot = Object.create(null) as PlainRecord;
+    for (const key of ownKeys) {
+      if (typeof key !== 'string') return null;
+      const descriptor = descriptors[key];
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return null;
+      snapshot[key] = descriptor.value;
+    }
+
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
 }
 
 /** Confirms an optional context identifier is absent or a non-empty string. */
-function hasValidOptionalId(context: PlainRecord, key: 'intentId' | 'policyId'): boolean {
+function hasValidOptionalId(context: Readonly<PlainRecord>, key: 'intentId' | 'policyId'): boolean {
   if (!Object.prototype.hasOwnProperty.call(context, key)) return true;
   return typeof context[key] === 'string' && context[key].length > 0;
 }
 
 /** Confirms a compiled proof identifier is either intentionally absent or non-empty. */
-function isNullableId(value: string | null | undefined): boolean {
+function isNullableId(value: unknown): boolean {
   return value === null || (typeof value === 'string' && value.length > 0);
 }
 
-/** Confirms context shape, identifiers, and mode-to-source trust relationship. */
-function isTrustedContext(context: unknown): context is TrustedExecutionContext {
-  if (!isPlainRecord(context) || !hasOnlyOwnKeys(context, CONTEXT_KEYS)) return false;
-  if (!hasValidOptionalId(context, 'intentId') || !hasValidOptionalId(context, 'policyId')) return false;
+/** Snapshots context once, then validates identifiers and the mode-to-source relationship. */
+function snapshotTrustedContext(context: unknown): TrustedExecutionContext | null {
+  const snapshot = snapshotPlainDataRecord(context, CONTEXT_KEYS, ['mode', 'source']);
+  if (!snapshot
+    || !hasValidOptionalId(snapshot, 'intentId')
+    || !hasValidOptionalId(snapshot, 'policyId')) {
+    return null;
+  }
 
-  const validManualContext = context.mode === 'manual'
-    && (context.source === 'renderer' || context.source === 'telegram-approved');
-  const validAutomaticContext = context.mode === 'automatic'
-    && (context.source === 'incident'
-      || context.source === 'schedule'
-      || context.source === 'maintenance');
+  const validManualContext = snapshot.mode === 'manual'
+    && (snapshot.source === 'renderer' || snapshot.source === 'telegram-approved');
+  const validAutomaticContext = snapshot.mode === 'automatic'
+    && (snapshot.source === 'incident'
+      || snapshot.source === 'schedule'
+      || snapshot.source === 'maintenance');
 
-  return validManualContext || validAutomaticContext;
+  return validManualContext || validAutomaticContext
+    ? snapshot as unknown as TrustedExecutionContext
+    : null;
+}
+
+/** Snapshots a dense, ordinary string array without invoking indexed accessors. */
+function snapshotStringArray(value: unknown): readonly string[] | null {
+  try {
+    if (typeof value !== 'object'
+      || value === null
+      || nodeTypes.isProxy(value)
+      || !Array.isArray(value)
+      || Object.getPrototypeOf(value) !== Array.prototype) {
+      return null;
+    }
+
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<
+      PropertyKey,
+      PropertyDescriptor
+    >;
+    const ownKeys = Reflect.ownKeys(descriptors);
+    const lengthDescriptor = descriptors.length;
+    if (!lengthDescriptor || !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value')) return null;
+
+    const length = lengthDescriptor.value;
+    if (!Number.isSafeInteger(length) || length < 0 || ownKeys.length !== length + 1) return null;
+
+    const snapshot: string[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor
+        || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        || typeof descriptor.value !== 'string'
+        || descriptor.value.length === 0) {
+        return null;
+      }
+      snapshot.push(descriptor.value);
+    }
+
+    if (ownKeys.some((key) => (
+      typeof key !== 'string'
+      || (key !== 'length' && !Number.isInteger(Number(key)))
+    ))) return null;
+
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
 }
 
 /** Confirms all compiled action metadata is present and structurally valid. */
-function hasCompleteActionMetadata(input: AutomationPolicyInput): boolean {
+function hasCompleteActionMetadata(input: Readonly<PlainRecord>): boolean {
   const validAutomation = input.automation === 'never'
     || input.automation === 'safe'
     || input.automation === 'conditional';
@@ -92,8 +181,6 @@ function hasCompleteActionMetadata(input: AutomationPolicyInput): boolean {
   return validAutomation
     && typeof input.rebootPolicy === 'string'
     && typeof input.requiresRollback === 'boolean'
-    && Array.isArray(input.resourceLocks)
-    && input.resourceLocks.every((lock) => typeof lock === 'string' && lock.length > 0)
     && isNullableId(input.preflightId)
     && isNullableId(input.postconditionId)
     && typeof input.cooldownMs === 'number'
@@ -109,23 +196,33 @@ function hasCompleteActionMetadata(input: AutomationPolicyInput): boolean {
     && typeof input.rebootRequired === 'boolean';
 }
 
-/** Confirms policy timing can be evaluated without accepting malformed containers. */
-function isPolicyState(policy: unknown): policy is RuntimePolicyState {
-  return isPlainRecord(policy)
-    && (policy.snoozedUntil === null
-      || (typeof policy.snoozedUntil === 'number' && Number.isFinite(policy.snoozedUntil)));
+/** Snapshots exact persisted policy state while preserving enabled for ordered denial. */
+function snapshotPolicyState(policy: unknown): RuntimePolicyState | null {
+  const snapshot = snapshotPlainDataRecord(policy, POLICY_KEYS, POLICY_KEYS);
+  if (!snapshot
+    || (snapshot.snoozedUntil !== null
+      && (typeof snapshot.snoozedUntil !== 'number'
+        || !Number.isFinite(snapshot.snoozedUntil)))) {
+    return null;
+  }
+
+  return {
+    enabled: snapshot.enabled,
+    snoozedUntil: snapshot.snoozedUntil,
+  } as RuntimePolicyState;
 }
 
-/** Confirms evidence is the exact trusted freshness payload. */
-function isEvidence(evidence: unknown): evidence is RuntimeEvidence {
-  return isPlainRecord(evidence)
-    && hasExactOwnKeys(evidence, ['state'])
-    && (evidence.state === 'fresh' || evidence.state === 'stale');
+/** Snapshots exact evidence without rereading caller-controlled state. */
+function snapshotEvidence(evidence: unknown): RuntimeEvidence | null {
+  const snapshot = snapshotPlainDataRecord(evidence, EVIDENCE_KEYS, EVIDENCE_KEYS);
+  return snapshot && (snapshot.state === 'fresh' || snapshot.state === 'stale')
+    ? { state: snapshot.state }
+    : null;
 }
 
-/** Confirms the gate bundle is a plain record with every documented gate and no extras. */
-function hasExactGateShape(gates: unknown): gates is PlainRecord {
-  return isPlainRecord(gates) && hasExactOwnKeys(gates, GATE_KEYS);
+/** Snapshots all documented gates exactly once for ordered literal checks. */
+function snapshotGates(gates: unknown): Readonly<PlainRecord> | null {
+  return snapshotPlainDataRecord(gates, GATE_KEYS, GATE_KEYS);
 }
 
 /**
@@ -133,59 +230,66 @@ function hasExactGateShape(gates: unknown): gates is PlainRecord {
  * Expected missing or failed policy inputs return denial codes and never throw.
  */
 export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDecision {
-  if (!isPlainRecord(input) || !isTrustedContext(input.context)) {
+  const inputSnapshot = snapshotPlainDataRecord(input, INPUT_KEYS);
+  const context = inputSnapshot
+    ? snapshotTrustedContext(inputSnapshot.context)
+    : null;
+  if (!inputSnapshot || !context) {
     return { allowed: false, code: 'E_CONTEXT_REQUIRED' };
   }
 
   // Manual execution remains governed by the existing confirmation UX, not automatic gates.
-  if (input.context.mode === 'manual') {
+  if (context.mode === 'manual') {
     return { allowed: true, code: 'ALLOW' };
   }
 
-  if (input.globalEnabled !== true) {
+  if (inputSnapshot.globalEnabled !== true) {
     return { allowed: false, code: 'E_AUTOMATION_DISABLED' };
   }
 
-  if (!hasCompleteActionMetadata(input)) {
+  const resourceLocks = snapshotStringArray(inputSnapshot.resourceLocks);
+  if (resourceLocks === null || !hasCompleteActionMetadata(inputSnapshot)) {
     return { allowed: false, code: 'E_ACTION_METADATA_REQUIRED' };
   }
 
-  if (input.automation === 'never') {
+  if (inputSnapshot.automation === 'never') {
     return { allowed: false, code: 'E_AUTOMATION_NEVER' };
   }
 
-  if (input.rebootPolicy !== 'never' || input.rebootRequired) {
+  if (inputSnapshot.rebootPolicy !== 'never' || inputSnapshot.rebootRequired) {
     return { allowed: false, code: 'E_REBOOT_FORBIDDEN' };
   }
 
-  if (input.confirmLevel === 'destructive') {
+  if (inputSnapshot.confirmLevel === 'destructive') {
     return { allowed: false, code: 'E_DESTRUCTIVE_FORBIDDEN' };
   }
 
-  if (!isPolicyState(input.policy)
-    || typeof input.now !== 'number'
-    || !Number.isFinite(input.now)) {
+  const policy = snapshotPolicyState(inputSnapshot.policy);
+  if (!policy
+    || typeof inputSnapshot.now !== 'number'
+    || !Number.isFinite(inputSnapshot.now)) {
     return { allowed: false, code: 'E_POLICY_REQUIRED' };
   }
 
-  if (input.policy.enabled !== true) {
+  if (policy.enabled !== true) {
     return { allowed: false, code: 'E_POLICY_DISABLED' };
   }
 
-  if (input.policy.snoozedUntil !== null && input.policy.snoozedUntil > input.now) {
+  if (policy.snoozedUntil !== null && policy.snoozedUntil > inputSnapshot.now) {
     return { allowed: false, code: 'E_POLICY_SNOOZED' };
   }
 
-  if (!isEvidence(input.evidence)) {
+  const evidence = snapshotEvidence(inputSnapshot.evidence);
+  if (!evidence) {
     return { allowed: false, code: 'E_EVIDENCE_REQUIRED' };
   }
 
-  if (input.evidence.state === 'stale') {
+  if (evidence.state === 'stale') {
     return { allowed: false, code: 'E_EVIDENCE_STALE' };
   }
 
-  const gates = input.gates;
-  if (!hasExactGateShape(gates) || gates.maintenanceWindowOpen !== true) {
+  const gates = snapshotGates(inputSnapshot.gates);
+  if (!gates || gates.maintenanceWindowOpen !== true) {
     return { allowed: false, code: 'E_WINDOW_CLOSED' };
   }
 
@@ -197,7 +301,7 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_IDLE_REQUIRED' };
   }
 
-  if ((input.resourceLocks?.length ?? 0) > 0 && gates.locksAvailable !== true) {
+  if (resourceLocks.length > 0 && gates.locksAvailable !== true) {
     return { allowed: false, code: 'E_RESOURCE_LOCKED' };
   }
 
@@ -209,7 +313,7 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_ATTEMPT_LIMIT' };
   }
 
-  if (input.preflightId === null) {
+  if (inputSnapshot.preflightId === null) {
     return { allowed: false, code: 'E_PREFLIGHT_REQUIRED' };
   }
 
@@ -217,11 +321,11 @@ export function evaluateAutomationPolicy(input: AutomationPolicyInput): PolicyDe
     return { allowed: false, code: 'E_PREFLIGHT_FAILED' };
   }
 
-  if (input.postconditionId === null) {
+  if (inputSnapshot.postconditionId === null) {
     return { allowed: false, code: 'E_POSTCONDITION_REQUIRED' };
   }
 
-  if (input.requiresRollback && gates.rollbackReady !== true) {
+  if (inputSnapshot.requiresRollback && gates.rollbackReady !== true) {
     return { allowed: false, code: 'E_ROLLBACK_UNAVAILABLE' };
   }
 

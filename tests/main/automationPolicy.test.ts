@@ -17,6 +17,7 @@ import {
 import type {
   AutomationPolicyInput,
   PolicyDecision,
+  TrustedExecutionContext,
 } from '../../src/shared/automation.js';
 
 const NOW = 1_900_000_000_000;
@@ -65,12 +66,48 @@ function asRuntimeInput(value: unknown): AutomationPolicyInput {
   return value as AutomationPolicyInput;
 }
 
+function asRuntimeContext(value: unknown): TrustedExecutionContext {
+  return value as TrustedExecutionContext;
+}
+
+function revokedRecord<T extends object>(target: T): T {
+  const revocable = Proxy.revocable(target, {});
+  revocable.revoke();
+  return revocable.proxy;
+}
+
+function throwingRecord<T extends object>(target: T): T {
+  return new Proxy(target, {
+    ownKeys: () => {
+      throw new Error('inspection denied');
+    },
+  });
+}
+
 describe('evaluateAutomationPolicy', () => {
   // Production break caught: an untrusted caller reaches policy evaluation without execution context.
   it('denies missing execution context without throwing', () => {
     expect(() => evaluateAutomationPolicy(base({ context: undefined }))).not.toThrow();
     expectDenied(base({ context: undefined }), 'E_CONTEXT_REQUIRED');
   });
+
+  // Production break caught: requiring every root descriptor masks the established denial stage.
+  it.each([
+    ['context', 'E_CONTEXT_REQUIRED'],
+    ['globalEnabled', 'E_AUTOMATION_DISABLED'],
+    ['automation', 'E_ACTION_METADATA_REQUIRED'],
+    ['policy', 'E_POLICY_REQUIRED'],
+    ['evidence', 'E_EVIDENCE_REQUIRED'],
+    ['gates', 'E_WINDOW_CLOSED'],
+  ] satisfies ReadonlyArray<[keyof AutomationPolicyInput, PolicyDecision['code']]>) (
+    'denies an omitted %s field at its documented boundary',
+    (field, expectedCode) => {
+      const input = base() as unknown as Record<string, unknown>;
+      Reflect.deleteProperty(input, field);
+
+      expectDenied(asRuntimeInput(input), expectedCode);
+    },
+  );
 
   // Production break caught: a malformed root value throws before default-deny context handling.
   it.each([
@@ -80,6 +117,55 @@ describe('evaluateAutomationPolicy', () => {
     ['string', 'automatic-request'],
     ['number', 1],
     ['boolean', true],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s root input without throwing',
+    (_caseName, value) => {
+      const input = asRuntimeInput(value);
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: undocumented root proof can bypass the declared boundary schema.
+  it.each([
+    ['string key', { ...base(), callerApproved: true }],
+    ['symbol key', { ...base(), [Symbol('callerApproved')]: true }],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a root input with an unexpected %s',
+    (_caseName, value) => {
+      expectDenied(asRuntimeInput(value), 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: root accessors execute caller code before trust is established.
+  it('denies a root accessor without invoking it', () => {
+    let getterCalls = 0;
+    const input = base();
+    Object.defineProperty(input, 'globalEnabled', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return true;
+      },
+    });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_CONTEXT_REQUIRED');
+    expect(getterCalls).toBe(0);
+  });
+
+  // Production break caught: hostile root reflection traps throw or evade schema checks.
+  it.each([
+    ['transparent proxy', new Proxy(base(), {})],
+    ['revoked proxy', revokedRecord(base())],
+    ['throwing ownKeys trap', throwingRecord(base())],
+    ['throwing descriptor trap', new Proxy(base(), {
+      getOwnPropertyDescriptor: () => {
+        throw new Error('descriptor denied');
+      },
+    })],
   ] satisfies ReadonlyArray<[string, unknown]>) (
     'denies a %s root input without throwing',
     (_caseName, value) => {
@@ -110,6 +196,44 @@ describe('evaluateAutomationPolicy', () => {
     'denies a %s execution context without throwing',
     (_caseName, value) => {
       const input = base({ context: value as AutomationPolicyInput['context'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_CONTEXT_REQUIRED');
+    },
+  );
+
+  // Production break caught: required context values can be inherited instead of proven by own data.
+  it('denies inherited context mode and source', () => {
+    const context = Object.create({ mode: 'manual', source: 'renderer' }) as unknown;
+    expectDenied(base({ context: asRuntimeContext(context) }), 'E_CONTEXT_REQUIRED');
+  });
+
+  // Production break caught: a stateful mode getter validates automatic, then changes to manual.
+  it('denies a stateful context getter without invoking it', () => {
+    let getterCalls = 0;
+    const context = {
+      get mode(): 'automatic' | 'manual' {
+        getterCalls += 1;
+        return getterCalls < 3 ? 'automatic' : 'manual';
+      },
+      source: 'schedule',
+    };
+    const input = base({ context: asRuntimeContext(context) });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_CONTEXT_REQUIRED');
+    expect(getterCalls).toBe(0);
+  });
+
+  // Production break caught: context proxies can throw during inspection or fabricate changing values.
+  it.each([
+    ['transparent proxy', new Proxy({ mode: 'manual', source: 'renderer' }, {})],
+    ['revoked proxy', revokedRecord({ mode: 'manual', source: 'renderer' })],
+    ['throwing proxy', throwingRecord({ mode: 'manual', source: 'renderer' })],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s context without throwing',
+    (_caseName, value) => {
+      const input = base({ context: asRuntimeContext(value) });
 
       expect(() => evaluateAutomationPolicy(input)).not.toThrow();
       expectDenied(input, 'E_CONTEXT_REQUIRED');
@@ -246,6 +370,30 @@ describe('evaluateAutomationPolicy', () => {
     expectDenied(base({ globalEnabled: false }), 'E_AUTOMATION_DISABLED');
   });
 
+  // Production break caught: a later hostile boundary changes earlier denial precedence.
+  it('does not inspect policy state after the global switch denies execution', () => {
+    const input = base({
+      globalEnabled: false,
+      policy: revokedRecord({ enabled: true, snoozedUntil: null }),
+    });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_AUTOMATION_DISABLED');
+  });
+
+  // Production break caught: manual execution begins inspecting automatic-only hostile state.
+  it('does not inspect automatic-only boundaries for a valid manual context', () => {
+    const input = base({
+      context: { mode: 'manual', source: 'renderer' },
+      policy: revokedRecord({ enabled: true, snoozedUntil: null }),
+      evidence: revokedRecord({ state: 'fresh' }),
+      gates: revokedRecord({ ...base().gates! }),
+    });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expect(evaluateAutomationPolicy(input)).toEqual({ allowed: true, code: 'ALLOW' });
+  });
+
   // Production break caught: a truthy non-boolean value bypasses the automatic kill switch.
   it.each([
     ['zero string', '0'],
@@ -294,6 +442,49 @@ describe('evaluateAutomationPolicy', () => {
     },
   );
 
+  // Production break caught: sparse or augmented lock arrays pass metadata validation.
+  it.each([
+    ['sparse array', new Array<string>(1)],
+    ['custom prototype', (() => {
+      const locks = ['defender'];
+      Object.setPrototypeOf(locks, Object.create(Array.prototype));
+      return locks;
+    })()],
+    ['string property', Object.assign(['defender'], { callerApproved: true })],
+    ['symbol property', Object.assign(['defender'], { [Symbol('callerApproved')]: true })],
+    ['transparent proxy', new Proxy(['defender'], {})],
+    ['revoked proxy', revokedRecord(['defender'])],
+    ['throwing proxy', throwingRecord(['defender'])],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies malformed resource locks: %s',
+    (_caseName, resourceLocks) => {
+      const input = base({
+        resourceLocks: resourceLocks as readonly string[],
+      });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_ACTION_METADATA_REQUIRED');
+    },
+  );
+
+  it('denies a resource-lock accessor without invoking it', () => {
+    let getterCalls = 0;
+    const resourceLocks = ['defender'];
+    Object.defineProperty(resourceLocks, '0', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return 'defender';
+      },
+    });
+    const input = base({ resourceLocks });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_ACTION_METADATA_REQUIRED');
+    expect(getterCalls).toBe(0);
+  });
+
   // Production break caught: an action classified as never automatic is dispatched automatically.
   it('denies actions classified as never automatic', () => {
     expectDenied(base({ automation: 'never' }), 'E_AUTOMATION_NEVER');
@@ -327,8 +518,67 @@ describe('evaluateAutomationPolicy', () => {
     ['string', 'enabled'],
     ['number', 1],
     ['boolean', true],
+    ['missing enabled descriptor', { snoozedUntil: null }],
+    ['missing snoozedUntil descriptor', { enabled: true }],
   ] satisfies ReadonlyArray<[string, unknown]>) (
     'denies a %s policy value without throwing',
+    (_caseName, policy) => {
+      const input = base({ policy: policy as AutomationPolicyInput['policy'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_POLICY_REQUIRED');
+    },
+  );
+
+  // Production break caught: augmented policy state is accepted as persisted authorization.
+  it.each([
+    ['string key', { enabled: true, snoozedUntil: null, callerApproved: true }],
+    ['symbol key', { enabled: true, snoozedUntil: null, [Symbol('callerApproved')]: true }],
+    ['hidden key', Object.defineProperty(
+      { enabled: true, snoozedUntil: null },
+      'callerApproved',
+      { value: true },
+    )],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies policy state with an unexpected %s',
+    (_caseName, policy) => {
+      expectDenied(base({
+        policy: policy as AutomationPolicyInput['policy'],
+      }), 'E_POLICY_REQUIRED');
+    },
+  );
+
+  // Production break caught: policy authorization can be inherited or computed by caller code.
+  it('denies inherited policy fields', () => {
+    const policy = Object.create({ enabled: true, snoozedUntil: null }) as unknown;
+    expectDenied(base({
+      policy: policy as AutomationPolicyInput['policy'],
+    }), 'E_POLICY_REQUIRED');
+  });
+
+  it('denies a policy accessor without invoking it', () => {
+    let getterCalls = 0;
+    const policy = {
+      enabled: true,
+      get snoozedUntil(): null {
+        getterCalls += 1;
+        return null;
+      },
+    };
+    const input = base({ policy });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_POLICY_REQUIRED');
+    expect(getterCalls).toBe(0);
+  });
+
+  // Production break caught: policy proxies throw or fabricate persisted authorization.
+  it.each([
+    ['transparent proxy', new Proxy({ enabled: true, snoozedUntil: null }, {})],
+    ['revoked proxy', revokedRecord({ enabled: true, snoozedUntil: null })],
+    ['throwing proxy', throwingRecord({ enabled: true, snoozedUntil: null })],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s policy without throwing',
     (_caseName, policy) => {
       const input = base({ policy: policy as AutomationPolicyInput['policy'] });
 
@@ -443,6 +693,36 @@ describe('evaluateAutomationPolicy', () => {
     },
   );
 
+  // Production break caught: evidence accessors and proxies execute or fabricate fresh proof.
+  it('denies an evidence accessor without invoking it', () => {
+    let getterCalls = 0;
+    const evidence = {
+      get state(): 'fresh' {
+        getterCalls += 1;
+        return 'fresh';
+      },
+    };
+    const input = base({ evidence });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_EVIDENCE_REQUIRED');
+    expect(getterCalls).toBe(0);
+  });
+
+  it.each([
+    ['transparent proxy', new Proxy({ state: 'fresh' }, {})],
+    ['revoked proxy', revokedRecord({ state: 'fresh' })],
+    ['throwing proxy', throwingRecord({ state: 'fresh' })],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s evidence record without throwing',
+    (_caseName, evidence) => {
+      const input = base({ evidence: evidence as AutomationPolicyInput['evidence'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_EVIDENCE_REQUIRED');
+    },
+  );
+
   // Production break caught: malformed gate containers bypass exact gate evidence requirements.
   it.each([
     ['null', null],
@@ -457,6 +737,39 @@ describe('evaluateAutomationPolicy', () => {
     ['extra key', { ...base().gates!, callerApproved: true }],
   ] satisfies ReadonlyArray<[string, unknown]>) (
     'denies a malformed %s gate bundle at the first documented gate',
+    (_caseName, gates) => {
+      const input = base({ gates: gates as AutomationPolicyInput['gates'] });
+
+      expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+      expectDenied(input, 'E_WINDOW_CLOSED');
+    },
+  );
+
+  // Production break caught: gate accessors and proxies execute or fabricate passing proof.
+  it('denies a gate accessor without invoking it', () => {
+    let getterCalls = 0;
+    const gates = { ...base().gates! };
+    Object.defineProperty(gates, 'maintenanceWindowOpen', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return true;
+      },
+    });
+    const input = base({ gates });
+
+    expect(() => evaluateAutomationPolicy(input)).not.toThrow();
+    expectDenied(input, 'E_WINDOW_CLOSED');
+    expect(getterCalls).toBe(0);
+  });
+
+  it.each([
+    ['transparent proxy', new Proxy({ ...base().gates! }, {})],
+    ['revoked proxy', revokedRecord({ ...base().gates! })],
+    ['throwing proxy', throwingRecord({ ...base().gates! })],
+  ] satisfies ReadonlyArray<[string, unknown]>) (
+    'denies a %s gate bundle without throwing',
     (_caseName, gates) => {
       const input = base({ gates: gates as AutomationPolicyInput['gates'] });
 

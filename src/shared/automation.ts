@@ -12,12 +12,21 @@ export type AutomationClass = 'never' | 'safe' | 'conditional';
 export type RebootPolicy = 'never';
 export type ExecutionMode = 'manual' | 'automatic';
 
-export interface TrustedExecutionContext {
-  readonly mode: ExecutionMode;
-  readonly source: 'renderer' | 'telegram-approved' | 'incident' | 'schedule' | 'maintenance';
+interface ExecutionContextProofIds {
   readonly intentId?: string;
   readonly policyId?: string;
 }
+
+export type TrustedExecutionContext = ExecutionContextProofIds & (
+  | {
+    readonly mode: 'manual';
+    readonly source: 'renderer' | 'telegram-approved';
+  }
+  | {
+    readonly mode: 'automatic';
+    readonly source: 'incident' | 'schedule' | 'maintenance';
+  }
+);
 
 export interface ActionAutomationDefinition {
   readonly automation: AutomationClass;
