@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FirstRunToolsSplash } from '../../../src/renderer/components/firstRunTools/FirstRunToolsSplash.js';
 
 /**
@@ -123,12 +123,12 @@ describe('<FirstRunToolsSplash> tool grouping', () => {
       await screen.findByRole('dialog');
       expect(screen.getByText('Detecting installed tools…')).toBeInTheDocument();
       const firstTool = screen.findByText('LibreHardwareMonitor');
-      await act(async () => listTools.resolve(missingToolsResponse));
+      listTools.resolve(missingToolsResponse);
       // Both required tools surface by name.
       expect(await firstTool).toBeInTheDocument();
       expect(screen.getByText('CrystalDiskInfo')).toBeInTheDocument();
     } finally {
-      await act(async () => listTools.resolve(missingToolsResponse));
+      listTools.resolve(missingToolsResponse);
     }
   });
 
@@ -141,11 +141,11 @@ describe('<FirstRunToolsSplash> tool grouping', () => {
       await screen.findByRole('dialog');
       expect(screen.getByText('Detecting installed tools…')).toBeInTheDocument();
       const firstTool = screen.findByText('OCCT');
-      await act(async () => listTools.resolve(missingToolsResponse));
+      listTools.resolve(missingToolsResponse);
       expect(await firstTool).toBeInTheDocument();
       expect(screen.getByText('HWiNFO64')).toBeInTheDocument();
     } finally {
-      await act(async () => listTools.resolve(missingToolsResponse));
+      listTools.resolve(missingToolsResponse);
     }
   });
 
