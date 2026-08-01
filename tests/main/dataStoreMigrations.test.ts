@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import Database from 'better-sqlite3';
+import { runMigrations, type Migration } from '../../src/main/dataStore.js';
 
 /**
  * v2.3.13 schema migration framework (dataStore.ts:176-206, S20).
  *
- * Invariants under test (mirroring runMigrations verbatim):
+ * Invariants under test (using the production migration runner):
  *   1. On a fresh DB, user_version pragma starts at 0.
  *   2. A migration with version > current is applied in-order; user_version
  *      is updated inside the same transaction as the migration body.
@@ -19,24 +20,9 @@ import Database from 'better-sqlite3';
  *   5. If a migration throws, user_version is NOT bumped (transaction
  *      rolls back). This is the "partial apply = bad" safety net.
  *
- * We inline a minimal copy of runMigrations (it isn't exported from
- * dataStore). The point is to lock the contract of the framework, not
- * to test better-sqlite3 itself.
+ * Importing production code prevents a copied implementation from masking
+ * regressions in the runner used by openDb().
  */
-
-interface Migration { version: number; name: string; up: (db: Database.Database) => void; }
-
-function runMigrations(db: Database.Database, MIGRATIONS: Migration[]) {
-  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
-  for (const m of [...MIGRATIONS].sort((a, b) => a.version - b.version)) {
-    if (m.version <= current) continue;
-    const tx = db.transaction(() => {
-      m.up(db);
-      db.pragma(`user_version = ${m.version}`);
-    });
-    tx();
-  }
-}
 
 describe('dataStore migration framework (S20)', () => {
   let tempDir: string;

@@ -2,55 +2,26 @@
  * v2.3.0 C2 — Autopilot rule editor persistence + run-now semantics.
  *
  * We test the dataStore helpers directly (setAutopilotRuleEnabled / getAutopilotRule)
- * using an in-memory better-sqlite3 path via the existing openDb layer. If the
- * native binding ABI is mismatched we skip the suite instead of failing, mirroring
- * the pattern used in other main-process DB tests.
+ * using an in-memory better-sqlite3 path via the existing openDb layer.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
-let canRunSqliteTests = true;
+let ds: typeof import('../../src/main/dataStore.js');
 
 // Constants module stub: openDb() reads WORKBENCH_DB_PATH, so we redirect it to
-// a temp directory before the module is loaded.
+// a temp directory before the real module is loaded. A native-load failure must
+// fail this hook so the test suite cannot report a false pass.
 beforeAll(async () => {
-  try {
-    const tmp = mkdtempSync(path.join(tmpdir(), 'pcd-ap-rules-'));
-    process.env.PCD_DB_PATH_OVERRIDE = path.join(tmp, 'workbench.db');
-  } catch {
-    canRunSqliteTests = false;
-  }
+  const tmp = mkdtempSync(path.join(tmpdir(), 'pcd-ap-rules-'));
+  process.env.PCD_DB_PATH_OVERRIDE = path.join(tmp, 'workbench.db');
+  ds = await import('../../src/main/dataStore.js');
 });
-
-/**
- * We can't easily import the real dataStore from a test env that lacks the
- * ABI-matched better-sqlite3 binary. Skip gracefully when require fails.
- */
-async function tryLoadDataStore(): Promise<any | null> {
-  try {
-    // Dynamic import so a failed native load doesn't crash test discovery.
-    const url = pathToFileURL(path.resolve('src/main/dataStore.ts')).href;
-    void url; // referenced for docs
-    const mod = await import('../../src/main/dataStore.js');
-    return mod;
-  } catch (e) {
-    canRunSqliteTests = false;
-    return null;
-  }
-}
 
 describe('autopilot rule editor — dataStore contract', () => {
   it('setAutopilotRuleEnabled toggles the enabled flag and getAutopilotRule reads it back', async () => {
-    if (!canRunSqliteTests) {
-      expect(true).toBe(true);
-      return;
-    }
-    const ds = await tryLoadDataStore();
-    if (!ds) { expect(true).toBe(true); return; }
-
     const { upsertAutopilotRule, setAutopilotRuleEnabled, getAutopilotRule } = ds;
     upsertAutopilotRule({
       id: 'test_rule_c2',
@@ -71,9 +42,6 @@ describe('autopilot rule editor — dataStore contract', () => {
   });
 
   it('getAutopilotRule returns null for unknown rule id', async () => {
-    if (!canRunSqliteTests) { expect(true).toBe(true); return; }
-    const ds = await tryLoadDataStore();
-    if (!ds) { expect(true).toBe(true); return; }
     expect(ds.getAutopilotRule('does_not_exist_xyz')).toBeNull();
   });
 });

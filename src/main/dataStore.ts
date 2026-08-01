@@ -286,27 +286,33 @@ function openDb(): Database.Database {
  * stored user_version is behind the latest. Wrap multi-statement migrations
  * in a transaction so a partial apply rolls back.
  */
-interface Migration { version: number; name: string; up: (db: Database.Database) => void; }
+export interface Migration {
+  version: number;
+  name: string;
+  up: (db: Database.Database) => void;
+}
+
 const MIGRATIONS: Migration[] = [
   // Future migrations go here, e.g.:
   // { version: 1, name: 'add_col_foo_to_bar', up: (db) => db.exec(`ALTER TABLE bar ADD COLUMN foo TEXT`) },
 ];
 
-function runMigrations(db: Database.Database) {
-  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
-  for (const m of MIGRATIONS) {
-    if (m.version <= current) continue;
-    const tx = db.transaction(() => {
-      m.up(db);
-      db.pragma(`user_version = ${m.version}`);
-    });
-    try {
-      tx();
-      console.log(`dataStore: applied migration ${m.version} (${m.name})`);
-    } catch (e: any) {
-      console.error(`dataStore: migration ${m.version} (${m.name}) failed:`, e?.message);
-      throw e;
-    }
+export function runMigrations(
+  database: Database.Database,
+  migrations: readonly Migration[] = MIGRATIONS,
+): void {
+  const current = Number(database.pragma('user_version', { simple: true }) ?? 0);
+  const ordered = [...migrations].sort((a, b) => a.version - b.version);
+  if (new Set(ordered.map((migration) => migration.version)).size !== ordered.length) {
+    throw new Error('Duplicate migration version');
+  }
+
+  for (const migration of ordered) {
+    if (migration.version <= current) continue;
+    database.transaction(() => {
+      migration.up(database);
+      database.pragma(`user_version = ${migration.version}`);
+    })();
   }
 }
 
