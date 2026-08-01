@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'node:path';
 
 // ── Mock fs operations the dispatcher uses ─────────────────────────────────
 // We hold a virtual filesystem in memory so test cases can install fake
@@ -17,10 +18,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // fakeFs Map and the spawnMock fn must be defined via vi.hoisted() so the
 // vi.mock factories (which are themselves hoisted to module top) can see them.
 const {
-  fakeFs, spawnMock, execFileSyncMock, readFileSyncMock, renameSyncMock,
+  fakeFs, fakeBytes, spawnMock, execFileSyncMock, readFileSyncMock, renameSyncMock,
   openSyncMock, readSyncMock, closeSyncMock, spawnChildren, resolveScriptPathMock,
 } = vi.hoisted(() => {
   const files = new Map<string, string>();
+  const byteFiles = new Map<string, Buffer>();
   const handles = new Map<number, { path: string; offset: number }>();
   type ChildListener = (...args: any[]) => void;
   type FakeChild = {
@@ -46,6 +48,7 @@ const {
   };
   return {
     fakeFs: files,
+    fakeBytes: byteFiles,
     spawnChildren: children,
     resolveScriptPathMock: vi.fn((rel: string) => (
       `C:\\ProgramData\\PCDoctor\\${rel.replace(/\//g, '\\')}`
@@ -83,6 +86,12 @@ const {
       return value;
     }),
     renameSyncMock: vi.fn((source: any, destination: any) => {
+      const byteValue = byteFiles.get(String(source));
+      if (byteValue !== undefined) {
+        byteFiles.set(String(destination), byteValue);
+        byteFiles.delete(String(source));
+        return;
+      }
       const value = files.get(String(source));
       if (value === undefined) throw new Error(`ENOENT (mock): ${source}`);
       files.set(String(destination), value);
@@ -90,7 +99,7 @@ const {
     }),
     openSyncMock: vi.fn((p: any) => {
       const filePath = String(p);
-      if (!files.has(filePath)) throw new Error(`ENOENT (mock): ${p}`);
+      if (!files.has(filePath) && !byteFiles.has(filePath)) throw new Error(`ENOENT (mock): ${p}`);
       const handle = nextHandle;
       nextHandle += 1;
       handles.set(handle, { path: filePath, offset: 0 });
@@ -99,7 +108,7 @@ const {
     readSyncMock: vi.fn((handle: number, buffer: Buffer, offset: number, length: number) => {
       const entry = handles.get(handle);
       if (!entry) throw new Error(`EBADF (mock): ${handle}`);
-      const source = Buffer.from(files.get(entry.path) ?? '', 'utf8');
+      const source = byteFiles.get(entry.path) ?? Buffer.from(files.get(entry.path) ?? '', 'utf8');
       const count = Math.min(length, Math.max(0, source.length - entry.offset));
       source.copy(buffer, offset, entry.offset, entry.offset + count);
       entry.offset += count;
@@ -119,12 +128,15 @@ vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
-    existsSync: vi.fn((p: any) => fakeFs.has(String(p))),
+    existsSync: vi.fn((p: any) => fakeFs.has(String(p)) || fakeBytes.has(String(p))),
     readFileSync: readFileSyncMock,
     writeFileSync: vi.fn((p: any, data: any) => {
       fakeFs.set(String(p), String(data));
     }),
-    rmSync: vi.fn((p: any) => { fakeFs.delete(String(p)); }),
+    rmSync: vi.fn((p: any) => {
+      fakeFs.delete(String(p));
+      fakeBytes.delete(String(p));
+    }),
     renameSync: renameSyncMock,
     openSync: openSyncMock,
     readSync: readSyncMock,
@@ -169,6 +181,7 @@ import {
   ensureWorkerRunning,
   dispatchCommand,
   buildLaunchCmd,
+  getQueueDir,
   _testing,
 } from '@main/elevatedWorker.js';
 import {
@@ -189,16 +202,39 @@ import {
 
 function clearFs() {
   fakeFs.clear();
+  fakeBytes.clear();
 }
 
-function queueAclProof(overrides: Record<string, unknown> = {}): string {
+function queueAclProof(
+  scope: 'root' | 'leaf' = 'root',
+  overrides: Record<string, unknown> = {},
+): string {
+  const session = _testing.getWorkerSessionForTests();
   return JSON.stringify({
     secure: true,
+    scope,
+    queue_root: 'C:\\ProgramData\\PCDoctorWorkerQueue',
+    queue_dir: scope === 'root' ? null : session.queueDir,
+    owner_sid: 'S-1-5-32-544',
     user_sid: 'S-1-5-21-1000',
     protected: true,
     allowed_sids: ['S-1-5-21-1000', 'S-1-5-32-544', 'S-1-5-18'],
+    no_reparse: true,
+    trusted_owner: true,
+    trusted_ancestor_owner: true,
+    no_untrusted_write: true,
+    ancestor_delete_safe: true,
     ...overrides,
   });
+}
+
+function mutateQueueAclProof(
+  scope: 'root' | 'leaf',
+  mutate: (proof: Record<string, unknown>) => void,
+): string {
+  const proof = JSON.parse(queueAclProof(scope)) as Record<string, unknown>;
+  mutate(proof);
+  return JSON.stringify(proof);
 }
 
 function codeTrustProof(overrides: Record<string, unknown> = {}): string {
@@ -275,23 +311,13 @@ function resetBoundary(): void {
   readFileSyncMock.mockClear();
   renameSyncMock.mockClear();
   execFileSyncMock.mockReset();
-  execFileSyncMock.mockReturnValue(JSON.stringify({
-    secure: true,
-    user_sid: 'S-1-5-21-1000',
-    protected: true,
-    allowed_sids: ['S-1-5-21-1000', 'S-1-5-32-544', 'S-1-5-18'],
-    base_path: 'C:\\ProgramData\\PCDoctor',
-    worker_script: 'C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1',
-    protected_boundary: true,
-    ancestor_delete_safe: true,
-    ancestor_untrusted_rights: 0,
-    trusted_ancestor_owner: true,
-    trusted_owner: true,
-    no_reparse: true,
-    no_untrusted_write: true,
-    checked_files: 10,
-  }));
   _testing.resetWorkerSessionForTests();
+  execFileSyncMock.mockImplementation((...args: any[]) => {
+    const options = args[2] as { env?: NodeJS.ProcessEnv } | undefined;
+    const scope = options?.env?.PCDOCTOR_QUEUE_PROOF_SCOPE;
+    if (scope === 'root' || scope === 'leaf') return queueAclProof(scope);
+    return codeTrustProof();
+  });
 }
 
 const FIXTURE_CAPABILITY = Buffer.from(
@@ -517,8 +543,42 @@ describe('elevatedWorker > canonical JSON and authenticated V2 envelope', () => 
     expect(accepted.params).toEqual({ ...params, dry_run: true });
   });
 
+  it.each(['A', 'aZ09._-', 'A'.repeat(128)])(
+    'accepts the complete bounded safe-name domain boundary: %s',
+    (value) => {
+      expect(validateEnvelope(
+        signedFixture({ action: 'stop-service', params: { service: value } }),
+        validationContext(),
+      ).params).toEqual({ service: value });
+      expect(validateEnvelope(
+        signedFixture({ action: 'kill-process', params: { target: value } }),
+        validationContext(),
+      ).params).toEqual({ target: value });
+    },
+  );
+
   it.each([
     ['blank service', 'stop-service', { service: '   ' }],
+    ['service wildcard star', 'stop-service', { service: '*' }],
+    ['service wildcard question', 'start-service', { service: 'Spool?er' }],
+    ['service wildcard brackets', 'restart-service', { service: 'Spool[er]' }],
+    ['service slash', 'stop-service', { service: 'bad/name' }],
+    ['service backslash', 'stop-service', { service: 'bad\\name' }],
+    ['service whitespace', 'stop-service', { service: 'bad name' }],
+    ['service newline', 'stop-service', { service: 'bad\nname' }],
+    ['service trailing LF', 'stop-service', { service: 'badname\n' }],
+    ['service max length plus trailing LF', 'stop-service', { service: `${'A'.repeat(128)}\n` }],
+    ['service non-ASCII', 'stop-service', { service: 'café' }],
+    ['service over 128 characters', 'stop-service', { service: 'a'.repeat(129) }],
+    ['kill wildcard star', 'kill-process', { target: '*' }],
+    ['kill wildcard question', 'kill-process', { target: 'note?ad' }],
+    ['kill wildcard brackets', 'kill-process', { target: 'note[pad]' }],
+    ['kill slash', 'kill-process', { target: 'bad/name' }],
+    ['kill whitespace', 'kill-process', { target: 'bad name' }],
+    ['kill semicolon', 'kill-process', { target: 'bad;name' }],
+    ['kill newline', 'kill-process', { target: 'bad\nname' }],
+    ['kill trailing LF', 'kill-process', { target: 'badname\n' }],
+    ['kill over 128 characters', 'kill-process', { target: 'a'.repeat(129) }],
     ['wrong-case startup type', 'set-service-startup', {
       service: 'Spooler', startup_type: 'disabled',
     }],
@@ -694,6 +754,34 @@ describe('elevatedWorker > authenticated heartbeat and result artifacts', () => 
     expect(isWorkerAlive()).toBe(false);
   });
 
+  it('rejects a heartbeat artifact containing malformed UTF-8 bytes', () => {
+    setHeartbeat({ ageMs: 1_000 });
+    const valid = Buffer.from(fakeFs.get(heartbeatPath())!, 'utf8');
+    fakeFs.delete(heartbeatPath());
+    fakeBytes.set(heartbeatPath(), Buffer.concat([
+      valid.subarray(0, 1), Buffer.from([0xc3, 0x28]), valid.subarray(1),
+    ]));
+
+    expect(() => _testing.readBoundedUtf8ForTests(
+      heartbeatPath(), WORKER_ARTIFACT_MAX_BYTES,
+    )).toThrowError(expect.objectContaining({ code: 'E_ARTIFACT_ENCODING' }));
+    expect(readHeartbeat()).toBeNull();
+    expect(isWorkerAlive()).toBe(false);
+  });
+
+  it('preserves and rejects a noncanonical UTF-8 BOM on a heartbeat artifact', () => {
+    setHeartbeat({ ageMs: 1_000 });
+    const valid = Buffer.from(fakeFs.get(heartbeatPath())!, 'utf8');
+    fakeFs.delete(heartbeatPath());
+    fakeBytes.set(heartbeatPath(), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), valid]));
+
+    expect(_testing.readBoundedUtf8ForTests(
+      heartbeatPath(), WORKER_ARTIFACT_MAX_BYTES,
+    ).startsWith('\ufeff')).toBe(true);
+    expect(readHeartbeat()).toBeNull();
+    expect(isWorkerAlive()).toBe(false);
+  });
+
   it('rejects result nonce replay without letting failed authentication consume the nonce', () => {
     const unsigned = {
       version: 2,
@@ -845,6 +933,64 @@ describe('elevatedWorker > heartbeat', () => {
 describe('elevatedWorker > ensureWorkerRunning', () => {
   beforeEach(resetBoundary);
 
+  it('derives the authenticated session leaf directly beneath the fixed queue root', () => {
+    const session = _testing.getWorkerSessionForTests();
+    expect(getQueueDir()).toBe('C:\\ProgramData\\PCDoctorWorkerQueue');
+    expect(session.queueDir).toBe(`${getQueueDir()}\\${session.sessionId}`);
+    expect(path.win32.basename(session.queueDir)).toBe(session.sessionId);
+    expect(path.win32.dirname(session.queueDir)).toBe(getQueueDir());
+  });
+
+  it('models atomic Node publication without directory replacement rights', () => {
+    const model = (_testing as any).QUEUE_USER_ACL_MODEL as {
+      directoryRights: number;
+      fileRights: number;
+      directoryInheritanceFlags: number;
+      fileInheritanceFlags: number;
+      filePropagationFlags: number;
+    };
+    expect(model).toBeDefined();
+
+    const LIST_DIRECTORY = 1;
+    const CREATE_FILES = 2;
+    const CREATE_DIRECTORIES = 4;
+    const WRITE_EXTENDED_ATTRIBUTES = 16;
+    const DELETE_CHILD = 64;
+    const WRITE_ATTRIBUTES = 256;
+    const DELETE = 65_536;
+    const CHANGE_PERMISSIONS = 262_144;
+    const TAKE_OWNERSHIP = 524_288;
+    const CONTAINER_INHERIT = 1;
+    const OBJECT_INHERIT = 2;
+    const INHERIT_ONLY = 2;
+
+    expect(model.directoryRights & LIST_DIRECTORY).toBe(LIST_DIRECTORY);
+    expect(model.directoryRights & CREATE_FILES).toBe(CREATE_FILES);
+    expect(model.directoryRights & (CREATE_DIRECTORIES | WRITE_EXTENDED_ATTRIBUTES
+      | DELETE_CHILD | WRITE_ATTRIBUTES | DELETE | CHANGE_PERMISSIONS
+      | TAKE_OWNERSHIP)).toBe(0);
+    expect(model.directoryInheritanceFlags).toBe(0);
+
+    // Same-directory temp creation uses CreateFiles. Rename/delete of that
+    // temp is authorized only on the inherited child file, never the directory.
+    expect(model.fileRights & DELETE).toBe(DELETE);
+    expect(model.fileInheritanceFlags & OBJECT_INHERIT).toBe(OBJECT_INHERIT);
+    expect(model.fileInheritanceFlags & CONTAINER_INHERIT).toBe(0);
+    expect(model.filePropagationFlags & INHERIT_ONLY).toBe(INHERIT_ONLY);
+  });
+
+  it('fails closed before UAC when the installer-owned queue root is unavailable', async () => {
+    execFileSyncMock.mockImplementationOnce(() => {
+      throw new Error('fixed queue root missing');
+    });
+
+    const error = await ensureWorkerRunning().catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_QUEUE_ROOT_TRUST');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('no-ops (no spawn) when worker is already alive', async () => {
     setHeartbeat({ ageMs: 1000 });
     await ensureWorkerRunning();
@@ -875,7 +1021,6 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
 
   it('passes a 32-byte capability only in the dedicated launcher child environment', async () => {
     fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
-    fakeFs.set('pwsh.exe', '<executable>');
     const parentValue = process.env[_testing.CAPABILITY_ENV];
     setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
 
@@ -887,7 +1032,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
       { env: NodeJS.ProcessEnv },
     ];
     const capabilityText = opts.env[_testing.CAPABILITY_ENV];
-    expect(file).toBe('pwsh.exe');
+    expect(file).toBe('powershell.exe');
     expect(capabilityText).toMatch(/^[A-Za-z0-9+/]{43}=$/);
     expect(Buffer.from(capabilityText!, 'base64')).toHaveLength(32);
     expect(args.join(' ')).not.toContain(capabilityText);
@@ -895,7 +1040,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
       pwsh: 'pwsh.exe',
       workerScript: 'worker.ps1',
       basePath: 'base',
-      queueDir: 'queue',
+      queueRoot: 'queue',
       sessionId: '00112233445566778899aabbccddeeff',
       queueUserSid: 'S-1-5-21-1000',
     })).not.toContain(capabilityText);
@@ -922,10 +1067,14 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
       const proofEnvironments = execFileSyncMock.mock.calls.slice(0, 2).map((call) => (
         (call[2] as { env?: NodeJS.ProcessEnv }).env
       ));
+      const leafProofEnvironment = execFileSyncMock.mock.calls.map((call) => (
+        (call[2] as { env?: NodeJS.ProcessEnv }).env
+      )).find((environment) => environment?.PCDOCTOR_QUEUE_PROOF_SCOPE === 'leaf');
       const launcherEnvironment = (
         spawnMock.mock.calls[0][2] as { env: NodeJS.ProcessEnv }
       ).env;
-      const environments = [...proofEnvironments, launcherEnvironment];
+      expect(leafProofEnvironment).toBeDefined();
+      const environments = [...proofEnvironments, leafProofEnvironment, launcherEnvironment];
       for (const childEnvironment of environments) {
         expect(childEnvironment).toBeDefined();
         for (const key of hostileKeys) expect(childEnvironment?.[key]).toBeUndefined();
@@ -937,9 +1086,15 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
         'SystemRoot', 'TEMP', 'TMP', 'WINDIR',
       ];
       expect(Object.keys(proofEnvironments[0]!).sort()).toEqual([
-        ...baseKeys, 'PCDOCTOR_QUEUE_ACL_MODE', 'PCDOCTOR_QUEUE_ACL_PATH',
+        ...baseKeys, 'PCDOCTOR_QUEUE_PROOF_SCOPE',
       ].sort());
       expect(Object.keys(proofEnvironments[1]!).sort()).toEqual(baseKeys.sort());
+      expect(Object.keys(leafProofEnvironment!).sort()).toEqual([
+        ...baseKeys, 'PCDOCTOR_QUEUE_PROOF_SCOPE', 'PCDOCTOR_QUEUE_SESSION_ID',
+      ].sort());
+      expect(leafProofEnvironment?.PCDOCTOR_QUEUE_SESSION_ID).toBe(
+        _testing.getWorkerSessionForTests().sessionId,
+      );
       expect(Object.keys(launcherEnvironment).sort()).toEqual([
         ...baseKeys, _testing.CAPABILITY_ENV,
       ].sort());
@@ -966,7 +1121,7 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     }
   });
 
-  it('fails closed before spawn when secure queue ACL creation throws', async () => {
+  it('fails closed before spawn when queue-root trust verification throws', async () => {
     fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
     execFileSyncMock.mockImplementationOnce(() => {
       throw new Error('simulated ACL setup failure');
@@ -975,24 +1130,108 @@ describe('elevatedWorker > ensureWorkerRunning', () => {
     const error = await ensureWorkerRunning().catch((caught) => caught);
 
     expect(error).toBeInstanceOf(ElevatedWorkerError);
-    expect(error.code).toBe('E_QUEUE_ACL');
+    expect(error.code).toBe('E_QUEUE_ROOT_TRUST');
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('fails closed before spawn when effective queue ACL verification denies', async () => {
+  it('fails closed before spawn when effective queue-root trust verification denies', async () => {
     fakeFs.set('C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1', '<script>');
-    execFileSyncMock.mockReturnValueOnce(JSON.stringify({
+    execFileSyncMock.mockReturnValueOnce(queueAclProof('root', {
       secure: false,
-      user_sid: 'S-1-5-21-1000',
       protected: false,
-      allowed_sids: ['S-1-5-21-1000', 'S-1-5-32-544', 'S-1-5-18'],
     }));
 
     const error = await ensureWorkerRunning().catch((caught) => caught);
 
     expect(error).toBeInstanceOf(ElevatedWorkerError);
-    expect(error.code).toBe('E_QUEUE_ACL');
+    expect(error.code).toBe('E_QUEUE_ROOT_TRUST');
     expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['root reparse point', { no_reparse: false }],
+    ['untrusted root owner', { trusted_owner: false }],
+    ['non-Administrators root owner', { owner_sid: 'S-1-5-18' }],
+    ['untrusted ancestor owner', { trusted_ancestor_owner: false }],
+    ['untrusted root write', { no_untrusted_write: false }],
+    ['replaceable ancestor', { ancestor_delete_safe: false }],
+    ['wrong proof scope', { scope: 'leaf' }],
+    ['wrong fixed root', { queue_root: 'C:\\Users\\attacker\\queue' }],
+    ['unexpected root leaf path', { queue_dir: 'C:\\ProgramData\\PCDoctorWorkerQueue\\bad' }],
+  ])('rejects an exact queue-root proof violation: %s', async (_label, overrides) => {
+    execFileSyncMock.mockReturnValueOnce(queueAclProof('root', overrides));
+
+    const error = await ensureWorkerRunning().catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_QUEUE_ROOT_TRUST');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a missing required field', (proof: Record<string, unknown>) => { delete proof.no_reparse; }],
+    ['an unexpected extra field', (proof: Record<string, unknown>) => { proof.extra = true; }],
+  ])('rejects a queue-root proof with %s', async (_label, mutate) => {
+    execFileSyncMock.mockReturnValueOnce(mutateQueueAclProof('root', mutate));
+
+    const error = await ensureWorkerRunning().catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_QUEUE_ROOT_TRUST');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('does not accept a heartbeat until the elevated-created leaf proof succeeds', async () => {
+    const failedSession = _testing.getWorkerSessionForTests();
+    execFileSyncMock.mockImplementation((...args: any[]) => {
+      const options = args[2] as { env?: NodeJS.ProcessEnv } | undefined;
+      const scope = options?.env?.PCDOCTOR_QUEUE_PROOF_SCOPE;
+      if (scope === 'root') return queueAclProof('root');
+      if (scope === 'leaf') return queueAclProof('leaf', {
+        secure: false,
+        no_reparse: false,
+      });
+      return codeTrustProof();
+    });
+    setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
+
+    const error = await ensureWorkerRunning().catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_QUEUE_ACL');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(_testing.getWorkerSessionForTests().sessionId).not.toBe(failedSession.sessionId);
+  });
+
+  it.each([
+    ['a missing required field', (proof: Record<string, unknown>) => { delete proof.allowed_sids; }],
+    ['an unexpected extra field', (proof: Record<string, unknown>) => { proof.extra = true; }],
+    ['the wrong proof scope', (proof: Record<string, unknown>) => { proof.scope = 'root'; }],
+    ['a non-Administrators owner', (proof: Record<string, unknown>) => {
+      proof.owner_sid = 'S-1-5-18';
+    }],
+    ['a different session path', (proof: Record<string, unknown>) => {
+      proof.queue_dir = 'C:\\ProgramData\\PCDoctorWorkerQueue\\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    }],
+    ['a changed user SID', (proof: Record<string, unknown>) => {
+      proof.user_sid = 'S-1-5-21-2000';
+      proof.allowed_sids = ['S-1-5-21-2000', 'S-1-5-32-544', 'S-1-5-18'];
+    }],
+  ])('rejects a queue-leaf proof with %s', async (_label, mutate) => {
+    execFileSyncMock.mockImplementation((...args: any[]) => {
+      const options = args[2] as { env?: NodeJS.ProcessEnv } | undefined;
+      const scope = options?.env?.PCDOCTOR_QUEUE_PROOF_SCOPE;
+      if (scope === 'root') return queueAclProof('root');
+      if (scope === 'leaf') return mutateQueueAclProof('leaf', mutate);
+      return codeTrustProof();
+    });
+    setTimeout(() => setHeartbeat({ ageMs: 0 }), 350);
+
+    const error = await ensureWorkerRunning().catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_QUEUE_ACL');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
   it('allows CreateDirectories alone on an ancestor of the protected existing root', async () => {
@@ -1292,6 +1531,50 @@ describe('elevatedWorker > dispatchCommand', () => {
     expect(err.code).toBe('E_BAD_RESULT');
   });
 
+  it('rejects a signed result artifact whose malformed UTF-8 replacement-decodes', async () => {
+    setHeartbeat({ ageMs: 1_000 });
+    setTimeout(() => {
+      const cmdPath = Array.from(fakeFs.keys()).find((key) => key.endsWith('.cmd.json'))!;
+      const id = JSON.parse(fakeFs.get(cmdPath)!).id;
+      setResult(id, { success: true, data: { state: '\ufffd(' }, duration_ms: 1 });
+      const resultPath = _testing.getResultPath(id);
+      const valid = Buffer.from(fakeFs.get(resultPath)!, 'utf8');
+      const replacementIndex = valid.indexOf(Buffer.from('\ufffd', 'utf8'));
+      expect(replacementIndex).toBeGreaterThanOrEqual(0);
+      fakeFs.delete(resultPath);
+      fakeBytes.set(resultPath, Buffer.concat([
+        valid.subarray(0, replacementIndex),
+        Buffer.from([0xc3]),
+        valid.subarray(replacementIndex + Buffer.byteLength('\ufffd', 'utf8')),
+      ]));
+    }, 100);
+
+    const error = await dispatchCommand('stop-service', { service: 'Spooler' })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_BAD_RESULT');
+  });
+
+  it('rejects a signed result artifact prefixed with a noncanonical UTF-8 BOM', async () => {
+    setHeartbeat({ ageMs: 1_000 });
+    setTimeout(() => {
+      const cmdPath = Array.from(fakeFs.keys()).find((key) => key.endsWith('.cmd.json'))!;
+      const id = JSON.parse(fakeFs.get(cmdPath)!).id;
+      setResult(id, { success: true, data: { state: 'Stopped' }, duration_ms: 1 });
+      const resultPath = _testing.getResultPath(id);
+      const valid = Buffer.from(fakeFs.get(resultPath)!, 'utf8');
+      fakeFs.delete(resultPath);
+      fakeBytes.set(resultPath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), valid]));
+    }, 100);
+
+    const error = await dispatchCommand('stop-service', { service: 'Spooler' })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ElevatedWorkerError);
+    expect(error.code).toBe('E_BAD_RESULT');
+  });
+
   it('rejects an oversized result before the legacy unbounded read', async () => {
     setHeartbeat({ ageMs: 1_000 });
     let oversizedPath = '';
@@ -1473,15 +1756,20 @@ describe('elevatedWorker > dispatchCommand', () => {
   });
 
   it.each([
-    ['unknown parameter', { service: 'Spooler', executable: 'cmd.exe' }],
-    ['missing required parameter', {}],
-    ['wrong parameter type', { service: 42 }],
-  ])('rejects %s before writing a command', async (_label, params) => {
+    ['unknown parameter', 'stop-service', { service: 'Spooler', executable: 'cmd.exe' }],
+    ['missing required parameter', 'stop-service', {}],
+    ['wrong parameter type', 'stop-service', { service: 42 }],
+    ['service wildcard', 'stop-service', { service: '*' }],
+    ['service path', 'stop-service', { service: 'bad/name' }],
+    ['process wildcard', 'kill-process', { target: '?' }],
+    ['process whitespace', 'kill-process', { target: 'bad target' }],
+  ])('rejects %s before writing a command', async (_label, action, params) => {
     setHeartbeat({ ageMs: 1_000 });
-    const error = await dispatchCommand('stop-service', params).catch((caught) => caught);
+    const error = await dispatchCommand(action as any, params).catch((caught) => caught);
     expect(error).toBeInstanceOf(ElevatedWorkerError);
     expect(error.code).toBe('E_INVALID_PARAMS');
     expect(Array.from(fakeFs.keys()).some((key) => key.endsWith('.cmd.json'))).toBe(false);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });
 
@@ -1506,7 +1794,7 @@ describe('elevatedWorker > buildLaunchCmd', () => {
     pwsh: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
     workerScript: 'C:\\ProgramData\\PCDoctor\\worker\\Elevated-Worker.ps1',
     basePath: 'C:\\ProgramData\\PCDoctor',
-    queueDir: 'C:\\Users\\someone\\AppData\\Local\\PCDoctor\\worker-queue',
+    queueRoot: 'C:\\ProgramData\\PCDoctorWorkerQueue',
     sessionId: '00112233445566778899aabbccddeeff',
     queueUserSid: 'S-1-5-21-1000',
   };
@@ -1514,14 +1802,14 @@ describe('elevatedWorker > buildLaunchCmd', () => {
   it('passes one prequoted native ArgumentList string that preserves spaces and apostrophes', () => {
     const cmd = buildLaunchCmd({
       ...opts,
-      queueDir: "C:\\Users\\O'Brien\\Queue With Space\\",
+      queueRoot: "C:\\ProgramData\\O'Brien Queue Root\\",
     });
     const matches = Array.from(cmd.matchAll(/-ArgumentList\s+('(?:[^']|'')*')/g));
 
     expect(matches).toHaveLength(1);
     expect(cmd).not.toContain('-ArgumentList @(');
     expect(matches[0][1]).toContain('"-NoProfile" "-ExecutionPolicy" "Bypass"');
-    expect(matches[0][1]).toContain("\"C:\\Users\\O''Brien\\Queue With Space\\\\\"");
+    expect(matches[0][1]).toContain("\"C:\\ProgramData\\O''Brien Queue Root\\\\\"");
   });
 
   it('preserves all required worker args in order', () => {
@@ -1529,12 +1817,13 @@ describe('elevatedWorker > buildLaunchCmd', () => {
     // Sanity-check the worker receives only non-secret launch coordinates.
     expect(cmd).toContain('"-File"');
     expect(cmd).toContain('"-BasePath"');
-    expect(cmd).toContain('"-QueueDir"');
+    expect(cmd).toContain('"-QueueRoot"');
+    expect(cmd).not.toContain('"-QueueDir"');
     expect(cmd).toContain('"-SessionId"');
     expect(cmd).toContain('"-QueueUserSid"');
     expect(cmd).toContain(`"${opts.workerScript}"`);
     expect(cmd).toContain(`"${opts.basePath}"`);
-    expect(cmd).toContain(`"${opts.queueDir}"`);
+    expect(cmd).toContain(`"${opts.queueRoot}"`);
     expect(cmd).toContain(`"${opts.sessionId}"`);
     expect(cmd).toContain(`"${opts.queueUserSid}"`);
     expect(cmd).toContain(`Remove-Item Env:\\${_testing.CAPABILITY_ENV}`);

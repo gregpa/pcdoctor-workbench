@@ -2,16 +2,24 @@
 
 ## Status
 
-IMPLEMENTED AND VERIFIED, WITH A DELIBERATE FAIL-CLOSED DEPLOYMENT DEPENDENCY
+IMPLEMENTED AND VERIFIED, WITH DELIBERATE FAIL-CLOSED INSTALLER DEPENDENCIES
 
-Commit subject: `security: authenticate elevated worker commands`
+Base commit: `b44f363 security: authenticate elevated worker commands`
 
-Task 4 code is complete and the safe verification matrix passes. The current
-`C:\ProgramData\PCDoctor` Tier-A layout is intentionally rejected by the new
-code-trust proof because its owner and effective ACL permit untrusted replacement.
-Phase 0 is not releasable until a later installer task provisions the fixed worker
-and action payload beneath an administrator-protected immutable boundary. Manual
-worker actions must be restored through that installer change before Phase 0 exit.
+Controller remediation subject: `security: harden elevated worker queue boundary`
+
+The formal controller rejected the queue design in `b44f363` because its per-user
+parent and FullControl leaf could be renamed or replaced with a junction after a
+path-based ACL check. This remediation replaces that architecture. Task 4 code is
+complete and the safe verification matrix passes, but the current machine still
+fails closed before UAC because neither required production boundary is installed:
+
+- `C:\ProgramData\PCDoctorWorkerQueue` does not exist;
+- the current `C:\ProgramData\PCDoctor` Tier-A code layout remains mutable.
+
+Task 5 and the Phase 0 exit gate must provision both the administrator-owned queue
+root and privileged worker/action payload. Manual worker actions remain deliberately
+unavailable until that installer work is complete and independently verified.
 
 ## Success criteria
 
@@ -25,18 +33,18 @@ worker actions must be restored through that installer change before Phase 0 exi
    malformed schemas, unknown actions or parameters, automatic authority, and all
    reboot or shutdown actions.
    Verify: Node boundary cases plus independent PowerShell validation.
-4. Restrict the queue to the current user, Administrators, and SYSTEM with a
-   protected exact DACL, and fail closed if the proof changes.
-   Verify: queue proof tests and independent worker ACL checks.
+4. Require a fixed Administrators-owned queue root, create the random session leaf only
+   after elevation, and give the medium user no directory replacement authority.
+   Verify: exact root/leaf/ancestor proofs, four-ACE model tests, and pre-UAC failure.
 5. Execute only fixed ProgramData worker/action code that is protected from
    untrusted replacement.
    Verify: owner, DACL, reparse, path, file-set, and ancestor replacement proofs.
 6. Replace generic action forwarding with an exact fixed map and trusted absolute
    executables.
    Verify: nine action-map cases and pure absolute `sc.exe` resolution.
-7. Bound all reads, publish commands, heartbeats, and results atomically, and prevent
-   rejected traffic from keeping the elevated worker alive.
-   Verify: oversized, partial, concurrent heartbeat, replay, and backlog tests.
+7. Bound all reads and enumeration, publish commands, heartbeats, and results
+   atomically, and prevent rejected traffic from keeping the elevated worker alive.
+   Verify: oversized, partial, concurrent heartbeat, replay, and 2,500-file backlog tests.
 8. Exercise the worker without UAC or machine mutation.
    Verify: `-TestMode` accepts only a generated temp-only `test-echo` action.
 
@@ -98,16 +106,52 @@ data | error, issued_at, nonce, hmac_sha256
 
 ### Queue and code trust
 
-The random session queue is created with inheritance disabled and exactly three
-FullControl entries:
+The production queue root is the fixed literal
+`C:\ProgramData\PCDoctorWorkerQueue`, separate from the mutable `PCDOCTOR_ROOT`.
+Electron never creates the session directory. Before any UAC launch, a fixed encoded
+read-only verifier requires the root to exist, be owned exactly by
+BUILTIN\Administrators, have a
+protected DACL, contain no reparse point in its ancestor chain, and be structurally
+non-replaceable by untrusted principals. A missing or insecure root returns
+`E_QUEUE_ROOT_TRUST` before `spawn` can run.
 
-- current user SID;
-- BUILTIN\Administrators;
-- SYSTEM.
+The root proof reports its resolved owner SID as part of its exact shape, and
+Electron independently requires `S-1-5-32-544`. SYSTEM and TrustedInstaller remain
+valid owners for ancestors only. Task 5 must explicitly set the queue root owner to
+BUILTIN\Administrators even when installation runs as SYSTEM.
 
-Electron verifies that exact effective ACL before launch and again immediately
-before command publication. The elevated worker repeats the ACL proof before every
-command.
+The elevated Windows PowerShell 5.1 worker validates the same fixed root, derives the
+leaf as exactly `Join-Path $ProductionQueueRoot $SessionId`, rejects an existing leaf,
+and creates the leaf with `Directory.CreateDirectory(path, DirectorySecurity)`. The
+owner and DACL are applied at creation. There is no create-then-`Set-Acl` fallback.
+The exact protected leaf descriptor is:
+
+- owner: BUILTIN\Administrators;
+- BUILTIN\Administrators: FullControl, ContainerInherit and ObjectInherit;
+- SYSTEM: FullControl, ContainerInherit and ObjectInherit;
+- current user: direct ReadAndExecute plus CreateFiles, with no inheritance;
+- current user: Modify on child files only, ObjectInherit plus InheritOnly.
+
+The direct user rule has no CreateDirectories, DeleteChild, Delete, WriteAttributes,
+WriteExtendedAttributes, ChangePermissions, or TakeOwnership. The file-only rule
+allows a Node-created temporary file to be read, renamed, and deleted without giving
+the user any authority to create a subdirectory or reparse directory node. Explicit
+Administrators ownership prevents the medium user from acquiring implicit WRITE_DAC
+authority through ownership.
+
+After elevation, Electron marks the queue ready only after the exact leaf proof and
+an authenticated heartbeat both succeed. It repeats the leaf proof immediately
+before command publication. The worker repeats the root, leaf, owner, DACL, and
+no-reparse proof before every heartbeat or result publication and before queue-file
+deletion.
+
+PowerShell 5.1 does not provide a suitable retained open-directory, no-follow,
+handle-relative API for the current script. The safety argument is therefore
+structural: an untrusted medium process cannot delete, rename, re-ACL, re-own, or
+replace the trusted root or leaf; cannot create child directories in the root or
+leaf; and every path node is proven non-reparse before I/O. A privileged process can
+still race this boundary and is outside this specific trust claim. A protected broker
+remains the stronger long-term architecture.
 
 Worker and action coordinates are fixed under `C:\ProgramData\PCDoctor`. There is
 no per-user bundle fallback. A fixed inline non-elevated verifier checks:
@@ -150,6 +194,13 @@ fixed `-DryRun` and `-JsonOutput` switches. Validated values travel through boun
 UTF-8 base64 environment slots to a constant encoded wrapper. No attacker-controlled
 value enters a command-line program string.
 
+Every service string and `kill-process` target is independently constrained in both
+TypeScript and PowerShell to `[A-Za-z0-9._-]{1,128}`. Stars, question marks, bracket
+patterns, slashes, backslashes, whitespace, non-ASCII text, and values longer than
+128 characters are rejected before UAC in Electron and before action mapping in the
+worker. This prevents PowerShell wildcard expansion from widening one signed request
+to multiple services or processes.
+
 The action host is the absolute Windows PowerShell executable. Search-related child
 environment variables are reduced to Windows-owned paths. `Set-ServiceStartup.ps1`
 now resolves fallback `sc.exe` as the absolute
@@ -163,11 +214,18 @@ No service query or action is part of the smoke gate.
 - Heartbeats use a same-directory temporary file and atomic replacement, including a
   unique backup path required by Windows PowerShell 5.1.
 - Node and PowerShell reads are bounded before parsing.
+- Node and PowerShell use throwing UTF-8 decoders before JSON parsing. Neither
+  runtime can replacement-decode an authenticated artifact. Node preserves a BOM
+  as U+FEFF so BOM-prefixed JSON remains noncanonical and rejected.
 - Heartbeats remain signed and fresh while a synchronous action child runs.
-- Strict UTF-8 readers handle BOMless artifacts identically on PowerShell 5.1 and 7.
+- Strict UTF-8 readers handle BOMless artifacts identically on Node, PowerShell 5.1,
+  and PowerShell 7.
 - Only a fully authenticated envelope with an accepted nonce refreshes activity.
-- The idle deadline is checked inside every captured command snapshot, so malformed
-  or unauthenticated backlogs cannot extend worker lifetime.
+- Command files are obtained with lazy `Directory.EnumerateFiles`; there is no global
+  `Get-ChildItem` materialization or `Sort-Object` pass.
+- At most 64 command paths are handled per iteration, and the idle deadline is
+  checked before and after each enumerator step. A 2,500-file malformed backlog on
+  both PowerShell runtimes proves enumeration cannot defer worker shutdown.
 
 ## Literal cross-language baselines
 
@@ -256,14 +314,73 @@ accept a session ID or authenticated V2 input.
 - The exact Windows PowerShell-hosted smoke exposed ANSI decoding of BOMless UTF-8
   results. Replacing every artifact `Get-Content` with a strict UTF-8 stream reader
   corrected the HMAC mismatch on both worker runtimes.
-- A 1,200-file unauthenticated snapshot kept the unfixed worker busy beyond 60
-  seconds. In-loop idle enforcement and a deterministic 200-file regression now
-  prove the deadline cannot be deferred.
+- A 1,200-file unauthenticated snapshot kept the first implementation busy beyond
+  60 seconds. The controller later showed that its 200-file regression still
+  materialized and sorted the directory before the deadline check. The remediation
+  now uses lazy capped enumeration and a 2,500-file both-runtime regression.
 - Full regression found two constants mocks missing the new absolute PowerShell
   fallback export. The two suites failed at module load, then passed 31 of 31 after
   the test-only mock contract correction.
-- Final test-writer validation added 32 adversarial cases. Focused coverage is now
-  116 of 116 with no production bug demonstrated.
+- The pre-controller test-writer validation added 32 adversarial cases. That
+  historical focused checkpoint was 116 of 116 with no production bug demonstrated.
+
+### Formal controller remediation RED and GREEN
+
+The controller rejected `b44f363` for a replaceable per-user queue, wildcard-capable
+service/process strings, materialized backlog enumeration, and an undocumented
+same-user capability limitation. New tests were added before remediation code.
+
+The focused RED run reported:
+
+```text
+139 tests collected
+24 failed, 115 passed
+```
+
+The failures proved that 13 unsafe service/kill names were accepted, the queue still
+resolved beneath LocalAppData, the narrow ACL model did not exist, missing root trust
+returned the old error, and the launcher still accepted `-QueueDir`. Four dispatch
+tests timed out because unsafe names passed validation and reached worker readiness.
+
+The independent PowerShell RED stopped immediately with:
+
+```text
+[FAIL] set-service-startup accepted unsafe service name: *
+```
+
+GREEN proceeded in small slices:
+
+- the exact safe-name domain passed at lengths 1 and 128 and rejected wildcard,
+  slash, whitespace, bracket, and length-129 cases in TypeScript and PowerShell;
+- fixed-root derivation, pre-UAC root failure, exact 13-field root/leaf proofs, and
+  the four-ACE ACL model reached 150 of 150 focused tests;
+- a first PS7 smoke run exposed TestMode proof overhead and insufficient harness
+  timeout; proof placement was simplified without weakening pre-write production
+  checks, and the isolated harness timeout was adjusted;
+- a proposed PS7 create-then-ACL fallback was rejected before acceptance because the
+  creator would temporarily own WRITE_DAC. Production was pinned to Windows
+  PowerShell 5.1 atomic descriptor creation, and a static regression test now forbids
+  the fallback;
+- the final 2,500-file smoke passed authenticated worker, action-host heartbeat,
+  rejected-traffic idle, and bounded-backlog checks on PowerShell 7 and 5.1.
+- independent review found that a leaf-proof exception could escape the post-spawn
+  poll without retiring its session. A RED assertion reproduced the retained
+  session, and one lifecycle cleanup path now deactivates the launcher and retires
+  the current session for every proof, spawn, poll, launch, or timeout error;
+- root ownership was tightened from a privileged-owner set to exact
+  BUILTIN\Administrators. The proof now includes `owner_sid`; worker and Electron
+  reject SYSTEM, TrustedInstaller, or a user SID at the root while retaining the
+  privileged-owner set for ancestors;
+- parser validation showed that .NET `$` accepts a final line feed. A valid signed
+  command with line feed appended to its HMAC was accepted on both PowerShell
+  runtimes before the fix. All attacker-reachable exact worker and embedded-proof
+  formats now use the absolute `\z` anchor, including safe names, HMAC, ID, nonce,
+  session ID, SID, reboot names, and wrapper tokens;
+- parser validation also constructed malformed bytes `c3 28` that Node
+  replacement-decoded to the same logical string as a signed result containing
+  U+FFFD plus `(`. Node accepted it before the fix while both PowerShell runtimes
+  rejected it. Node now uses a fatal `TextDecoder` before parsing heartbeat or
+  result bytes, compatible with the declared Node 17.3 minimum.
 
 ## Final verification
 
@@ -272,15 +389,13 @@ All commands ran from
 
 | Check | Result |
 |---|---|
-| `npx vitest run tests/main/elevatedWorker.test.ts` | PASS, 116 of 116 |
+| `npx vitest run tests/main/elevatedWorker.test.ts` | PASS, 168 of 168 |
 | Exact PS5.1-hosted temp-only worker smoke | PASS on PowerShell 7 and 5.1 |
-| Repeated smoke plus parallel focused tests | PASS |
 | `npm run lint` | PASS |
 | `npm run typecheck` | PASS |
-| `npm run test:node` | PASS, 90 files and 1,215 tests |
+| `npm run test:node` | PASS, 90 files and 1,267 tests |
 | `npm run test:ps51` | PASS, 126 scripts |
 | `npm run test:bundle-sync` | PASS, 1 sidecar |
-| Fixture and action filter | PASS, 12 of 12 |
 | `git diff --check` | PASS |
 | Added-line em/en dash scan | PASS |
 
@@ -291,15 +406,18 @@ No Scheduled Task state was read or changed by Task 4 verification.
 
 ## Independent validators
 
-- Test-writer: PASS. Added 32 focused cases; 116 of 116 passed. No production bug.
-  Intentional gaps are live UAC/real ACL integration and real maintenance actions.
-- Code-reviewer: clean, with no finding at confidence 0.60 or higher. Both previous
-  Critical findings and all previous Warning findings were explicitly cleared.
-- Output-validator: PASS. Full safe suite passed 90 files and 1,215 tests; all three
-  primary HMAC fixtures were independently reproduced; no regression or baseline
-  snapshot update is required.
-- Parser validator: PASS. Strict JSON edge cases and the non-ASCII fixture matched
-  Node, PowerShell 7, and PowerShell 5.1. No high or moderate parser finding.
+- Test-writer: PASS. Added post-spawn proof-shape, proof-environment, exact ACL-mask,
+  and AST enumeration guards. Its pass was 158 of 158; later review-driven
+  regressions raised final focused coverage to 168 of 168. No live integration ran.
+- Code-reviewer: found and cleared the lifecycle cleanup warning and a declared
+  Node 17.3 compatibility warning in the first strict decoder. The final decoder is
+  fatal, BOM-preserving, and uses `node:util.TextDecoder`. No remaining code finding
+  reached confidence 0.60.
+- Output-validator: PASS on the requested architecture, cross-runtime smoke,
+  regression suite, and threat-model disclosure. Its root-owner wording warning
+  was resolved by tightening the implementation to exact BUILTIN\Administrators.
+- Parser validator: found and reproduced final-LF regex drift and malformed UTF-8
+  replacement decoding. Both were corrected with cross-runtime regressions.
   Engineering extraction domains were not applicable.
 
 ## Files changed
@@ -322,8 +440,21 @@ and TOCTOU surface.
 
 ## Safety and remaining concerns
 
+- Capability scope is limited: HMAC authentication protects queue artifacts from
+  tampering by processes that cannot inspect or inject into the trusted Electron or
+  launcher process. Arbitrary code already running as the same Windows user can
+  normally inspect or inject into those processes, recover the in-memory or
+  launcher-environment capability, and forge otherwise valid manual envelopes. If
+  hostile same-user code is in scope, this design is insufficient. Phase 0 must use
+  a protected broker with OS-enforced process identity and mutual validation, or
+  per-command elevation, before making that stronger claim.
 - Current deployment is deliberately unavailable: the mutable Tier-A root returns
-  `E_CODE_TRUST`. Installer hardening is a blocking Phase 0 integration dependency.
+  `E_CODE_TRUST`, and the absent fixed queue root returns `E_QUEUE_ROOT_TRUST` before
+  UAC. Installer hardening is a blocking Phase 0 integration dependency.
+- Task 5 must provision the protected queue root with owner exactly
+  BUILTIN\Administrators, provision the privileged code payload, define
+  administrator-owned stale session-leaf cleanup, and adapt the live launcher smoke
+  to the installed fixed-root contract before the Phase 0 exit gate.
 - Live UAC consent, the real hardened ProgramData ACL, and real maintenance actions
   were not exercised. This is intentional safety scope, not evidence they work
   end-to-end in the current deployment.

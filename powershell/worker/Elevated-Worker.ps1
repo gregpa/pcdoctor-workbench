@@ -21,7 +21,7 @@ param(
     [string]$BasePath,
 
     [Parameter(Mandatory=$true)]
-    [string]$QueueDir,
+    [string]$QueueRoot,
 
     [Parameter(Mandatory=$true)]
     [string]$SessionId,
@@ -41,6 +41,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $CapabilityEnvironmentName = 'PCDOCTOR_WORKER_CAPABILITY_V2'
 $MaxCommandBytes = 1048576
+$MaxCommandFilesPerIteration = 64
+$script:ProductionQueueRoot = 'C:\ProgramData\PCDoctorWorkerQueue'
+$QueueDir = $null
 $script:CapabilityBytes = $null
 $script:TrustedPowerShellPath = $null
 $capabilityText = [Environment]::GetEnvironmentVariable($CapabilityEnvironmentName, 'Process')
@@ -110,7 +113,7 @@ function Read-StrictJsonHexUnit {
         throw 'Incomplete JSON Unicode escape'
     }
     $hex = $script:StrictJsonText.Substring($script:StrictJsonIndex, 4)
-    if ($hex -notmatch '^[0-9a-fA-F]{4}$') { throw 'Invalid JSON Unicode escape' }
+    if ($hex -notmatch '^[0-9a-fA-F]{4}\z') { throw 'Invalid JSON Unicode escape' }
     $script:StrictJsonIndex += 4
     return [Convert]::ToInt32($hex, 16)
 }
@@ -409,7 +412,7 @@ function New-ArtifactNonce {
 
 function ConvertFrom-LowerHex {
     param([Parameter(Mandatory=$true)][string]$Value)
-    if ($Value -cnotmatch '^[0-9a-f]{64}$') { Throw-WorkerError 'E_BAD_ENVELOPE' 'HMAC format is invalid' }
+    if ($Value -cnotmatch '^[0-9a-f]{64}\z') { Throw-WorkerError 'E_BAD_ENVELOPE' 'HMAC format is invalid' }
     $bytes = New-Object byte[] 32
     for ($index = 0; $index -lt 32; $index++) {
         $bytes[$index] = [Convert]::ToByte($Value.Substring($index * 2, 2), 16)
@@ -434,7 +437,7 @@ function Test-FixedTimeEqual {
 # ACL, envelope, and action validation
 # ---------------------------------------------------------------------------
 
-function Assert-SecureQueueAcl {
+function Assert-SecureTestQueueAcl {
     if (-not (Test-Path -LiteralPath $QueueDir -PathType Container)) {
         Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue is missing'
     }
@@ -459,6 +462,240 @@ function Assert-SecureQueueAcl {
     }
     foreach ($sid in $allowed) { if (-not $seen.Contains($sid)) { $secure = $false } }
     if (-not $secure) { Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue ACL verification failed' }
+}
+
+function Resolve-OwnerSid {
+    param([Parameter(Mandatory=$true)][string]$Owner)
+    try {
+        if ($Owner -match '^S-[0-9-]+\z') {
+            return (New-Object Security.Principal.SecurityIdentifier($Owner)).Value
+        }
+        return ([Security.Principal.NTAccount]$Owner).Translate(
+            [Security.Principal.SecurityIdentifier]
+        ).Value
+    } catch {
+        return $null
+    }
+}
+
+function Get-TrustedOwnerSidSet {
+    $trusted = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($sid in @(
+        'S-1-5-18',
+        'S-1-5-32-544',
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+    )) { [void]$trusted.Add($sid) }
+    return $trusted
+}
+
+function Test-ExpectedProductionQueueRootOwner {
+    param([Parameter(Mandatory=$true)][string]$OwnerSid)
+    return $OwnerSid -ceq 'S-1-5-32-544'
+}
+
+function Assert-TrustedProductionQueueRoot {
+    $expectedRoot = [IO.Path]::GetFullPath($script:ProductionQueueRoot).TrimEnd('\')
+    $actualRoot = [IO.Path]::GetFullPath($QueueRoot).TrimEnd('\')
+    if (-not $actualRoot.Equals($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Production queue root is not the fixed installer path'
+    }
+    if (-not (Test-Path -LiteralPath $expectedRoot -PathType Container)) {
+        Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Installer-provisioned queue root is missing'
+    }
+
+    $trustedOwners = Get-TrustedOwnerSidSet
+    $rootDangerousRights = [int64](
+        [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    )
+    $ancestorReplacementRights = [int64](
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    )
+
+    $node = Get-Item -LiteralPath $expectedRoot -Force
+    $isRoot = $true
+    while ($null -ne $node) {
+        if (($node.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Queue root or ancestor is a reparse point'
+        }
+        $acl = Get-Acl -LiteralPath $node.FullName
+        if ($isRoot -and -not $acl.AreAccessRulesProtected) {
+            Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Queue root ACL is not protected'
+        }
+        $ownerSid = Resolve-OwnerSid -Owner $acl.Owner
+        if ($isRoot) {
+            if ([string]::IsNullOrWhiteSpace($ownerSid) -or
+                -not (Test-ExpectedProductionQueueRootOwner -OwnerSid $ownerSid)) {
+                Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Queue root owner is not BUILTIN\Administrators'
+            }
+        } elseif ([string]::IsNullOrWhiteSpace($ownerSid) -or
+            -not $trustedOwners.Contains($ownerSid)) {
+            Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Queue ancestor has an untrusted owner'
+        }
+        $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        foreach ($rule in $rules) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                $trustedOwners.Contains($rule.IdentityReference.Value) -or
+                ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) {
+                continue
+            }
+            $forbidden = if ($isRoot) { $rootDangerousRights } else { $ancestorReplacementRights }
+            if (([int64]$rule.FileSystemRights -band $forbidden) -ne 0) {
+                Throw-WorkerError 'E_QUEUE_ROOT_TRUST' 'Untrusted principal can modify or replace the queue boundary'
+            }
+        }
+        $isRoot = $false
+        $node = $node.Parent
+    }
+}
+
+function New-ProductionQueueLeafSecurity {
+    param([Parameter(Mandatory=$true)][string]$UserSidText)
+    try { $userSid = New-Object Security.Principal.SecurityIdentifier($UserSidText) }
+    catch { Throw-WorkerError 'E_QUEUE_ACL' 'Queue user SID is invalid' }
+    $adminSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $systemSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+    $security = New-Object Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $security.SetOwner($adminSid)
+
+    foreach ($sid in @($adminSid, $systemSid)) {
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+            $sid,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow
+        )))
+    }
+    $directoryRights = [Security.AccessControl.FileSystemRights](
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+        [Security.AccessControl.FileSystemRights]::WriteData
+    )
+    $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+        $userSid,
+        $directoryRights,
+        [Security.AccessControl.InheritanceFlags]::None,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+    )))
+    $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+        $userSid,
+        [Security.AccessControl.FileSystemRights]::Modify,
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+        [Security.AccessControl.PropagationFlags]::InheritOnly,
+        [Security.AccessControl.AccessControlType]::Allow
+    )))
+    return $security
+}
+
+function New-ProductionQueueLeaf {
+    Assert-TrustedProductionQueueRoot
+    if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
+        Throw-WorkerError 'E_QUEUE_ACL' 'Production queue creation requires Windows PowerShell 5.1'
+    }
+    $expectedLeaf = Join-Path $script:ProductionQueueRoot $SessionId
+    if (-not [IO.Path]::GetFullPath($QueueDir).Equals(
+            [IO.Path]::GetFullPath($expectedLeaf), [StringComparison]::OrdinalIgnoreCase)) {
+        Throw-WorkerError 'E_QUEUE_ACL' 'Queue leaf is not the authenticated session path'
+    }
+    if ([IO.Directory]::Exists($QueueDir)) {
+        Throw-WorkerError 'E_QUEUE_ACL' 'Authenticated queue leaf already exists'
+    }
+    $security = New-ProductionQueueLeafSecurity -UserSidText $QueueUserSid
+    try {
+        # The DirectorySecurity overload creates the directory and applies its
+        # owner and DACL in one kernel-backed operation. Production never uses a
+        # create-then-SetAcl sequence because the owner would gain WRITE_DAC in
+        # the gap even when the parent itself is protected.
+        [IO.Directory]::CreateDirectory($QueueDir, $security) | Out-Null
+    } catch {
+        Throw-WorkerError 'E_QUEUE_ACL' "Could not create the protected queue leaf: $($_.Exception.Message)"
+    }
+}
+
+function Assert-SecureProductionQueueLeaf {
+    Assert-TrustedProductionQueueRoot
+    if (-not (Test-Path -LiteralPath $QueueDir -PathType Container)) {
+        Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue leaf is missing'
+    }
+    $item = Get-Item -LiteralPath $QueueDir -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue leaf is a reparse point'
+    }
+    if (-not $item.Parent.FullName.Equals(
+            [IO.Path]::GetFullPath($script:ProductionQueueRoot).TrimEnd('\'),
+            [StringComparison]::OrdinalIgnoreCase) -or $item.Name -cne $SessionId) {
+        Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue leaf is outside the fixed session boundary'
+    }
+    try { $expectedUserSid = New-Object Security.Principal.SecurityIdentifier($QueueUserSid) }
+    catch { Throw-WorkerError 'E_QUEUE_ACL' 'Queue user SID is invalid' }
+    $adminSid = 'S-1-5-32-544'
+    $systemSid = 'S-1-5-18'
+    $acl = Get-Acl -LiteralPath $QueueDir
+    $ownerSid = Resolve-OwnerSid -Owner $acl.Owner
+    $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+    $secure = $acl.AreAccessRulesProtected -and $ownerSid -ceq $adminSid -and $rules.Count -eq 4
+    $trustedSeen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $userDirectorySeen = $false
+    $userFileSeen = $false
+    $expectedDirectoryRights = [int64](
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+        [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize
+    )
+    $expectedFileRights = [int64](
+        [Security.AccessControl.FileSystemRights]::Modify -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize
+    )
+    foreach ($rule in $rules) {
+        if ($rule.IsInherited -or
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
+            $secure = $false
+            continue
+        }
+        $sid = $rule.IdentityReference.Value
+        if ($sid -ceq $adminSid -or $sid -ceq $systemSid) {
+            [void]$trustedSeen.Add($sid)
+            if ($rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+                $rule.InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' -or
+                $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) {
+                $secure = $false
+            }
+        } elseif ($sid -ceq $expectedUserSid.Value) {
+            if ([int64]$rule.FileSystemRights -eq $expectedDirectoryRights -and
+                $rule.InheritanceFlags -eq [Security.AccessControl.InheritanceFlags]::None -and
+                $rule.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None) {
+                if ($userDirectorySeen) { $secure = $false }
+                $userDirectorySeen = $true
+            } elseif ([int64]$rule.FileSystemRights -eq $expectedFileRights -and
+                $rule.InheritanceFlags -eq [Security.AccessControl.InheritanceFlags]::ObjectInherit -and
+                $rule.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::InheritOnly) {
+                if ($userFileSeen) { $secure = $false }
+                $userFileSeen = $true
+            } else {
+                $secure = $false
+            }
+        } else {
+            $secure = $false
+        }
+    }
+    if ($trustedSeen.Count -ne 2 -or -not $userDirectorySeen -or -not $userFileSeen) { $secure = $false }
+    if (-not $secure) { Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue leaf ACL verification failed' }
+}
+
+function Assert-SecureQueueBoundary {
+    if ($TestMode) { Assert-SecureTestQueueAcl }
+    else { Assert-SecureProductionQueueLeaf }
 }
 
 function Initialize-TrustedExecutionEnvironment {
@@ -503,13 +740,21 @@ function Assert-ExactKeys {
 }
 
 function Assert-StringParam {
-    param([Collections.IDictionary]$Params, [string]$Name, [string[]]$Values = @())
+    param(
+        [Collections.IDictionary]$Params,
+        [string]$Name,
+        [string[]]$Values = @(),
+        [switch]$SafeName
+    )
     $value = $Params[$Name]
     if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) {
         Throw-WorkerError 'E_INVALID_PARAMS' "Invalid string parameter: $Name"
     }
     if ($Values.Count -gt 0 -and $Values -cnotcontains $value) {
         Throw-WorkerError 'E_INVALID_PARAMS' "Invalid value for parameter: $Name"
+    }
+    if ($SafeName -and $value -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') {
+        Throw-WorkerError 'E_INVALID_PARAMS' "Invalid safe-name parameter: $Name"
     }
 }
 
@@ -538,24 +783,24 @@ function Get-ActionArguments {
     switch -CaseSensitive ($Action) {
         'set-service-startup' {
             Assert-ExactKeys $Params @('service', 'startup_type') @('dry_run') 'E_INVALID_PARAMS'
-            Assert-StringParam $Params 'service'
+            Assert-StringParam $Params 'service' -SafeName
             Assert-StringParam $Params 'startup_type' @('Automatic', 'AutomaticDelayedStart', 'Manual', 'Disabled')
             [void]$arguments.Add('-Service'); [void]$arguments.Add($Params['service'])
             [void]$arguments.Add('-StartupType'); [void]$arguments.Add($Params['startup_type'])
         }
         { $_ -ceq 'stop-service' -or $_ -ceq 'start-service' } {
             Assert-ExactKeys $Params @('service') @('dry_run') 'E_INVALID_PARAMS'
-            Assert-StringParam $Params 'service'
+            Assert-StringParam $Params 'service' -SafeName
             [void]$arguments.Add('-Service'); [void]$arguments.Add($Params['service'])
         }
         'restart-service' {
             Assert-ExactKeys $Params @('service') @('dry_run') 'E_INVALID_PARAMS'
-            Assert-StringParam $Params 'service'
+            Assert-StringParam $Params 'service' -SafeName
             [void]$arguments.Add('-ServiceName'); [void]$arguments.Add($Params['service'])
         }
         'kill-process' {
             Assert-ExactKeys $Params @('target') @('dry_run') 'E_INVALID_PARAMS'
-            Assert-StringParam $Params 'target'
+            Assert-StringParam $Params 'target' -SafeName
             [void]$arguments.Add('-Target'); [void]$arguments.Add($Params['target'])
         }
         'set-process-priority' {
@@ -588,7 +833,7 @@ function Get-ActionArguments {
             }
         }
         default {
-            if ($Action -match '^(?i:reboot|shutdown|restart-computer|shutdown-computer)$') {
+            if ($Action -match '^(?i:reboot|shutdown|restart-computer|shutdown-computer)\z') {
                 Throw-WorkerError 'E_REBOOT_FORBIDDEN' 'Reboot and shutdown actions are forbidden'
             }
             Throw-WorkerError 'E_INVALID_ACTION' "Unknown action: $Action"
@@ -621,11 +866,11 @@ function Test-WorkerEnvelope {
     }
     if ($Command['version'] -isnot [int64] -or $Command['version'] -ne 2 -or
         $Command['session_id'] -isnot [string] -or
-        $Command['id'] -isnot [string] -or $Command['id'] -cnotmatch '^[0-9a-f]{32}$' -or
+        $Command['id'] -isnot [string] -or $Command['id'] -cnotmatch '^[0-9a-f]{32}\z' -or
         $Command['action'] -isnot [string] -or
         $Command['params'] -isnot [Collections.IDictionary] -or
         $Command['issued_at'] -isnot [int64] -or $Command['expires_at'] -isnot [int64] -or
-        $Command['nonce'] -isnot [string] -or $Command['nonce'] -cnotmatch '^[0-9a-f]{32}$' -or
+        $Command['nonce'] -isnot [string] -or $Command['nonce'] -cnotmatch '^[0-9a-f]{32}\z' -or
         $Command['hmac_sha256'] -isnot [string]) {
         Throw-WorkerError 'E_BAD_ENVELOPE' 'Envelope field type or format is invalid'
     }
@@ -648,7 +893,7 @@ function Test-WorkerEnvelope {
         Throw-WorkerError 'E_BAD_HMAC' 'Envelope authentication failed'
     }
 
-    if ($Command['action'] -match '^(?i:reboot|shutdown|restart-computer|shutdown-computer)$') {
+    if ($Command['action'] -match '^(?i:reboot|shutdown|restart-computer|shutdown-computer)\z') {
         Throw-WorkerError 'E_REBOOT_FORBIDDEN' 'Reboot and shutdown actions are forbidden'
     }
     $arguments = @(Get-ActionArguments -Action $Command['action'] -Params $Command['params'])
@@ -726,7 +971,7 @@ $tokens = $actionArguments.ToArray()
 $namedArguments = @{}
 for ($index = 0; $index -lt $tokens.Count;) {
     $token = [string]$tokens[$index]
-    if ($token -cnotmatch '^-[A-Za-z]+$') { throw 'Invalid action argument token' }
+    if ($token -cnotmatch '^-[A-Za-z]+\z') { throw 'Invalid action argument token' }
     $name = $token.Substring(1)
     if ($name -ceq 'DryRun' -or $name -ceq 'JsonOutput') {
         $namedArguments[$name] = $true
@@ -851,6 +1096,7 @@ function Write-AtomicJson {
         [Parameter(Mandatory=$true)][string]$Destination,
         [Parameter(Mandatory=$true)]$Payload
     )
+    Assert-SecureQueueBoundary
     $directory = Split-Path -Parent $Destination
     $leaf = Split-Path -Leaf $Destination
     $temporary = Join-Path $directory "$leaf.$([Guid]::NewGuid().ToString('N')).tmp"
@@ -868,6 +1114,7 @@ function Write-AtomicJson {
 
 function Write-AtomicHeartbeat {
     param([Parameter(Mandatory=$true)]$Payload)
+    Assert-SecureQueueBoundary
     $directory = Split-Path -Parent $script:HeartbeatFile
     $leaf = Split-Path -Leaf $script:HeartbeatFile
     $publicationId = [Guid]::NewGuid().ToString('N')
@@ -911,7 +1158,7 @@ function Update-Heartbeat {
     }
 }
 
-$script:HeartbeatFile = Join-Path $QueueDir '.heartbeat'
+$script:HeartbeatFile = $null
 $acceptedNonces = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 
 function Get-ResultAction {
@@ -970,14 +1217,17 @@ try {
     catch { Throw-WorkerError 'E_CAPABILITY_REQUIRED' 'Worker capability encoding invalid' }
     $capabilityText = $null
     if ($script:CapabilityBytes.Length -ne 32) { Throw-WorkerError 'E_CAPABILITY_REQUIRED' 'Worker capability must be 32 bytes' }
-    if ($SessionId -cnotmatch '^[0-9a-f]{32}$') { Throw-WorkerError 'E_BAD_SESSION' 'Worker session ID format invalid' }
+    if ($SessionId -cnotmatch '^[0-9a-f]{32}\z') { Throw-WorkerError 'E_BAD_SESSION' 'Worker session ID format invalid' }
     if ($IdleTimeoutSeconds -lt 1 -or $PollIntervalMs -lt 1) { Throw-WorkerError 'E_BAD_WORKER_CONFIG' 'Worker timing invalid' }
+    $QueueDir = Join-Path $QueueRoot $SessionId
 
     if ($TestMode) {
         $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        $fullRoot = [IO.Path]::GetFullPath($QueueRoot)
         $fullQueue = [IO.Path]::GetFullPath($QueueDir)
         $fullBase = [IO.Path]::GetFullPath($BasePath)
-        if (-not $fullQueue.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        if (-not $fullRoot.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $fullQueue.Equals((Join-Path $fullRoot $SessionId), [StringComparison]::OrdinalIgnoreCase) -or
             -not $fullBase.StartsWith($fullQueue.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
             Throw-WorkerError 'E_TEST_MODE_ISOLATION' 'TestMode paths must stay under its TEMP queue'
         }
@@ -986,28 +1236,46 @@ try {
     }
 
     Initialize-TrustedExecutionEnvironment
-    Assert-SecureQueueAcl
-    Update-Heartbeat
+    if ($TestMode) { Assert-SecureTestQueueAcl }
+    else { New-ProductionQueueLeaf }
+    Assert-SecureQueueBoundary
+    $script:HeartbeatFile = Join-Path $QueueDir '.heartbeat'
     $lastActivity = [DateTime]::UtcNow
+    Update-Heartbeat
 
     while ($true) {
         Update-Heartbeat
-        if (-not (Test-Path -LiteralPath $QueueDir -PathType Container)) {
-            Throw-WorkerError 'E_QUEUE_ACL' 'Worker queue disappeared'
-        }
-        $commandFiles = @(Get-ChildItem -LiteralPath $QueueDir -Filter '*.cmd.json' -File | Sort-Object Name)
-        foreach ($commandFile in $commandFiles) {
-            # Enforce the deadline inside a captured snapshot. Otherwise an
-            # attacker can preload enough unauthenticated files to postpone the
-            # only idle check indefinitely without ever presenting a valid nonce.
-            if (([DateTime]::UtcNow - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) { break }
-            Assert-SecureQueueAcl
-            $fileId = $commandFile.Name -replace '\.cmd\.json$', ''
+        if (([DateTime]::UtcNow - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) { break }
+
+        $enumerator = $null
+        $processedThisIteration = 0
+        $deadlineReached = $false
+        try {
+            $enumerator = [IO.Directory]::EnumerateFiles(
+                $QueueDir, '*.cmd.json', [IO.SearchOption]::TopDirectoryOnly
+            ).GetEnumerator()
+            while ($processedThisIteration -lt $MaxCommandFilesPerIteration) {
+                # Check before MoveNext so enumeration itself cannot defer the
+                # deadline, then check again before processing the yielded path.
+                if (([DateTime]::UtcNow - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) {
+                    $deadlineReached = $true
+                    break
+                }
+                Assert-SecureQueueBoundary
+                if (-not $enumerator.MoveNext()) { break }
+                if (([DateTime]::UtcNow - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) {
+                    $deadlineReached = $true
+                    break
+                }
+                $processedThisIteration++
+                $commandPath = [IO.Path]::GetFullPath([string]$enumerator.Current)
+                $commandName = [IO.Path]::GetFileName($commandPath)
+                $fileId = $commandName -replace '\.cmd\.json$', ''
             $resultFile = Join-Path $QueueDir "$fileId.result.json"
             $stopwatch = [Diagnostics.Stopwatch]::StartNew()
             $command = $null
             try {
-                $raw = Read-BoundedUtf8File -Path $commandFile.FullName -MaxBytes $MaxCommandBytes
+                $raw = Read-BoundedUtf8File -Path $commandPath -MaxBytes $MaxCommandBytes
                 $command = ConvertFrom-StrictJson -Text $raw
                 if ($command -isnot [Collections.IDictionary]) { Throw-WorkerError 'E_BAD_ENVELOPE' 'Envelope must be object' }
             } catch {
@@ -1016,7 +1284,7 @@ try {
                     -DurationMilliseconds $stopwatch.ElapsedMilliseconds -ErrorCode 'E_BAD_CMD' `
                     -ErrorMessage "$($_.Exception.Message)"
                 try { Write-AtomicJson -Destination $resultFile -Payload $result } catch {}
-                try { Remove-Item -LiteralPath $commandFile.FullName -Force } catch {}
+                try { Assert-SecureQueueBoundary; [IO.File]::Delete($commandPath) } catch {}
                 continue
             }
 
@@ -1039,11 +1307,15 @@ try {
             }
 
             try { Write-AtomicJson -Destination $resultFile -Payload $result } catch {}
-            try { Remove-Item -LiteralPath $commandFile.FullName -Force } catch {}
+            try { Assert-SecureQueueBoundary; [IO.File]::Delete($commandPath) } catch {}
             if ($acceptedEnvelope) { $lastActivity = [DateTime]::UtcNow }
+            }
+        } finally {
+            if ($null -ne $enumerator -and $enumerator -is [IDisposable]) { $enumerator.Dispose() }
         }
 
-        if (([DateTime]::UtcNow - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) { break }
+        if ($deadlineReached -or
+            ([DateTime]::UtcNow - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) { break }
         Start-Sleep -Milliseconds $PollIntervalMs
     }
 } finally {
@@ -1053,7 +1325,12 @@ try {
         [Array]::Clear($script:CapabilityBytes, 0, $script:CapabilityBytes.Length)
         $script:CapabilityBytes = $null
     }
-    try { Remove-Item -LiteralPath $script:HeartbeatFile -Force -ErrorAction SilentlyContinue } catch {}
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($script:HeartbeatFile)) {
+            Assert-SecureQueueBoundary
+            [IO.File]::Delete($script:HeartbeatFile)
+        }
+    } catch {}
 }
 
 exit 0

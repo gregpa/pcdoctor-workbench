@@ -33,6 +33,7 @@ export type ParamRule = Readonly<{
   min?: number;
   max?: number;
   values?: readonly string[];
+  pattern?: string;
 }>;
 
 export interface WorkerActionContract {
@@ -49,6 +50,12 @@ const stringRule = (values?: readonly string[]): ParamRule => Object.freeze({
   type: 'string',
   nonEmpty: true,
   ...(values ? { values: Object.freeze([...values]) } : {}),
+});
+const SAFE_NAME_PATTERN = '^[A-Za-z0-9._-]{1,128}$';
+const safeNameRule: ParamRule = Object.freeze({
+  type: 'string',
+  nonEmpty: true,
+  pattern: SAFE_NAME_PATTERN,
 });
 const integerRule = (min: number, max: number): ParamRule => Object.freeze({
   type: 'integer', min, max,
@@ -67,13 +74,13 @@ const manualContract = (
 
 export const WORKER_ACTION_CONTRACTS: WorkerActionContracts = Object.freeze({
   'set-service-startup': manualContract({
-    service: stringRule(),
+    service: safeNameRule,
     startup_type: stringRule(['Automatic', 'AutomaticDelayedStart', 'Manual', 'Disabled']),
   }),
-  'stop-service': manualContract({ service: stringRule() }),
-  'start-service': manualContract({ service: stringRule() }),
-  'restart-service': manualContract({ service: stringRule() }),
-  'kill-process': manualContract({ target: stringRule() }),
+  'stop-service': manualContract({ service: safeNameRule }),
+  'start-service': manualContract({ service: safeNameRule }),
+  'restart-service': manualContract({ service: safeNameRule }),
+  'kill-process': manualContract({ target: safeNameRule }),
   'set-process-priority': manualContract({
     target: integerRule(1, 2_147_483_647),
     class: stringRule(['Idle', 'BelowNormal', 'Normal', 'AboveNormal', 'High', 'RealTime']),
@@ -385,7 +392,8 @@ function isRuleMatch(value: JsonValue, rule: ParamRule): boolean {
   }
   return typeof value === 'string'
     && (!rule.nonEmpty || value.trim().length > 0)
-    && (!rule.values || rule.values.includes(value));
+    && (!rule.values || rule.values.includes(value))
+    && (!rule.pattern || new RegExp(rule.pattern, 'u').test(value));
 }
 
 function validateParams(

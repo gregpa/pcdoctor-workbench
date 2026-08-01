@@ -75,8 +75,8 @@ function Assert-SignedHeartbeat {
         @('version', 'session_id', 'worker_pid', 'issued_at', 'expires_at', 'nonce', 'hmac_sha256') `
         'Heartbeat'
     if ($Heartbeat.version -ne 2 -or $Heartbeat.session_id -cne $FixtureSession -or
-        [int64]$Heartbeat.worker_pid -le 0 -or "$($Heartbeat.nonce)" -notmatch '^[0-9a-f]{32}$' -or
-        "$($Heartbeat.hmac_sha256)" -notmatch '^[0-9a-f]{64}$') {
+        [int64]$Heartbeat.worker_pid -le 0 -or "$($Heartbeat.nonce)" -notmatch '^[0-9a-f]{32}\z' -or
+        "$($Heartbeat.hmac_sha256)" -notmatch '^[0-9a-f]{64}\z') {
         throw 'Heartbeat field type or format is invalid'
     }
     $unsigned = [ordered]@{
@@ -105,8 +105,8 @@ function Assert-SignedResult {
         'Result'
     if ($Result.version -ne 2 -or $Result.session_id -cne $FixtureSession -or $Result.id -cne $Id -or
         "$($Result.action)".Length -lt 1 -or [int64]$Result.duration_ms -lt 0 -or
-        "$($Result.nonce)" -notmatch '^[0-9a-f]{32}$' -or
-        "$($Result.hmac_sha256)" -notmatch '^[0-9a-f]{64}$') {
+        "$($Result.nonce)" -notmatch '^[0-9a-f]{32}\z' -or
+        "$($Result.hmac_sha256)" -notmatch '^[0-9a-f]{64}\z') {
         throw "Signed result fields are invalid for $Id"
     }
 
@@ -168,6 +168,151 @@ function Assert-WorkerArgumentMaps {
             throw "Explicit argument map mismatch for $($case.Action): $($actual -join ' ')"
         }
     }
+
+    $invalidSafeNames = @(
+        '*', '?', 'name[0]', 'bad/name', 'bad\name', 'bad name', "bad`tname",
+        "bad`nname", "badname`n", (('A' * 128) + "`n"), 'bad;name', 'café', ('a' * 129)
+    )
+    foreach ($action in @('set-service-startup', 'stop-service', 'start-service', 'restart-service')) {
+        foreach ($value in $invalidSafeNames) {
+            $params = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+            $params.Add('service', $value)
+            if ($action -ceq 'set-service-startup') { $params.Add('startup_type', 'Disabled') }
+            $accepted = $true
+            try { [void](Get-ActionArguments -Action $action -Params $params) }
+            catch {
+                $accepted = $false
+                if ($_.Exception.Data['code'] -cne 'E_INVALID_PARAMS') { throw }
+            }
+            if ($accepted) { throw "$action accepted unsafe service name: $value" }
+        }
+    }
+    foreach ($value in $invalidSafeNames) {
+        $params = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+        $params.Add('target', $value)
+        $accepted = $true
+        try { [void](Get-ActionArguments -Action 'kill-process' -Params $params) }
+        catch {
+            $accepted = $false
+            if ($_.Exception.Data['code'] -cne 'E_INVALID_PARAMS') { throw }
+        }
+        if ($accepted) { throw "kill-process accepted unsafe target: $value" }
+    }
+}
+
+function Assert-WorkerQueueAclModel {
+    $tokens = $null
+    $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($worker, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) { throw 'Worker AST could not be parsed for queue ACL model tests' }
+    $definition = @($ast.FindAll({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -ceq 'New-ProductionQueueLeafSecurity'
+    }, $true))[0]
+    if (-not $definition) { throw 'Worker production queue ACL factory is missing' }
+    Invoke-Expression $definition.Extent.Text
+
+    $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security = New-ProductionQueueLeafSecurity -UserSidText $userSid.Value
+    $adminSid = 'S-1-5-32-544'
+    $systemSid = 'S-1-5-18'
+    if (-not $security.AreAccessRulesProtected -or
+        $security.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $adminSid) {
+        throw 'Production queue leaf is not protected and administrator-owned'
+    }
+
+    $rules = @($security.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+    $userRules = @($rules | Where-Object { $_.IdentityReference.Value -ceq $userSid.Value })
+    if ($rules.Count -ne 4 -or $userRules.Count -ne 2) {
+        throw 'Production queue leaf ACL does not contain the exact four-rule model'
+    }
+    foreach ($trustedSid in @($adminSid, $systemSid)) {
+        $trustedRule = @($rules | Where-Object { $_.IdentityReference.Value -ceq $trustedSid })
+        if ($trustedRule.Count -ne 1 -or
+            $trustedRule[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $trustedRule[0].FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+            $trustedRule[0].InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' -or
+            $trustedRule[0].PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) {
+            throw "Production queue leaf trusted rule is invalid for $trustedSid"
+        }
+    }
+
+    $directoryRule = @($userRules | Where-Object {
+        $_.InheritanceFlags -eq [Security.AccessControl.InheritanceFlags]::None -and
+        $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
+    })
+    $fileRule = @($userRules | Where-Object {
+        $_.InheritanceFlags -eq [Security.AccessControl.InheritanceFlags]::ObjectInherit -and
+        $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::InheritOnly
+    })
+    if ($directoryRule.Count -ne 1 -or $fileRule.Count -ne 1) {
+        throw 'Production queue leaf user rules do not separate directory and child-file rights'
+    }
+
+    $requiredDirectoryRights = [int64](
+        [Security.AccessControl.FileSystemRights]::ListDirectory -bor
+        [Security.AccessControl.FileSystemRights]::CreateFiles -bor
+        [Security.AccessControl.FileSystemRights]::ReadExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Traverse -bor
+        [Security.AccessControl.FileSystemRights]::ReadAttributes -bor
+        [Security.AccessControl.FileSystemRights]::ReadPermissions -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize
+    )
+    $forbiddenDirectoryRights = [int64](
+        [Security.AccessControl.FileSystemRights]::CreateDirectories -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    )
+    if ([int64]$directoryRule[0].FileSystemRights -ne $requiredDirectoryRights -or
+        ([int64]$directoryRule[0].FileSystemRights -band $forbiddenDirectoryRights) -ne 0) {
+        throw 'Production queue leaf grants the user unsafe or insufficient directory rights'
+    }
+    $requiredFileRights = [int64](
+        [Security.AccessControl.FileSystemRights]::Modify -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize
+    )
+    if ([int64]$fileRule[0].FileSystemRights -ne $requiredFileRights) {
+        throw 'Production queue leaf child-file rule cannot support atomic temp rename and cleanup'
+    }
+}
+
+function Assert-WorkerSourceSafety {
+    $source = [IO.File]::ReadAllText($worker)
+    $tokens = $null
+    $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($worker, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) { throw 'Worker AST could not be parsed for source-safety tests' }
+    $forbiddenQueueCommands = @($ast.FindAll({
+        param($node)
+        if ($node -isnot [Management.Automation.Language.CommandAst]) { return $false }
+        $name = $node.GetCommandName()
+        if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+        $unqualified = ($name -split '\\')[-1]
+        return @('Get-ChildItem', 'Sort-Object') -icontains $unqualified
+    }, $true))
+    if ($forbiddenQueueCommands.Count -ne 0) {
+        throw 'Worker source contains a global Get-ChildItem or Sort-Object command'
+    }
+    if ($source -notmatch [regex]::Escape("`$script:ProductionQueueRoot = 'C:\ProgramData\PCDoctorWorkerQueue'")) {
+        throw 'Worker does not pin the production queue root outside PCDOCTOR_ROOT'
+    }
+    if ($source -notmatch '\[IO\.Directory\]::EnumerateFiles\(' -or
+        $source -match '\[IO\.Directory\]::GetFiles\(' -or
+        $source -notmatch '\$MaxCommandFilesPerIteration') {
+        throw 'Worker command backlog is not lazily enumerated with an iteration cap'
+    }
+    if ($source -match 'Get-ChildItem[^\r\n]*\*\.cmd\.json' -or
+        $source -match 'Sort-Object[^\r\n]*Name') {
+        throw 'Worker still materializes or globally sorts the command backlog'
+    }
+    if ($source -match '\[IO\.Directory\]::CreateDirectory\(\$QueueDir\)' -or
+        $source -match 'Set-Acl[^\r\n]*\$QueueDir' -or
+        $source -notmatch "PSEdition -cne 'Desktop'") {
+        throw 'Production queue creation permits a non-atomic create-then-ACL fallback'
+    }
 }
 
 function Assert-WorkerPureHelpers {
@@ -184,12 +329,25 @@ function Assert-WorkerPureHelpers {
         'Read-StrictJsonHexUnit', 'Read-StrictJsonString', 'Read-StrictJsonNumber',
         'Read-StrictJsonObject', 'Read-StrictJsonArray', 'Read-StrictJsonValue',
         'ConvertFrom-StrictJson', 'ConvertTo-CanonicalJsonString', 'ConvertTo-CanonicalJson',
-        'Read-BoundedUtf8File'
+        'Read-BoundedUtf8File', 'Test-ExpectedProductionQueueRootOwner'
     )
     foreach ($name in $names) {
         $definition = @($definitions | Where-Object { $_.Name -ceq $name })[0]
         if (-not $definition) { throw "Worker function missing from pure helper test: $name" }
         Invoke-Expression $definition.Extent.Text
+    }
+
+    if (-not (Test-ExpectedProductionQueueRootOwner -OwnerSid 'S-1-5-32-544')) {
+        throw 'Production queue root rejected BUILTIN\Administrators ownership'
+    }
+    foreach ($otherOwner in @(
+        'S-1-5-18',
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464',
+        'S-1-5-21-1000'
+    )) {
+        if (Test-ExpectedProductionQueueRootOwner -OwnerSid $otherOwner) {
+            throw "Production queue root accepted non-Administrators owner: $otherOwner"
+        }
     }
 
     $json = '{"empty":[],"items":[1],"path":"C:\\Windows","quote":"a\"b"}'
@@ -414,7 +572,8 @@ function Assert-TrustedActionHostAndFreshHeartbeat {
         [Parameter(Mandatory=$true)][string]$ShellPath,
         [Parameter(Mandatory=$true)][string]$ShellName
     )
-    $queuePath = Join-Path $env:TEMP "pcdoctor-worker-host-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queueRootPath = Join-Path $env:TEMP "pcdoctor-worker-host-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queuePath = Join-Path $queueRootPath $FixtureSession
     $job = $null
     try {
         $queueSid = New-SecureTestQueue -Path $queuePath
@@ -430,16 +589,16 @@ function Assert-TrustedActionHostAndFreshHeartbeat {
 
         $parentCapability = [Environment]::GetEnvironmentVariable($CapabilityEnvironmentName, 'Process')
         $job = Start-Job -ScriptBlock {
-            param($WorkerShell, $WorkerPath, $ActionBase, $Queue, $Session, $QueueSid, $Capability)
+            param($WorkerShell, $WorkerPath, $ActionBase, $QueueRoot, $Session, $QueueSid, $Capability)
             $env:PCDOCTOR_WORKER_CAPABILITY_V2 = $Capability
             try {
                 & $WorkerShell -NoProfile -ExecutionPolicy Bypass -File $WorkerPath `
-                    -BasePath $ActionBase -QueueDir $Queue -SessionId $Session `
+                    -BasePath $ActionBase -QueueRoot $QueueRoot -SessionId $Session `
                     -QueueUserSid $QueueSid -IdleTimeoutSeconds 1 -PollIntervalMs 20 -TestMode 2>&1
             } finally {
                 Remove-Item Env:\PCDOCTOR_WORKER_CAPABILITY_V2 -ErrorAction SilentlyContinue
             }
-        } -ArgumentList $ShellPath, $worker, $basePath, $queuePath, $FixtureSession, $queueSid, $FixtureCapability
+        } -ArgumentList $ShellPath, $worker, $basePath, $queueRootPath, $FixtureSession, $queueSid, $FixtureCapability
 
         $heartbeatPath = Join-Path $queuePath '.heartbeat'
         $resultPath = Join-Path $queuePath "$($command.id).result.json"
@@ -521,8 +680,8 @@ function Assert-TrustedActionHostAndFreshHeartbeat {
             Stop-Job -Job $job -ErrorAction SilentlyContinue
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
-        if (Test-Path -LiteralPath $queuePath) {
-            Remove-Item -LiteralPath $queuePath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $queueRootPath) {
+            Remove-Item -LiteralPath $queueRootPath -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -532,7 +691,8 @@ function Assert-RejectedCommandsDoNotRefreshIdle {
         [Parameter(Mandatory=$true)][string]$ShellPath,
         [Parameter(Mandatory=$true)][string]$ShellName
     )
-    $queuePath = Join-Path $env:TEMP "pcdoctor-worker-idle-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queueRootPath = Join-Path $env:TEMP "pcdoctor-worker-idle-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queuePath = Join-Path $queueRootPath $FixtureSession
     $job = $null
     try {
         $queueSid = New-SecureTestQueue -Path $queuePath
@@ -546,17 +706,17 @@ function Assert-RejectedCommandsDoNotRefreshIdle {
         Write-TestJson -Path (Join-Path $queuePath "$($seed.id).cmd.json") -Value $seed
 
         $job = Start-Job -ScriptBlock {
-            param($WorkerShell, $WorkerPath, $ActionBase, $Queue, $Session, $QueueSid, $Capability, $Now)
+            param($WorkerShell, $WorkerPath, $ActionBase, $QueueRoot, $Session, $QueueSid, $Capability, $Now)
             $env:PCDOCTOR_WORKER_CAPABILITY_V2 = $Capability
             try {
                 & $WorkerShell -NoProfile -ExecutionPolicy Bypass -File $WorkerPath `
-                    -BasePath $ActionBase -QueueDir $Queue -SessionId $Session `
+                    -BasePath $ActionBase -QueueRoot $QueueRoot -SessionId $Session `
                     -QueueUserSid $QueueSid -IdleTimeoutSeconds 1 -PollIntervalMs 20 `
                     -TestMode -TestNowMilliseconds $Now 2>&1
             } finally {
                 Remove-Item Env:\PCDOCTOR_WORKER_CAPABILITY_V2 -ErrorAction SilentlyContinue
             }
-        } -ArgumentList $ShellPath, $worker, $basePath, $queuePath, $FixtureSession, $queueSid, `
+        } -ArgumentList $ShellPath, $worker, $basePath, $queueRootPath, $FixtureSession, $queueSid, `
             $FixtureCapability, $FixtureNow
 
         $seedResultPath = Join-Path $queuePath "$($seed.id).result.json"
@@ -625,8 +785,8 @@ function Assert-RejectedCommandsDoNotRefreshIdle {
             Stop-Job -Job $job -ErrorAction SilentlyContinue
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
-        if (Test-Path -LiteralPath $queuePath) {
-            Remove-Item -LiteralPath $queuePath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $queueRootPath) {
+            Remove-Item -LiteralPath $queueRootPath -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -636,7 +796,8 @@ function Assert-RejectedBacklogHonorsIdleDeadline {
         [Parameter(Mandatory=$true)][string]$ShellPath,
         [Parameter(Mandatory=$true)][string]$ShellName
     )
-    $queuePath = Join-Path $env:TEMP "pcdoctor-worker-backlog-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queueRootPath = Join-Path $env:TEMP "pcdoctor-worker-backlog-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queuePath = Join-Path $queueRootPath $FixtureSession
     $job = $null
     try {
         $queueSid = New-SecureTestQueue -Path $queuePath
@@ -648,23 +809,23 @@ function Assert-RejectedBacklogHonorsIdleDeadline {
             -Params ([ordered]@{ value = 'backlog-seed' }) `
             -Nonce '01000000000000000000000000000001'
         Write-TestJson -Path (Join-Path $queuePath "$($seed.id).cmd.json") -Value $seed
-        for ($index = 0; $index -lt 200; $index++) {
+        for ($index = 0; $index -lt 2500; $index++) {
             $id = 'f' + $index.ToString('x31')
             Write-TestJson -Path (Join-Path $queuePath "$id.cmd.json") -Value '{not-json'
         }
 
         $job = Start-Job -ScriptBlock {
-            param($WorkerShell, $WorkerPath, $ActionBase, $Queue, $Session, $QueueSid, $Capability, $Now)
+            param($WorkerShell, $WorkerPath, $ActionBase, $QueueRoot, $Session, $QueueSid, $Capability, $Now)
             $env:PCDOCTOR_WORKER_CAPABILITY_V2 = $Capability
             try {
                 & $WorkerShell -NoProfile -ExecutionPolicy Bypass -File $WorkerPath `
-                    -BasePath $ActionBase -QueueDir $Queue -SessionId $Session `
+                    -BasePath $ActionBase -QueueRoot $QueueRoot -SessionId $Session `
                     -QueueUserSid $QueueSid -IdleTimeoutSeconds 1 -PollIntervalMs 20 `
                     -TestMode -TestNowMilliseconds $Now 2>&1
             } finally {
                 Remove-Item Env:\PCDOCTOR_WORKER_CAPABILITY_V2 -ErrorAction SilentlyContinue
             }
-        } -ArgumentList $ShellPath, $worker, $basePath, $queuePath, $FixtureSession, $queueSid, `
+        } -ArgumentList $ShellPath, $worker, $basePath, $queueRootPath, $FixtureSession, $queueSid, `
             $FixtureCapability, $FixtureNow
 
         $seedResultPath = Join-Path $queuePath "$($seed.id).result.json"
@@ -694,8 +855,8 @@ function Assert-RejectedBacklogHonorsIdleDeadline {
             Stop-Job -Job $job -ErrorAction SilentlyContinue
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
-        if (Test-Path -LiteralPath $queuePath) {
-            Remove-Item -LiteralPath $queuePath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $queueRootPath) {
+            Remove-Item -LiteralPath $queueRootPath -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -729,6 +890,8 @@ if ((Get-TestHmac -Canonical $NonAsciiFixtureCanonical) -ne $NonAsciiFixtureHmac
 try {
     Assert-WorkerArgumentMaps
     Assert-WorkerPureHelpers
+    Assert-WorkerQueueAclModel
+    Assert-WorkerSourceSafety
     Assert-ServiceStartupPureHelpers
 }
 catch {
@@ -748,11 +911,12 @@ if ($shells.Count -eq 0) {
 
 $failed = 0
 foreach ($shell in $shells) {
-    $queueDir = Join-Path $env:TEMP "pcdoctor-worker-auth-smoke-$([guid]::NewGuid().ToString('N'))"
+    $queueRoot = Join-Path $env:TEMP "pcdoctor-worker-auth-smoke-$([guid]::NewGuid().ToString('N'))"
     $resolvedTemp = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
-    $resolvedQueue = [IO.Path]::GetFullPath($queueDir)
-    if (-not $resolvedQueue.StartsWith($resolvedTemp, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-Host "[FAIL] Refusing non-temp queue path: $resolvedQueue"
+    $resolvedQueueRoot = [IO.Path]::GetFullPath($queueRoot)
+    $resolvedQueue = Join-Path $resolvedQueueRoot $FixtureSession
+    if (-not $resolvedQueueRoot.StartsWith($resolvedTemp, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "[FAIL] Refusing non-temp queue root: $resolvedQueueRoot"
         exit 1
     }
 
@@ -772,6 +936,25 @@ foreach ($shell in $shells) {
             nonce = '0123456789abcdeffedcba9876543210'; hmac_sha256 = $FixtureHmac
         }
         Write-TestJson -Path (Join-Path $resolvedQueue "$($fixtureEnvelope.id).cmd.json") -Value $fixtureEnvelope
+
+        $safeMaxService = New-SignedEnvelope -Id 'f1000000000000000000000000000000' -Action 'stop-service' `
+            -Params ([ordered]@{ service = ('A' * 128) }) -Nonce 'f1000000000000000000000000000001'
+        $safeKillTarget = New-SignedEnvelope -Id 'f2000000000000000000000000000000' -Action 'kill-process' `
+            -Params ([ordered]@{ target = 'aZ09._-' }) -Nonce 'f2000000000000000000000000000001'
+        $unsafeServiceWildcard = New-SignedEnvelope -Id 'f3000000000000000000000000000000' -Action 'stop-service' `
+            -Params ([ordered]@{ service = '*' }) -Nonce 'f3000000000000000000000000000001'
+        $unsafeServicePath = New-SignedEnvelope -Id 'f4000000000000000000000000000000' -Action 'start-service' `
+            -Params ([ordered]@{ service = 'bad/name' }) -Nonce 'f4000000000000000000000000000001'
+        $unsafeServiceLength = New-SignedEnvelope -Id 'f5000000000000000000000000000000' -Action 'restart-service' `
+            -Params ([ordered]@{ service = ('A' * 129) }) -Nonce 'f5000000000000000000000000000001'
+        $unsafeKillTarget = New-SignedEnvelope -Id 'f6000000000000000000000000000000' -Action 'kill-process' `
+            -Params ([ordered]@{ target = 'bad target' }) -Nonce 'f6000000000000000000000000000001'
+        foreach ($safeNameEnvelope in @(
+            $safeMaxService, $safeKillTarget, $unsafeServiceWildcard, $unsafeServicePath,
+            $unsafeServiceLength, $unsafeKillTarget
+        )) {
+            Write-TestJson -Path (Join-Path $resolvedQueue "$($safeNameEnvelope.id).cmd.json") -Value $safeNameEnvelope
+        }
 
         $valid = New-SignedEnvelope -Id '10000000000000000000000000000000' -Action 'test-echo' `
             -Params ([ordered]@{ value = 'safe-smoke' }) -Nonce '10000000000000000000000000000001'
@@ -877,6 +1060,15 @@ foreach ($shell in $shells) {
         $upperHmac['hmac_sha256'] = $upperHmac['hmac_sha256'].ToUpperInvariant()
         Write-TestJson -Path (Join-Path $resolvedQueue "$($upperHmac.id).cmd.json") -Value $upperHmac
 
+        $hmacTrailingLf = New-SignedEnvelope -Id 'd6000000000000000000000000000000' -Action 'test-echo' `
+            -Params ([ordered]@{ value = 'hmac-trailing-lf' }) -Nonce 'd6000000000000000000000000000001'
+        $hmacTrailingLf['hmac_sha256'] = $hmacTrailingLf['hmac_sha256'] + "`n"
+        Write-TestJson -Path (Join-Path $resolvedQueue "$($hmacTrailingLf.id).cmd.json") -Value $hmacTrailingLf
+
+        $nonceTrailingLf = New-SignedEnvelope -Id 'd7000000000000000000000000000000' -Action 'test-echo' `
+            -Params ([ordered]@{ value = 'nonce-trailing-lf' }) -Nonce (('a' * 32) + "`n")
+        Write-TestJson -Path (Join-Path $resolvedQueue "$($nonceTrailingLf.id).cmd.json") -Value $nonceTrailingLf
+
         $malformedId = 'b0000000000000000000000000000000'
         Write-TestJson -Path (Join-Path $resolvedQueue "$malformedId.cmd.json") -Value '{not-json'
 
@@ -888,17 +1080,17 @@ foreach ($shell in $shells) {
 
         $parentCapability = [Environment]::GetEnvironmentVariable($CapabilityEnvironmentName, 'Process')
         $job = Start-Job -ScriptBlock {
-            param($ShellPath, $WorkerPath, $BasePath, $QueuePath, $SessionId, $QueueSid, $Capability, $Now)
+            param($ShellPath, $WorkerPath, $BasePath, $QueueRoot, $SessionId, $QueueSid, $Capability, $Now)
             $env:PCDOCTOR_WORKER_CAPABILITY_V2 = $Capability
             try {
                 & $ShellPath -NoProfile -ExecutionPolicy Bypass -File $WorkerPath `
-                    -BasePath $BasePath -QueueDir $QueuePath -SessionId $SessionId `
-                    -QueueUserSid $QueueSid -IdleTimeoutSeconds 1 -PollIntervalMs 20 `
+                    -BasePath $BasePath -QueueRoot $QueueRoot -SessionId $SessionId `
+                    -QueueUserSid $QueueSid -IdleTimeoutSeconds 3 -PollIntervalMs 20 `
                     -TestMode -TestNowMilliseconds $Now 2>&1
             } finally {
                 Remove-Item Env:\PCDOCTOR_WORKER_CAPABILITY_V2 -ErrorAction SilentlyContinue
             }
-        } -ArgumentList $shell.Path, $worker, $emptyBase, $resolvedQueue, $FixtureSession, `
+        } -ArgumentList $shell.Path, $worker, $emptyBase, $resolvedQueueRoot, $FixtureSession, `
             $queueUserSid, $FixtureCapability, $FixtureNow
 
         $heartbeat = $null
@@ -918,7 +1110,7 @@ foreach ($shell in $shells) {
         }
         if (-not $heartbeat) { throw "Authenticated heartbeat unavailable: $heartbeatFailure" }
 
-        $completed = Wait-Job -Job $job -Timeout 8
+        $completed = Wait-Job -Job $job -Timeout 20
         if (-not $completed) {
             Stop-Job -Job $job -ErrorAction SilentlyContinue
             throw 'Worker did not exit within the safe smoke timeout'
@@ -933,6 +1125,12 @@ foreach ($shell in $shells) {
         }
 
         Assert-ResultCode -QueueDir $resolvedQueue -Id $fixtureEnvelope.id -Code 'E_TEST_MODE_NO_EXECUTION'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $safeMaxService.id -Code 'E_TEST_MODE_NO_EXECUTION'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $safeKillTarget.id -Code 'E_TEST_MODE_NO_EXECUTION'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $unsafeServiceWildcard.id -Code 'E_INVALID_PARAMS'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $unsafeServicePath.id -Code 'E_INVALID_PARAMS'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $unsafeServiceLength.id -Code 'E_INVALID_PARAMS'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $unsafeKillTarget.id -Code 'E_INVALID_PARAMS'
         $validResult = Read-WorkerArtifactJson -Path (Join-Path $resolvedQueue "$($valid.id).result.json")
         Assert-SignedResult -Result $validResult -Id $valid.id
         if ($validResult.success -ne $true -or "$($validResult.data.echo)" -ne 'safe-smoke') {
@@ -960,6 +1158,8 @@ foreach ($shell in $shells) {
         Assert-ResultCode -QueueDir $resolvedQueue -Id $upperSession.id -Code 'E_WRONG_SESSION'
         Assert-ResultCode -QueueDir $resolvedQueue -Id $wrongCaseParam.id -Code 'E_INVALID_PARAMS'
         Assert-ResultCode -QueueDir $resolvedQueue -Id $upperHmac.id -Code 'E_BAD_ENVELOPE'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $hmacTrailingLf.id -Code 'E_BAD_ENVELOPE'
+        Assert-ResultCode -QueueDir $resolvedQueue -Id $nonceTrailingLf.id -Code 'E_BAD_ENVELOPE'
 
         $replayResults = @(
             (Read-WorkerArtifactJson -Path (Join-Path $resolvedQueue "$($replayOne.id).result.json")),
@@ -989,8 +1189,8 @@ foreach ($shell in $shells) {
         Write-Host "[FAIL] $($shell.Name): $($_.Exception.Message)"
         $failed++
     } finally {
-        if (Test-Path -LiteralPath $resolvedQueue) {
-            Remove-Item -LiteralPath $resolvedQueue -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $resolvedQueueRoot) {
+            Remove-Item -LiteralPath $resolvedQueueRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
