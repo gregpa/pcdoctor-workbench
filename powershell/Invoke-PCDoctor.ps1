@@ -119,6 +119,26 @@ function Add-Action {
     Log "ACTION: $Action -> $Result"
 }
 
+# A volume with Size 0/null (unmounted reader, H:) or a locked BitLocker volume
+# (B: SecureDrive) has no meaningful free space. Pre-fix these reported as
+# "100% full". Read-only: never unlock, mount or write to a skipped volume.
+function Split-PCDoctorVolumes {
+    param($Volumes, [string[]]$LockedDriveLetters = @())
+    $measured = @()
+    $skipped = @()
+    foreach ($v in @($Volumes)) {
+        $reason = if ("$($v.DriveLetter)" -in $LockedDriveLetters) { 'locked' }
+                  elseif ($null -eq $v.Size -or $v.Size -le 0) { 'no_size' }
+                  else { $null }
+        if ($reason) {
+            $skipped += [ordered]@{ drive = "$($v.DriveLetter):"; reason = $reason; status = 'skipped (locked / no size)' }
+        } else {
+            $measured += $v
+        }
+    }
+    @{ measured = $measured; skipped = $skipped }
+}
+
 # Load event allowlist (silent if missing).
 $allowlist = @()
 if (Test-Path $AllowlistPath) {
@@ -162,8 +182,19 @@ try {
 Log "Checking disks..."
 try {
     $report.metrics.disks = @()
-    foreach ($v in Get-Volume | Where-Object DriveLetter) {
-        $freePct = if ($v.Size -gt 0) { [math]::Round(($v.SizeRemaining / $v.Size) * 100, 1) } else { 0 }
+    # Get-BitLockerVolume only reads status. It needs admin; without it, fall
+    # back to the Size check alone.
+    $lockedLetters = @()
+    try {
+        $lockedLetters = @(Get-BitLockerVolume -ErrorAction Stop |
+            Where-Object { "$($_.LockStatus)" -eq 'Locked' } |
+            ForEach-Object { "$($_.MountPoint)".TrimEnd(':\') })
+    } catch { Log "BitLocker lock status unavailable, using Size check only: $_" }
+    $split = Split-PCDoctorVolumes -Volumes @(Get-Volume | Where-Object DriveLetter) -LockedDriveLetters $lockedLetters
+    $report.metrics.disks_skipped = @($split.skipped)
+    foreach ($s in $split.skipped) { Log "Disk $($s.drive) $($s.status): $($s.reason)" }
+    foreach ($v in $split.measured) {
+        $freePct = [math]::Round(($v.SizeRemaining / $v.Size) * 100, 1)
         $d = @{
             drive      = "$($v.DriveLetter):"
             label      = $v.FileSystemLabel
