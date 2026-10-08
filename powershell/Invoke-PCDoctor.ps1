@@ -1124,6 +1124,9 @@ $md += "## Drives"
 foreach ($d in $report.metrics.disks) {
     $md += "- $($d.drive) $($d.fs) [$($d.drive_type)]: $($d.free_gb) GB free of $($d.size_gb) GB ($($d.free_pct)%)"
 }
+foreach ($s in $report.metrics.disks_skipped) {
+    $md += "- $($s.drive) $($s.status) [$($s.reason)]"
+}
 $md += ""
 $md += "## NAS ($($report.metrics.nas.ip))"
 $md += "- Ping: $($report.metrics.nas.ping)"
