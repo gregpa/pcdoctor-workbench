@@ -1,0 +1,4 @@
+# The task manifest source_sha256 is a hash of the raw bytes. Keep LF on every
+# checkout so core.autocrlf=true does not change the bytes and stale the hash.
+src/shared/task-manifest.json text eol=lf
+powershell/task-manifest.json text eol=lf
